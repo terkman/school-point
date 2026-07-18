@@ -1,0 +1,165 @@
+import { useMemo, useState, type FormEvent } from 'react'
+import {
+  appealDeadline,
+  canAppeal,
+  createId,
+  formatThaiDate,
+  type Account,
+  type DemoState,
+  type ScoreTransaction,
+} from './domain'
+import { AppShell, EmptyState, Icon, type NavItem } from './ui'
+
+type StudentTab = 'overview' | 'history' | 'appeals'
+
+const navItems: NavItem<StudentTab>[] = [
+  { id: 'overview', label: 'ภาพรวม', icon: 'home' },
+  { id: 'history', label: 'ประวัติคะแนน', icon: 'history' },
+  { id: 'appeals', label: 'การอุทธรณ์', icon: 'approval' },
+]
+
+interface StudentDashboardProps {
+  account: Account
+  state: DemoState
+  onChange: (next: DemoState) => void
+  onLogout: () => void
+}
+
+function TransactionRow({
+  transaction,
+  state,
+  onAppeal,
+}: {
+  transaction: ScoreTransaction
+  state: DemoState
+  onAppeal: (transaction: ScoreTransaction) => void
+}) {
+  const rule = state.rules.find((item) => item.id === transaction.ruleId)
+  const existingAppeal = state.appeals.find((item) => item.transactionId === transaction.id)
+  const eligible = transaction.kind === 'deduction' && canAppeal(transaction.occurredAt) && !existingAppeal
+  return (
+    <tr>
+      <td><strong>{rule?.title ?? transaction.reason}</strong><small>{formatThaiDate(transaction.occurredAt)}</small></td>
+      <td><span className={`delta ${transaction.appliedDelta < 0 ? 'negative' : 'positive'}`}>{transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta}</span></td>
+      <td>{transaction.scoreBefore} → <strong>{transaction.scoreAfter}</strong></td>
+      <td>
+        {existingAppeal ? <span className="badge status-pending">ยื่นอุทธรณ์แล้ว</span> : null}
+        {eligible ? <button className="button ghost compact" onClick={() => onAppeal(transaction)}>ยื่นอุทธรณ์</button> : null}
+        {!eligible && !existingAppeal ? <span className="muted">—</span> : null}
+      </td>
+    </tr>
+  )
+}
+
+export function StudentDashboard({ account, state, onChange, onLogout }: StudentDashboardProps) {
+  const [tab, setTab] = useState<StudentTab>('overview')
+  const [appealTarget, setAppealTarget] = useState<ScoreTransaction | null>(null)
+  const [statement, setStatement] = useState('')
+  const [announcement, setAnnouncement] = useState('')
+  const student = state.students.find((item) => item.id === account.studentId)
+  const transactions = useMemo(
+    () => state.transactions
+      .filter((item) => item.studentId === student?.id)
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
+    [state.transactions, student?.id],
+  )
+  const appeals = state.appeals.filter((item) => item.studentId === student?.id)
+
+  if (!student) return <p>ไม่พบข้อมูลนักเรียน</p>
+  const currentStudent = student
+
+  function openAppeal(transaction: ScoreTransaction) {
+    setAppealTarget(transaction)
+    setStatement('')
+    setTab('appeals')
+  }
+
+  function submitAppeal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!appealTarget || !statement.trim() || !canAppeal(appealTarget.occurredAt)) return
+    onChange({
+      ...state,
+      appeals: [
+        {
+          id: createId('appeal'),
+          transactionId: appealTarget.id,
+          studentId: currentStudent.id,
+          statement: statement.trim(),
+          status: 'submitted',
+          createdAt: new Date().toISOString(),
+        },
+        ...state.appeals,
+      ],
+    })
+    setAnnouncement('ส่งคำอุทธรณ์เรียบร้อยแล้ว')
+    setAppealTarget(null)
+    setStatement('')
+  }
+
+  return (
+    <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
+      <div className="page-heading">
+        <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : 'การอุทธรณ์'}</h1></div>
+        <span className="class-chip">{currentStudent.classroomName} • {currentStudent.studentCode}</span>
+      </div>
+      <div className="sr-only" aria-live="polite">{announcement}</div>
+
+      {tab === 'overview' ? (
+        <>
+          <section className="score-hero">
+            <div className="score-ring" style={{ '--score': `${currentStudent.score * 3.6}deg` } as React.CSSProperties}>
+              <div><strong>{currentStudent.score}</strong><span>/ 100</span></div>
+            </div>
+            <div className="score-message">
+              <span className="success-icon"><Icon name="shield" size={26} /></span>
+              <div><p className="eyebrow">คะแนนความประพฤติปัจจุบัน</p><h2>{currentStudent.score >= 90 ? 'รักษามาตรฐานที่ดีไว้' : 'ยังพัฒนาให้ดีขึ้นได้เสมอ'}</h2><p>คะแนนเริ่มต้นภาคเรียนละ 100 และทุกการเปลี่ยนแปลงมีรายการตรวจสอบย้อนหลัง</p></div>
+            </div>
+          </section>
+          <section className="panel">
+            <div className="section-heading"><div><p className="eyebrow">ล่าสุด</p><h2>การเปลี่ยนแปลงคะแนน</h2></div><button className="text-button" onClick={() => setTab('history')}>ดูทั้งหมด</button></div>
+            <div className="table-wrap">
+              <table><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
+                <tbody>{transactions.slice(0, 4).map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
+              </table>
+            </div>
+          </section>
+          <section className="guidance-strip"><Icon name="book" size={28} /><div><h2>แนวทางพัฒนาและการไกล่เกลี่ย</h2><p>หากมีข้อสงสัย สามารถพูดคุยกับครูที่ปรึกษาเพื่อวางแผนปรับพฤติกรรมร่วมกันได้</p></div></section>
+        </>
+      ) : null}
+
+      {tab === 'history' ? (
+        <section className="panel">
+          <div className="privacy-note"><Icon name="shield" /><span>เพื่อความเป็นส่วนตัว หน้านี้ไม่แสดงชื่อหรือข้อมูลของผู้บันทึกรายการ</span></div>
+          <div className="table-wrap">
+            <table><caption className="sr-only">ประวัติการเปลี่ยนแปลงคะแนนของนักเรียน</caption><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
+              <tbody>{transactions.map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === 'appeals' ? (
+        <div className="two-column">
+          <section className="panel">
+            <div className="section-heading"><div><p className="eyebrow">ภายใน 7 วัน</p><h2>ยื่นคำอุทธรณ์</h2></div></div>
+            {appealTarget ? (
+              <form className="stack-form" onSubmit={submitAppeal}>
+                <div className="selected-record"><strong>{state.rules.find((item) => item.id === appealTarget.ruleId)?.title}</strong><span>ตัด {Math.abs(appealTarget.appliedDelta)} คะแนน • หมดเขต {formatThaiDate(appealDeadline(appealTarget.occurredAt))}</span></div>
+                <label>เหตุผลการอุทธรณ์<textarea value={statement} onChange={(event) => setStatement(event.target.value)} required minLength={10} placeholder="อธิบายข้อเท็จจริงหรือข้อมูลที่ต้องการให้โรงเรียนพิจารณา" /></label>
+                <div className="form-actions"><button type="button" className="button secondary" onClick={() => setAppealTarget(null)}>ยกเลิก</button><button className="button primary" type="submit">ส่งคำอุทธรณ์</button></div>
+              </form>
+            ) : <EmptyState title="เลือกรายการจากประวัติคะแนน" detail="ปุ่มอุทธรณ์จะแสดงเฉพาะรายการตัดคะแนนที่ยังไม่เกิน 7 วัน" />}
+          </section>
+          <section className="panel">
+            <div className="section-heading"><div><p className="eyebrow">ติดตามผล</p><h2>คำอุทธรณ์ของฉัน</h2></div><span className="counter">{appeals.length}</span></div>
+            {appeals.length ? <div className="record-list">{appeals.map((appeal) => {
+              const transaction = transactions.find((item) => item.id === appeal.transactionId)
+              const rule = state.rules.find((item) => item.id === transaction?.ruleId)
+              return <article className="record-row" key={appeal.id}><div><strong>{rule?.title ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span></div><span className="badge status-pending">อยู่ระหว่างพิจารณา</span></article>
+            })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="เมื่อยื่นคำอุทธรณ์แล้ว สถานะจะแสดงที่นี่" />}
+          </section>
+        </div>
+      ) : null}
+    </AppShell>
+  )
+}
