@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Account, DemoState, Severity } from './domain'
+import { dataMode } from './supabaseClient'
 
 export type IconName =
   | 'home'
@@ -49,6 +50,7 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 }
 
 export function DemoBanner() {
+  if (dataMode !== 'demo') return null
   return (
     <div className="demo-banner" role="status">
       <span className="demo-dot" />

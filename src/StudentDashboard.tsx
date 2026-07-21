@@ -2,12 +2,14 @@ import { useMemo, useState, type FormEvent } from 'react'
 import {
   appealDeadline,
   canAppeal,
+  canAppealUntil,
   createId,
   formatThaiDate,
   type Account,
   type DemoState,
   type ScoreTransaction,
 } from './domain'
+import type { AppDataActions } from './dataActions'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
 
 type StudentTab = 'overview' | 'history' | 'appeals'
@@ -22,6 +24,7 @@ interface StudentDashboardProps {
   account: Account
   state: DemoState
   onChange: (next: DemoState) => void
+  actions?: AppDataActions
   onLogout: () => void
 }
 
@@ -36,7 +39,9 @@ function TransactionRow({
 }) {
   const rule = state.rules.find((item) => item.id === transaction.ruleId)
   const existingAppeal = state.appeals.find((item) => item.transactionId === transaction.id)
-  const eligible = transaction.kind === 'deduction' && canAppeal(transaction.occurredAt) && !existingAppeal
+  const eligible = transaction.kind === 'deduction'
+    && (transaction.appealDeadline ? canAppealUntil(transaction.appealDeadline) : canAppeal(transaction.occurredAt))
+    && !existingAppeal
   return (
     <tr>
       <td><strong>{rule?.title ?? transaction.reason}</strong><small>{formatThaiDate(transaction.occurredAt)}</small></td>
@@ -51,11 +56,12 @@ function TransactionRow({
   )
 }
 
-export function StudentDashboard({ account, state, onChange, onLogout }: StudentDashboardProps) {
+export function StudentDashboard({ account, state, onChange, actions, onLogout }: StudentDashboardProps) {
   const [tab, setTab] = useState<StudentTab>('overview')
   const [appealTarget, setAppealTarget] = useState<ScoreTransaction | null>(null)
   const [statement, setStatement] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  const [busy, setBusy] = useState(false)
   const student = state.students.find((item) => item.id === account.studentId)
   const transactions = useMemo(
     () => state.transactions
@@ -74,9 +80,31 @@ export function StudentDashboard({ account, state, onChange, onLogout }: Student
     setTab('appeals')
   }
 
-  function submitAppeal(event: FormEvent<HTMLFormElement>) {
+  async function submitAppeal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!appealTarget || !statement.trim() || !canAppeal(appealTarget.occurredAt)) return
+    if (!appealTarget || !statement.trim()) return
+    const appealOpen = appealTarget.appealDeadline
+      ? canAppealUntil(appealTarget.appealDeadline)
+      : canAppeal(appealTarget.occurredAt)
+    if (!appealOpen) return
+    if (actions) {
+      if (!appealTarget.incidentId) {
+        setAnnouncement('ไม่พบรหัสเหตุการณ์สำหรับยื่นอุทธรณ์ กรุณาติดต่อผู้ดูแลระบบ')
+        return
+      }
+      setBusy(true)
+      try {
+        await actions.submitAppeal({ incidentId: appealTarget.incidentId, reason: statement.trim() })
+        setAnnouncement('ส่งคำอุทธรณ์เรียบร้อยแล้ว')
+        setAppealTarget(null)
+        setStatement('')
+      } catch (error) {
+        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถส่งคำอุทธรณ์ได้')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     onChange({
       ...state,
       appeals: [
@@ -144,9 +172,9 @@ export function StudentDashboard({ account, state, onChange, onLogout }: Student
             <div className="section-heading"><div><p className="eyebrow">ภายใน 7 วัน</p><h2>ยื่นคำอุทธรณ์</h2></div></div>
             {appealTarget ? (
               <form className="stack-form" onSubmit={submitAppeal}>
-                <div className="selected-record"><strong>{state.rules.find((item) => item.id === appealTarget.ruleId)?.title}</strong><span>ตัด {Math.abs(appealTarget.appliedDelta)} คะแนน • หมดเขต {formatThaiDate(appealDeadline(appealTarget.occurredAt))}</span></div>
+                <div className="selected-record"><strong>{state.rules.find((item) => item.id === appealTarget.ruleId)?.title ?? appealTarget.reason}</strong><span>ตัด {Math.abs(appealTarget.appliedDelta)} คะแนน • หมดเขต {formatThaiDate(appealTarget.appealDeadline ?? appealDeadline(appealTarget.occurredAt))}</span></div>
                 <label>เหตุผลการอุทธรณ์<textarea value={statement} onChange={(event) => setStatement(event.target.value)} required minLength={10} placeholder="อธิบายข้อเท็จจริงหรือข้อมูลที่ต้องการให้โรงเรียนพิจารณา" /></label>
-                <div className="form-actions"><button type="button" className="button secondary" onClick={() => setAppealTarget(null)}>ยกเลิก</button><button className="button primary" type="submit">ส่งคำอุทธรณ์</button></div>
+                <div className="form-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => setAppealTarget(null)}>ยกเลิก</button><button className="button primary" type="submit" disabled={busy}>{busy ? 'กำลังส่ง…' : 'ส่งคำอุทธรณ์'}</button></div>
               </form>
             ) : <EmptyState title="เลือกรายการจากประวัติคะแนน" detail="ปุ่มอุทธรณ์จะแสดงเฉพาะรายการตัดคะแนนที่ยังไม่เกิน 7 วัน" />}
           </section>
@@ -155,7 +183,9 @@ export function StudentDashboard({ account, state, onChange, onLogout }: Student
             {appeals.length ? <div className="record-list">{appeals.map((appeal) => {
               const transaction = transactions.find((item) => item.id === appeal.transactionId)
               const rule = state.rules.find((item) => item.id === transaction?.ruleId)
-              return <article className="record-row" key={appeal.id}><div><strong>{rule?.title ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span></div><span className="badge status-pending">อยู่ระหว่างพิจารณา</span></article>
+              const label = appeal.status === 'accepted' ? 'คืนคะแนนแล้ว' : appeal.status === 'rejected' ? 'ไม่อนุมัติ' : 'อยู่ระหว่างพิจารณา'
+              const statusClass = appeal.status === 'accepted' ? 'approved' : appeal.status === 'rejected' ? 'rejected' : 'pending'
+              return <article className="record-row" key={appeal.id}><div><strong>{rule?.title ?? transaction?.reason ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span></div><span className={`badge status-${statusClass}`}>{label}</span></article>
             })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="เมื่อยื่นคำอุทธรณ์แล้ว สถานะจะแสดงที่นี่" />}
           </section>
         </div>

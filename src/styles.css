@@ -88,6 +88,36 @@ p { line-height: 1.65; color: var(--muted); }
 }
 .demo-dot { width: 7px; height: 7px; border-radius: 50%; background: #d49300; flex: 0 0 auto; }
 
+.status-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(145deg, #102a56, #204db5);
+}
+.status-card {
+  width: min(100%, 480px);
+  padding: 34px;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 24px 70px rgba(4, 18, 43, .28);
+  text-align: center;
+}
+.status-card .brand-mark { margin: 0 auto 20px; background: var(--navy); }
+.status-card h1 { color: var(--navy); }
+.status-card p { margin-bottom: 22px; }
+
+.activation-page { padding-block: 32px; }
+.activation-card { max-width: 520px; text-align: left; }
+.activation-card .brand-mark { text-align: center; }
+.activation-card > .eyebrow,
+.activation-card > h1,
+.activation-card > p { text-align: center; }
+.activation-card .login-form { margin-top: 24px; }
+.activation-hint { display: flex; gap: 9px; align-items: flex-start; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.activation-hint svg { flex: 0 0 auto; color: var(--teal); }
+
 .topbar {
   height: 68px;
   display: flex;

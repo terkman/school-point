@@ -1,8 +1,8 @@
 # School Point
 
-ระบบบริหารคะแนนความประพฤตินักเรียนแบบ demo-first สำหรับนักเรียน คุณครู และผู้ดูแลระบบ คะแนนเริ่มต้นภาคเรียนละ 100 คะแนน และทุกการเปลี่ยนแปลงมีประวัติตรวจสอบย้อนหลัง
+ระบบบริหารคะแนนความประพฤตินักเรียนสำหรับนักเรียน คุณครู และผู้ดูแลระบบ รองรับทั้งโหมดสาธิตและ Supabase คะแนนเริ่มต้นภาคเรียนละ 100 คะแนน และทุกการเปลี่ยนแปลงมีประวัติตรวจสอบย้อนหลัง
 
-> ตอนนี้เป็น MVP พร้อมข้อมูลสมมติสำหรับทดลองขั้นตอนทำงาน ห้ามนำข้อมูลนักเรียนจริงใส่ repository นี้ เนื่องจาก repository เป็นสาธารณะ
+> Repository นี้เป็นสาธารณะ ห้ามใส่ข้อมูลนักเรียนจริง secret, OTP, `.env.local` หรือหลักฐานเหตุการณ์ลง Git ข้อมูลจริงต้องอยู่ใน Supabase และไฟล์ local ที่ถูก ignore เท่านั้น
 
 ## สิ่งที่ใช้งานได้แล้ว
 
@@ -72,16 +72,18 @@ npm run build
 npm run preview
 ```
 
-## เชื่อม Supabase ภายหลัง
+## ใช้งานกับ Supabase
 
 1. สร้าง Supabase project สำหรับโรงเรียนโดยเฉพาะ
 2. คัดลอก `.env.example` เป็น `.env.local`
 3. ตั้ง `VITE_DATA_MODE=supabase`
-4. ใส่ project URL และ publishable/anon keyเท่านั้น ห้ามใส่ service-role key ในตัวแปร `VITE_*`
-5. รัน migration ใน `supabase/migrations`
-6. สร้างบัญชีแอดมินแรกผ่าน Supabase Dashboard หรือ server-side process
-7. ทดสอบ RLS ด้วยบัญชีนักเรียน ครูต่างห้อง และแอดมินก่อนนำข้อมูลจริงเข้า
-8. ปิด demo login และ role switch ใน production
+4. ใส่ project URL และ publishable/anon key เท่านั้น ห้ามใส่ service-role key ในตัวแปร `VITE_*`
+5. ตั้ง `VITE_SUPABASE_AUTH_EMAIL_DOMAIN` ให้ตรงกับสคริปต์ provision บัญชี (ค่าเริ่มต้น `accounts.school-point.invalid`)
+6. รัน migration ใน `supabase/migrations` และรัน assertions ใน `supabase/tests`
+7. ตรวจ import plan แล้วนำเข้าด้วย `npm run supabase:import` จาก trusted local process
+8. บัญชีใหม่ถูกสร้างโดยยังไม่มีรหัสผ่าน; ออกรหัสเปิดใช้ครั้งเดียวด้วย `npm run supabase:activation`
+9. เติมวันเปิด–ปิดและเปลี่ยนภาคเรียนจาก `planned` เป็น `active` ก่อนเริ่มตัดคะแนน
+10. ทดสอบ RLS ด้วยบัญชีนักเรียน ครูต่างห้อง และแอดมินก่อนเปิดใช้งานจริง
 
 ```powershell
 npx supabase login
@@ -89,7 +91,9 @@ npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
 ```
 
-Supabase Auth ไม่มี username/password โดยตรง การเข้าสู่ระบบด้วยรหัสนักเรียนจึงต้องมี Edge Function หรือ server route แปลง username ไปยังบัญชี Auth อย่างปลอดภัย รหัสเปิดใช้งานครั้งแรกควรเป็นค่าสุ่ม ใช้ได้ครั้งเดียว แล้วบังคับตั้งรหัสผ่านส่วนตัว ไม่ใช้วันเกิดเป็นรหัสผ่านถาวร
+หน้าเว็บรับ username แต่ Supabase Auth ใช้อีเมลภายในแบบ deterministic: `trim().toLowerCase()` แล้วต่อกับ `VITE_SUPABASE_AUTH_EMAIL_DOMAIN` โดย username อนุญาตเฉพาะ `a-z`, `0-9`, `.`, `_`, `-` เท่านั้น สคริปต์ provision ต้องใช้สูตรและ domain เดียวกัน อีเมลนี้ไม่ใช่อีเมลจริงของนักเรียน และ client ใช้เพียง anon key ส่วนการสร้างผู้ใช้ยังต้องทำผ่าน trusted server/Edge Function เท่านั้น
+
+บัญชีใหม่ไม่มีรหัสผ่านจนกว่าจะยืนยัน OTP ที่ออกโดย Supabase แล้วตั้งรหัสผ่านส่วนตัว ฐานข้อมูลใช้ `activation_required` กั้นข้อมูลโรงเรียนและ RPC คะแนนจนตรวจพบว่ามีการตั้งรหัสผ่านแรกจริง จึงไม่ใช้วันเกิดเป็นรหัสผ่านถาวร ดูขั้นตอนเต็มใน `docs/IMPORT_DATA.md`
 
 ## การนำเข้าข้อมูลภายหลัง
 

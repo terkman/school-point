@@ -3,8 +3,11 @@ import type { Account, DemoState, Role } from './domain'
 import { DemoBanner, Icon } from './ui'
 
 interface LoginPageProps {
-  state: DemoState
-  onLogin: (account: Account) => void
+  state?: DemoState
+  mode?: 'demo' | 'supabase'
+  onLogin?: (account: Account) => void
+  onAuthenticate?: (username: string, password: string) => Promise<void>
+  onActivate?: (username: string, activationCode: string) => Promise<void>
 }
 
 const demos: Array<{ role: Role; label: string; username: string }> = [
@@ -13,14 +16,31 @@ const demos: Array<{ role: Role; label: string; username: string }> = [
   { role: 'admin', label: 'ผู้ดูแลระบบ', username: 'admin.demo' },
 ]
 
-export function LoginPage({ state, onLogin }: LoginPageProps) {
-  const [username, setUsername] = useState('69001')
-  const [password, setPassword] = useState('demo1234')
+export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onActivate }: LoginPageProps) {
+  const isDemo = mode === 'demo'
+  const [username, setUsername] = useState(isDemo ? '69001' : '')
+  const [password, setPassword] = useState(isDemo ? 'demo1234' : '')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [activationMode, setActivationMode] = useState(false)
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const account = state.accounts.find(
+    if (!isDemo) {
+      const handler = activationMode ? onActivate : onAuthenticate
+      if (!handler) return
+      setBusy(true)
+      setError('')
+      try {
+        await handler(username, password)
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'ไม่สามารถเข้าสู่ระบบได้')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    const account = state?.accounts.find(
       (item) => item.username.toLowerCase() === username.trim().toLowerCase() && item.password === password,
     )
     if (!account) {
@@ -28,7 +48,7 @@ export function LoginPage({ state, onLogin }: LoginPageProps) {
       return
     }
     setError('')
-    onLogin(account)
+    onLogin?.(account)
   }
 
   function chooseDemo(nextUsername: string) {
@@ -59,10 +79,10 @@ export function LoginPage({ state, onLogin }: LoginPageProps) {
         <section className="login-panel" aria-labelledby="login-title">
           <div className="login-heading">
             <p className="eyebrow">ยินดีต้อนรับ</p>
-            <h2 id="login-title">เข้าสู่ระบบ</h2>
-            <p>เลือกบัญชีตัวอย่างหรือกรอกข้อมูลด้านล่าง</p>
+            <h2 id="login-title">{activationMode ? 'เปิดใช้บัญชีครั้งแรก' : 'เข้าสู่ระบบ'}</h2>
+            <p>{isDemo ? 'เลือกบัญชีตัวอย่างหรือกรอกข้อมูลด้านล่าง' : activationMode ? 'กรอกชื่อผู้ใช้และรหัสเปิดใช้ครั้งเดียวที่ได้รับจากโรงเรียน' : 'กรอกชื่อผู้ใช้และรหัสผ่านของคุณ'}</p>
           </div>
-          <div className="demo-accounts" aria-label="เลือกบัญชีสาธิต">
+          {isDemo ? <div className="demo-accounts" aria-label="เลือกบัญชีสาธิต">
             {demos.map((demo) => (
               <button
                 key={demo.role}
@@ -74,7 +94,7 @@ export function LoginPage({ state, onLogin }: LoginPageProps) {
                 <span>{demo.label}<small>{demo.username}</small></span>
               </button>
             ))}
-          </div>
+          </div> : null}
           <form className="login-form" onSubmit={submit}>
             <label>
               ชื่อผู้ใช้ / รหัสนักเรียน
@@ -86,21 +106,36 @@ export function LoginPage({ state, onLogin }: LoginPageProps) {
               />
             </label>
             <label>
-              รหัสผ่าน
+              {activationMode ? 'รหัสเปิดใช้ครั้งเดียว' : 'รหัสผ่าน'}
               <input
-                type="password"
+                type={activationMode ? 'text' : 'password'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
+                autoComplete={activationMode ? 'one-time-code' : 'current-password'}
+                inputMode={activationMode ? 'numeric' : undefined}
                 required
               />
             </label>
             {error ? <p className="form-error" role="alert">{error}</p> : null}
-            <button className="button primary full" type="submit">เข้าสู่ระบบ</button>
+            <button className="button primary full" type="submit" disabled={busy}>{busy ? 'กำลังตรวจสอบ…' : activationMode ? 'ตรวจรหัสและตั้งรหัสผ่าน' : 'เข้าสู่ระบบ'}</button>
+            {!isDemo ? (
+              <button
+                className="button ghost full"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setActivationMode((value) => !value)
+                  setPassword('')
+                  setError('')
+                }}
+              >
+                {activationMode ? 'กลับไปเข้าสู่ระบบปกติ' : 'เปิดใช้บัญชีครั้งแรก'}
+              </button>
+            ) : null}
           </form>
           <div className="login-note">
             <Icon name="alert" />
-            <p><strong>ระบบจริงจะไม่ใช้วันเกิดเป็นรหัสผ่านถาวร</strong><br />ผู้ใช้จะได้รับรหัสเปิดใช้งานครั้งเดียว แล้วตั้งรหัสผ่านส่วนตัวด้วยตนเอง</p>
+            <p><strong>ระบบไม่ใช้วันเกิดเป็นรหัสผ่านถาวร</strong><br />รหัสเปิดใช้มีอายุจำกัดและใช้ได้ครั้งเดียว จากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว</p>
           </div>
         </section>
       </div>

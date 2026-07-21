@@ -51,6 +51,8 @@ export interface ScoreTransaction {
   reason: string
   occurredAt: string
   actorId: string
+  incidentId?: string
+  appealDeadline?: string
   sourceRequestId?: string
   sourceAppealId?: string
 }
@@ -132,6 +134,11 @@ export function canAppeal(occurredAt: string, now = new Date()): boolean {
   const occurred = new Date(occurredAt).getTime()
   const deadline = occurred + 7 * 24 * 60 * 60 * 1000
   return Number.isFinite(occurred) && now.getTime() <= deadline
+}
+
+export function canAppealUntil(deadlineAt: string, now = new Date()): boolean {
+  const deadline = new Date(deadlineAt).getTime()
+  return Number.isFinite(deadline) && now.getTime() <= deadline
 }
 
 export function appealDeadline(occurredAt: string): Date {

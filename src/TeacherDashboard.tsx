@@ -8,6 +8,7 @@ import {
   type DemoState,
   type Student,
 } from './domain'
+import type { AppDataActions } from './dataActions'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
 type TeacherTab = 'overview' | 'deduct' | 'request' | 'cases'
@@ -16,6 +17,7 @@ interface TeacherDashboardProps {
   account: Account
   state: DemoState
   onChange: (next: DemoState) => void
+  actions?: AppDataActions
   onLogout: () => void
 }
 
@@ -62,7 +64,7 @@ function RuleOption({ rule, selected, onSelect }: { rule: BehaviorRule; selected
   )
 }
 
-export function TeacherDashboard({ account, state, onChange, onLogout }: TeacherDashboardProps) {
+export function TeacherDashboard({ account, state, onChange, actions, onLogout }: TeacherDashboardProps) {
   const [tab, setTab] = useState<TeacherTab>('overview')
   const teacher = state.teachers.find((item) => item.id === account.teacherId)
   const assignedStudents = useMemo(
@@ -75,6 +77,7 @@ export function TeacherDashboard({ account, state, onChange, onLogout }: Teacher
   const [requestPoints, setRequestPoints] = useState(3)
   const [requestReason, setRequestReason] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  const [busy, setBusy] = useState(false)
   const selectedStudent = assignedStudents.find((item) => item.id === studentId)
   const selectedRule = state.rules.find((item) => item.id === ruleId)
   const preview = selectedStudent && selectedRule ? applyScoreDelta(selectedStudent.score, -selectedRule.points) : null
@@ -90,11 +93,24 @@ export function TeacherDashboard({ account, state, onChange, onLogout }: Teacher
   if (!teacher) return <p>ไม่พบข้อมูลครู</p>
   const currentTeacher = teacher
 
-  function recordDeduction(event: FormEvent<HTMLFormElement>) {
+  async function recordDeduction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedStudent || !selectedRule || !reason.trim()) return
     if (!currentTeacher.classroomIds.includes(selectedStudent.classroomId)) {
       setAnnouncement('ไม่สามารถบันทึกนักเรียนที่อยู่นอกห้องรับผิดชอบ')
+      return
+    }
+    if (actions) {
+      setBusy(true)
+      try {
+        await actions.recordDeduction({ studentId: selectedStudent.id, ruleId: selectedRule.id, note: reason.trim() })
+        setReason('')
+        setAnnouncement(`บันทึกตัดคะแนน ${selectedStudent.name} เรียบร้อยแล้ว`)
+      } catch (error) {
+        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกการตัดคะแนนได้')
+      } finally {
+        setBusy(false)
+      }
       return
     }
     const change = applyScoreDelta(selectedStudent.score, -selectedRule.points)
@@ -139,9 +155,22 @@ export function TeacherDashboard({ account, state, onChange, onLogout }: Teacher
     setAnnouncement(`บันทึกตัดคะแนน ${selectedStudent.name} จาก ${change.before} เหลือ ${change.after} เรียบร้อยแล้ว`)
   }
 
-  function submitAdditionRequest(event: FormEvent<HTMLFormElement>) {
+  async function submitAdditionRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedStudent || requestPoints < 1 || !requestReason.trim()) return
+    if (actions) {
+      setBusy(true)
+      try {
+        await actions.requestPointAddition({ studentId: selectedStudent.id, points: requestPoints, reason: requestReason.trim() })
+        setRequestReason('')
+        setAnnouncement('ส่งคำขอเพิ่มคะแนนแล้ว คะแนนยังไม่เปลี่ยนจนกว่าผู้ดูแลระบบจะอนุมัติ')
+      } catch (error) {
+        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถส่งคำขอเพิ่มคะแนนได้')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     onChange({
       ...state,
       additionRequests: [{
@@ -185,7 +214,7 @@ export function TeacherDashboard({ account, state, onChange, onLogout }: Teacher
             {selectedRule ? <div className="rule-summary"><div><StatusBadge severity={selectedRule.severity} /> <span>{selectedRule.category}</span></div><strong>{preview?.before} <span>→</span> {preview?.after}</strong></div> : null}
             <label>รายละเอียดเหตุการณ์<textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="ระบุข้อเท็จจริง วันเวลา หรือบริบทที่จำเป็น" minLength={5} required /></label>
             {selectedRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>ระเบียบนี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองโดยอัตโนมัติ</span></div> : null}
-            <div className="form-actions"><button type="button" className="button secondary" onClick={() => setReason('')}>ล้างข้อมูล</button><button type="submit" className="button primary">ยืนยันตัด {selectedRule?.points ?? 0} คะแนน</button></div>
+            <div className="form-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => setReason('')}>ล้างข้อมูล</button><button type="submit" className="button primary" disabled={busy}>{busy ? 'กำลังบันทึก…' : `ยืนยันตัด ${selectedRule?.points ?? 0} คะแนน`}</button></div>
           </form>
         </div>
       ) : null}
@@ -197,7 +226,7 @@ export function TeacherDashboard({ account, state, onChange, onLogout }: Teacher
             <label>นักเรียน<select value={studentId} onChange={(event) => setStudentId(event.target.value)}>{assignedStudents.map((student) => <option key={student.id} value={student.id}>{student.studentCode} • {student.name} ({student.score}/100)</option>)}</select></label>
             <label>จำนวนคะแนนที่ขอ<input type="number" min="1" max={Math.max(1, 100 - (selectedStudent?.score ?? 100))} value={requestPoints} onChange={(event) => setRequestPoints(Number(event.target.value))} /></label>
             <label>เหตุผลและงานที่นักเรียนทำ<textarea value={requestReason} onChange={(event) => setRequestReason(event.target.value)} required minLength={10} placeholder="ระบุงานปรับพฤติกรรมหรือหลักฐานประกอบ" /></label>
-            <button className="button primary" type="submit">ส่งให้ผู้ดูแลระบบอนุมัติ</button>
+            <button className="button primary" type="submit" disabled={busy}>{busy ? 'กำลังส่ง…' : 'ส่งให้ผู้ดูแลระบบอนุมัติ'}</button>
           </form>
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ประวัติคำขอ</p><h2>สถานะการอนุมัติ</h2></div><span className="counter">{teacherRequests.length}</span></div>
             {teacherRequests.length ? <div className="record-list">{teacherRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); return <article className="record-row" key={request.id}><div><strong>{student?.name} • +{request.requestedPoints}</strong><span>{request.reason}</span><small>{formatThaiDate(request.createdAt)}</small></div><span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span></article> })}</div> : <EmptyState title="ยังไม่มีคำขอ" detail="คำขอเพิ่มคะแนนที่ส่งแล้วจะแสดงที่นี่" />}
