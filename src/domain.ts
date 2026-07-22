@@ -38,6 +38,18 @@ export interface BehaviorRule {
   active: boolean
 }
 
+export interface PositiveBehaviorRule {
+  id: string
+  code: string
+  category: string
+  title: string
+  description: string
+  defaultPoints: number | null
+  maxPoints: number
+  discretionary: boolean
+  active: boolean
+}
+
 export interface ScoreTransaction {
   id: string
   studentId: string
@@ -55,14 +67,25 @@ export interface ScoreTransaction {
   appealDeadline?: string
   sourceRequestId?: string
   sourceAppealId?: string
+  positiveRuleId?: string
+  positiveRuleTitle?: string
+  activityOccurredAt?: string
+  evidenceNote?: string
+  internalReason?: string
+  additionSource?: 'teacher_request' | 'admin_direct' | 'appeal'
 }
 
 export interface AdditionRequest {
   id: string
   studentId: string
   teacherId: string
+  positiveRuleId?: string
+  positiveRuleCode?: string
+  positiveRuleTitle?: string
   requestedPoints: number
   reason: string
+  evidenceNote?: string
+  activityOccurredAt?: string
   status: RequestStatus
   createdAt: string
   decidedAt?: string
@@ -91,7 +114,7 @@ export interface SeriousCase {
 }
 
 export interface DemoState {
-  version: 1
+  version: 2
   term: {
     id: string
     label: string
@@ -104,6 +127,7 @@ export interface DemoState {
   students: Student[]
   teachers: Teacher[]
   rules: BehaviorRule[]
+  positiveRules: PositiveBehaviorRule[]
   transactions: ScoreTransaction[]
   additionRequests: AdditionRequest[]
   appeals: Appeal[]

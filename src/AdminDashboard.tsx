@@ -8,9 +8,14 @@ import {
 } from './domain'
 import type { AppDataActions, UpdateTermScheduleInput } from './dataActions'
 import { validateTermSchedule } from './termSchedule'
+import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
 type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
+
+function newRequestId(): string {
+  return globalThis.crypto.randomUUID()
+}
 
 interface AdminDashboardProps {
   account: Account
@@ -19,6 +24,13 @@ interface AdminDashboardProps {
   actions?: AppDataActions
   onResetDemo?: () => void
   onLogout: () => void
+}
+
+type DetailedAdditionRequest = DemoState['additionRequests'][number] & {
+  positiveRuleTitle?: string
+  evidenceNote?: string
+  activityOccurredAt?: string
+  teacherName?: string
 }
 
 interface TermScheduleFormProps {
@@ -36,6 +48,7 @@ function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
 
   async function saveSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (busy) return
     const validationError = validateTermSchedule(startsOn, endsOn)
     if (validationError) {
       setError(validationError)
@@ -63,6 +76,7 @@ function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
         <label>วันเปิดภาคเรียน
           <input
             type="date"
+            disabled={busy}
             value={startsOn}
             max={endsOn || undefined}
             required
@@ -74,6 +88,7 @@ function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
         <label>วันปิดภาคเรียน
           <input
             type="date"
+            disabled={busy}
             value={endsOn}
             min={startsOn || undefined}
             required
@@ -97,12 +112,36 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const pending = state.additionRequests.filter((item) => item.status === 'pending')
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
   const openAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
+  const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
   const [tab, setTab] = useState<AdminTab>('overview')
   const [studentId, setStudentId] = useState(state.students[0]?.id ?? '')
-  const [points, setPoints] = useState(3)
+  const activePositiveRules = state.positiveRules.filter((rule) => rule.active)
+  const initialPositiveRule = activePositiveRules[0]
+  const [adminPositiveRuleId, setAdminPositiveRuleId] = useState(initialPositiveRule?.id ?? '')
+  const [points, setPoints] = useState(initialPositiveRule?.defaultPoints ?? 1)
+  const [activityOccurredAt, setActivityOccurredAt] = useState(() => toLocalDateTimeInputValue())
   const [reason, setReason] = useState('')
+  const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
+  const [adminRequestId, setAdminRequestId] = useState(() => newRequestId())
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
+  const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
+  const [decisionNote, setDecisionNote] = useState('')
+  const [decisionError, setDecisionError] = useState('')
+  const adminStudent = state.students.find((item) => item.id === studentId)
+  const adminPositiveRule = activePositiveRules.find((item) => item.id === adminPositiveRuleId)
+  const adminPointValidation = validatePositiveRulePoints(adminPositiveRule, points)
+  const adminAdditionPreview = adminStudent ? applyScoreDelta(adminStudent.score, points) : null
+  const mutationBusy = Boolean(busyAction)
+  const adminAdditionBusy = mutationBusy
+  const selectedRequest = (state.additionRequests.find((item) => item.id === selectedRequestId)
+    ?? pending[0]
+    ?? state.additionRequests[0]) as DetailedAdditionRequest | undefined
+  const selectedRequestStudent = state.students.find((item) => item.id === selectedRequest?.studentId)
+  const selectedRequestTeacher = state.teachers.find((item) => item.id === selectedRequest?.teacherId)
+  const selectedRequestScore = selectedRequestStudent?.score ?? 0
+  const selectedRequestScoreAfter = Math.min(100, selectedRequestScore + (selectedRequest?.requestedPoints ?? 0))
+  const decisionNoteReady = decisionNote.trim().length >= 5
   const navItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'แดชบอร์ด', icon: 'home' },
     { id: 'approvals', label: 'ศูนย์อนุมัติ', icon: 'approval', count: pending.length },
@@ -110,68 +149,80 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     { id: 'manage', label: 'จัดการระบบ', icon: 'settings' },
   ]
 
-  async function approveRequest(requestId: string) {
+  function openRequestReview(requestId: string) {
+    const request = state.additionRequests.find((item) => item.id === requestId)
+    setSelectedRequestId(requestId)
+    setDecisionNote(request?.decisionNote ?? '')
+    setDecisionError('')
+    setTab('approvals')
+  }
+
+  async function decideAdditionRequest(requestId: string, approve: boolean, note: string) {
+    if (mutationBusy) return
     const request = state.additionRequests.find((item) => item.id === requestId)
     const student = state.students.find((item) => item.id === request?.studentId)
     if (!request || !student || request.status !== 'pending') return
+    const normalizedNote = note.trim()
+    if (normalizedNote.length < 5) {
+      setDecisionError('กรุณาระบุเหตุผลประกอบการตัดสินใจอย่างน้อย 5 ตัวอักษร')
+      return
+    }
+    setDecisionError('')
     if (actions) {
       setBusyAction(`request-${requestId}`)
       try {
-        await actions.reviewPointAddition({ requestId, approve: true, note: 'อนุมัติโดยผู้ดูแลระบบ' })
-        setAnnouncement(`อนุมัติคำขอเพิ่มคะแนนของ ${student.name} แล้ว`)
+        await actions.reviewPointAddition({ requestId, approve, note: normalizedNote })
+        setAnnouncement(approve
+          ? `อนุมัติคำขอเพิ่มคะแนนของ ${student.name} แล้ว`
+          : `ปฏิเสธคำขอของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
+        setDecisionNote('')
       } catch (error) {
-        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถอนุมัติคำขอได้')
+        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกผลการพิจารณาได้')
       } finally {
         setBusyAction('')
       }
       return
     }
-    const change = applyScoreDelta(student.score, request.requestedPoints)
-    onChange({
-      ...state,
-      students: state.students.map((item) => item.id === student.id ? { ...item, score: change.after } : item),
-      additionRequests: state.additionRequests.map((item) => item.id === requestId ? { ...item, status: 'approved', decidedAt: new Date().toISOString(), decisionNote: 'อนุมัติโดยผู้ดูแลระบบ' } : item),
-      transactions: [{
-        id: createId('tx'),
-        studentId: student.id,
-        termId: state.term.id,
-        kind: 'addition',
-        requestedDelta: change.requestedDelta,
-        appliedDelta: change.appliedDelta,
-        scoreBefore: change.before,
-        scoreAfter: change.after,
-        reason: request.reason,
-        occurredAt: new Date().toISOString(),
-        actorId: account.id,
-        sourceRequestId: request.id,
-      }, ...state.transactions],
-    })
-    setAnnouncement(`อนุมัติคำขอแล้ว คะแนนของ ${student.name} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
-  }
-
-  async function rejectRequest(requestId: string) {
-    const request = state.additionRequests.find((item) => item.id === requestId)
-    if (!request || request.status !== 'pending') return
-    if (actions) {
-      setBusyAction(`request-${requestId}`)
-      try {
-        await actions.reviewPointAddition({ requestId, approve: false, note: 'ข้อมูลประกอบยังไม่ครบถ้วน' })
-        setAnnouncement('ปฏิเสธคำขอแล้ว คะแนนนักเรียนไม่เปลี่ยนแปลง')
-      } catch (error) {
-        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถปฏิเสธคำขอได้')
-      } finally {
-        setBusyAction('')
-      }
-      return
+    if (approve) {
+      const change = applyScoreDelta(student.score, request.requestedPoints)
+      onChange({
+        ...state,
+        students: state.students.map((item) => item.id === student.id ? { ...item, score: change.after } : item),
+        additionRequests: state.additionRequests.map((item) => item.id === requestId ? { ...item, status: 'approved', decidedAt: new Date().toISOString(), decisionNote: normalizedNote } : item),
+        transactions: [{
+          id: createId('tx'),
+          studentId: student.id,
+          termId: state.term.id,
+          kind: 'addition',
+          requestedDelta: change.requestedDelta,
+          appliedDelta: change.appliedDelta,
+          scoreBefore: change.before,
+          scoreAfter: change.after,
+          reason: request.positiveRuleTitle ?? 'เพิ่มคะแนนตามเกณฑ์ความประพฤติ',
+          occurredAt: new Date().toISOString(),
+          actorId: account.id,
+          sourceRequestId: request.id,
+          positiveRuleId: request.positiveRuleId,
+          positiveRuleTitle: request.positiveRuleTitle,
+          activityOccurredAt: request.activityOccurredAt,
+          evidenceNote: request.evidenceNote,
+          internalReason: request.reason,
+          additionSource: 'teacher_request',
+        }, ...state.transactions],
+      })
+      setAnnouncement(`อนุมัติคำขอแล้ว คะแนนของ ${student.name} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
+    } else {
+      onChange({
+        ...state,
+        additionRequests: state.additionRequests.map((item) => item.id === requestId ? { ...item, status: 'rejected', decidedAt: new Date().toISOString(), decisionNote: normalizedNote } : item),
+      })
+      setAnnouncement(`ปฏิเสธคำขอของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
     }
-    onChange({
-      ...state,
-      additionRequests: state.additionRequests.map((item) => item.id === requestId ? { ...item, status: 'rejected', decidedAt: new Date().toISOString(), decisionNote: 'ข้อมูลประกอบยังไม่ครบถ้วน (โหมดสาธิต)' } : item),
-    })
-    setAnnouncement('ปฏิเสธคำขอแล้ว คะแนนนักเรียนไม่เปลี่ยนแปลง')
+    setDecisionNote('')
   }
 
   async function decideAppeal(appealId: string, accepted: boolean) {
+    if (mutationBusy) return
     const appeal = state.appeals.find((item) => item.id === appealId)
     if (!appeal || !['submitted', 'reviewing'].includes(appeal.status)) return
     if (actions) {
@@ -224,16 +275,40 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setAnnouncement(`อนุมัติคำอุทธรณ์แล้ว สร้างรายการคืน ${change.appliedDelta} คะแนน โดยไม่แก้ประวัติเดิม`)
   }
 
+  function invalidateAdminRequest() {
+    setAdminRequestId(newRequestId())
+  }
+
   async function addPointsDirectly(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const student = state.students.find((item) => item.id === studentId)
-    if (!student || points < 1 || !reason.trim()) return
+    if (mutationBusy) return
+    const student = adminStudent
+    const activityIso = localDateTimeToIso(activityOccurredAt)
+    if (!student || !adminPositiveRule || !adminPointValidation.valid || !activityIso || reason.trim().length < 5 || adminEvidenceNote.trim().length < 5) {
+      setAnnouncement(adminPointValidation.message ?? 'กรุณากรอกเกณฑ์ วันทำกิจกรรม เหตุผล และหลักฐานให้ครบถ้วน')
+      return
+    }
+    if (student.score >= 100) {
+      setAnnouncement('นักเรียนมีคะแนนเต็ม 100 แล้ว จึงไม่สามารถเพิ่มคะแนนได้')
+      return
+    }
     if (actions) {
       setBusyAction('admin-add')
       try {
-        await actions.adminAddPoints({ studentId: student.id, points, reason: reason.trim(), termId: state.term.id })
+        const result = await actions.adminAddPoints({
+          clientRequestId: adminRequestId,
+          studentId: student.id,
+          positiveRuleId: adminPositiveRule.id,
+          points,
+          activityOccurredAt: activityIso,
+          reason: reason.trim(),
+          evidenceNote: adminEvidenceNote.trim(),
+          termId: state.term.id,
+        })
         setReason('')
-        setAnnouncement(`เพิ่มคะแนนให้ ${student.name} และบันทึกประวัติเรียบร้อยแล้ว`)
+        setAdminEvidenceNote('')
+        setAdminRequestId(newRequestId())
+        setAnnouncement(`เพิ่มคะแนนให้ ${student.name} จริง ${result.appliedPoints} คะแนน จาก ${result.balanceBefore} เป็น ${result.balanceAfter} และบันทึกรายละเอียดแล้ว`)
       } catch (error) {
         setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเพิ่มคะแนนได้')
       } finally {
@@ -254,17 +329,25 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         appliedDelta: change.appliedDelta,
         scoreBefore: change.before,
         scoreAfter: change.after,
-        reason: reason.trim(),
-        occurredAt: new Date().toISOString(),
+        reason: adminPositiveRule.title,
+        occurredAt: activityIso,
         actorId: account.id,
+        positiveRuleId: adminPositiveRule.id,
+        positiveRuleTitle: adminPositiveRule.title,
+        activityOccurredAt: activityIso,
+        evidenceNote: adminEvidenceNote.trim(),
+        internalReason: reason.trim(),
+        additionSource: 'admin_direct',
       }, ...state.transactions],
     })
     setReason('')
+    setAdminEvidenceNote('')
+    setAdminRequestId(newRequestId())
     setAnnouncement(`เพิ่มคะแนน ${student.name} จาก ${change.before} เป็น ${change.after} เรียบร้อยแล้ว`)
   }
 
   async function resetTermScores() {
-    if (state.term.resetCompletedAt) return
+    if (mutationBusy || state.term.resetCompletedAt) return
     const confirmed = window.confirm(`ยืนยันเริ่มคะแนน ${state.term.label} ที่ 100 สำหรับนักเรียน ${state.students.length} คน? เคสติดตามที่ยังไม่เสร็จจะยังคงอยู่`)
     if (!confirmed) return
     if (actions) {
@@ -303,6 +386,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   }
 
   async function updateTermSchedule(input: UpdateTermScheduleInput) {
+    if (mutationBusy) return
     setBusyAction('term-schedule')
     setAnnouncement('')
     try {
@@ -338,7 +422,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </section>
           <div className="two-column wide-left">
             <section className="panel"><div className="section-heading"><div><p className="eyebrow">เร่งดำเนินการ</p><h2>คำขอเพิ่มคะแนนล่าสุด</h2></div><button className="text-button" onClick={() => setTab('approvals')}>ดูทั้งหมด</button></div>
-              {pending.length ? <div className="record-list">{pending.slice(0, 4).map((request) => { const student = state.students.find((item) => item.id === request.studentId); const requestBusy = busyAction === `request-${request.id}`; return <article className="approval-row" key={request.id}><div><strong>{student?.name}</strong><span>{request.reason}</span><small>{formatThaiDate(request.createdAt)} • ขอเพิ่ม {request.requestedPoints} คะแนน</small></div><div className="inline-actions"><button className="icon-button approve" disabled={requestBusy} aria-label={`อนุมัติ ${student?.name}`} onClick={() => approveRequest(request.id)}><Icon name="check" /></button><button className="icon-button reject" disabled={requestBusy} aria-label={`ปฏิเสธ ${student?.name}`} onClick={() => rejectRequest(request.id)}>×</button></div></article> })}</div> : <EmptyState title="ไม่มีคำขอรออนุมัติ" detail="คำขอใหม่จากคุณครูจะแสดงที่นี่" />}
+              {pending.length ? <div className="record-list">{pending.slice(0, 4).map((request) => { const student = state.students.find((item) => item.id === request.studentId); const details = request as DetailedAdditionRequest; return <article className="approval-row" key={request.id}><div><strong>{student?.name}</strong><span>{details.positiveRuleTitle ?? request.reason}</span><small>{formatThaiDate(request.createdAt)} • ขอเพิ่ม {request.requestedPoints} คะแนน</small></div><button className="button secondary compact" onClick={() => openRequestReview(request.id)}>ตรวจสอบรายละเอียด</button></article> })}</div> : <EmptyState title="ไม่มีคำขอรออนุมัติ" detail="คำขอใหม่จากคุณครูจะแสดงที่นี่" />}
             </section>
             <section className="panel"><div className="section-heading"><div><p className="eyebrow">ความปลอดภัย</p><h2>คิวติดตาม</h2></div><span className="counter danger">{openCases.length}</span></div>
               {openCases.length ? <div className="mini-case-list">{openCases.slice(0, 3).map((item) => { const student = state.students.find((entry) => entry.id === item.studentId); return <article key={item.id}><StatusBadge severity={item.severity} /><strong>{student?.name}</strong><span>{item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span></article> })}</div> : <EmptyState title="ไม่มีเคสค้าง" detail="กรณีร้ายแรงจะปรากฏที่นี่" />}
@@ -349,11 +433,108 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'approvals' ? (
         <div className="approval-stack">
-          <section className="panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบก่อนดำเนินการ</p><h2>คำขอเพิ่มคะแนนจากคุณครู</h2></div><span className="counter">{pending.length}</span></div>
-            {state.additionRequests.length ? <div className="table-wrap"><table><thead><tr><th>วันที่</th><th>นักเรียน</th><th>เหตุผล</th><th>คะแนน</th><th>สถานะ / จัดการ</th></tr></thead><tbody>{state.additionRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); const requestBusy = busyAction === `request-${request.id}`; return <tr key={request.id}><td>{formatThaiDate(request.createdAt)}</td><td><strong>{student?.name}</strong><small>{student?.studentCode} • ปัจจุบัน {student?.score}</small></td><td>{request.reason}</td><td><span className="delta positive">+{request.requestedPoints}</span></td><td>{request.status === 'pending' ? <div className="inline-actions"><button className="button approve compact" disabled={requestBusy} onClick={() => approveRequest(request.id)}>อนุมัติ</button><button className="button reject compact" disabled={requestBusy} onClick={() => rejectRequest(request.id)}>ปฏิเสธ</button></div> : <span className={`badge status-${request.status}`}>{request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>}</td></tr> })}</tbody></table></div> : <EmptyState title="ยังไม่มีคำขอ" detail="เมื่อครูขอเพิ่มคะแนน รายการจะปรากฏที่นี่" />}
+          <section className="panel">
+            <div className="section-heading"><div><p className="eyebrow">ตรวจสอบก่อนดำเนินการ</p><h2>คำขอเพิ่มคะแนนจากคุณครู</h2></div><span className="counter">{pending.length}</span></div>
+            {state.additionRequests.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>วันที่</th><th>นักเรียน</th><th>เกณฑ์ / เหตุผล</th><th>คะแนน</th><th>สถานะ / จัดการ</th></tr></thead>
+                  <tbody>{state.additionRequests.map((request) => {
+                    const student = state.students.find((item) => item.id === request.studentId)
+                    const details = request as DetailedAdditionRequest
+                    return (
+                      <tr key={request.id}>
+                        <td>{formatThaiDate(request.createdAt)}</td>
+                        <td><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><small>{student?.studentCode} • ปัจจุบัน {student?.score ?? '—'}</small></td>
+                        <td>{details.positiveRuleTitle ?? request.reason}<small>{details.positiveRuleTitle ? request.reason : 'ไม่ได้ระบุเกณฑ์กิจกรรม'}</small></td>
+                        <td><span className="delta positive">+{request.requestedPoints}</span></td>
+                        <td>
+                          <div className="inline-actions">
+                            <span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รอตรวจสอบ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>
+                            <button className="button secondary compact" onClick={() => openRequestReview(request.id)}>{request.status === 'pending' ? 'ตรวจสอบ' : 'ดูรายละเอียด'}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}</tbody>
+                </table>
+              </div>
+            ) : <EmptyState title="ยังไม่มีคำขอ" detail="เมื่อครูขอเพิ่มคะแนน รายการจะปรากฏที่นี่" />}
           </section>
+          {selectedRequest ? (
+            <section className="panel stack-form" aria-labelledby="addition-review-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">รายละเอียดคำขอ</p><h2 id="addition-review-title">ตรวจสอบหลักฐานก่อนตัดสินใจ</h2></div>
+                <span className={`badge status-${selectedRequest.status}`}>{selectedRequest.status === 'pending' ? 'รอตรวจสอบ' : selectedRequest.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>
+              </div>
+              <div className="two-column">
+                <div className="selected-record">
+                  <strong>นักเรียน</strong>
+                  <span>{selectedRequestStudent?.studentCode ?? 'ไม่พบรหัสนักเรียน'} • {selectedRequestStudent?.name ?? 'ไม่พบข้อมูลนักเรียน'}</span>
+                  <span>{selectedRequestStudent?.classroomName ?? 'ไม่พบข้อมูลห้องเรียน'}</span>
+                </div>
+                <div className="selected-record">
+                  <strong>ผู้ยื่นคำขอ</strong>
+                  <span>{selectedRequest.teacherName ?? selectedRequestTeacher?.name ?? 'ไม่พบข้อมูลคุณครู'}</span>
+                  <span>ยื่นเมื่อ {formatThaiDate(selectedRequest.createdAt)}</span>
+                </div>
+              </div>
+              <div className="two-column">
+                <div className="selected-record">
+                  <strong>เกณฑ์กิจกรรมเพิ่มคะแนน</strong>
+                  <span>{selectedRequest.positiveRuleTitle ?? 'ไม่ได้ระบุเกณฑ์กิจกรรม'}</span>
+                  <span>ทำกิจกรรมเมื่อ {formatThaiDate(selectedRequest.activityOccurredAt || selectedRequest.createdAt)}</span>
+                </div>
+                <div className="selected-record">
+                  <strong>เหตุผลที่ขอเพิ่มคะแนน</strong>
+                  <span>{selectedRequest.reason || 'ไม่ได้ระบุเหตุผล'}</span>
+                </div>
+              </div>
+              <div className="selected-record">
+                <strong>รายละเอียดและหลักฐานจากคุณครู</strong>
+                <span>{selectedRequest.evidenceNote?.trim() || 'ไม่ได้แนบรายละเอียดหลักฐาน'}</span>
+              </div>
+              <div className="rule-summary" aria-label={`คะแนนปัจจุบัน ${selectedRequestScore} คะแนน หากอนุมัติจะเป็น ${selectedRequestScoreAfter} คะแนน`}>
+                <div><Icon name="score" />คะแนนปัจจุบัน → หลังอนุมัติ (สูงสุด 100)</div>
+                <strong>{selectedRequestScore}<span>→</span>{selectedRequestScoreAfter}</strong>
+              </div>
+              {selectedRequest.status === 'pending' ? (
+                <>
+                  <label htmlFor="addition-decision-note">บันทึกผลการพิจารณา
+                    <textarea
+                      id="addition-decision-note"
+                      disabled={mutationBusy}
+                      value={decisionNote}
+                      minLength={5}
+                      required
+                      aria-invalid={Boolean(decisionError)}
+                      aria-describedby={`addition-decision-help${decisionError ? ' addition-decision-error' : ''}`}
+                      placeholder="ระบุเหตุผลที่อนุมัติหรือปฏิเสธ เพื่อเก็บในประวัติตรวจสอบ"
+                      onChange={(event) => { setDecisionNote(event.target.value); setDecisionError('') }}
+                    />
+                  </label>
+                  <small id="addition-decision-help">ต้องระบุอย่างน้อย 5 ตัวอักษรก่อนอนุมัติหรือปฏิเสธ</small>
+                  {decisionError ? <p className="form-error" id="addition-decision-error" role="alert">{decisionError}</p> : null}
+                  <div className="form-actions">
+                    <button className="button reject" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, false, decisionNote)}>
+                      {busyAction === `request-${selectedRequest.id}` ? 'กำลังบันทึก…' : 'ปฏิเสธคำขอ'}
+                    </button>
+                    <button className="button approve" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, true, decisionNote)}>
+                      {busyAction === `request-${selectedRequest.id}` ? 'กำลังบันทึก…' : `อนุมัติ +${selectedRequest.requestedPoints} คะแนน`}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="selected-record">
+                  <strong>บันทึกผลการพิจารณา</strong>
+                  <span>{selectedRequest.decisionNote?.trim() || 'ไม่มีบันทึกประกอบ'}</span>
+                  <span>{selectedRequest.decidedAt ? `ดำเนินการเมื่อ ${formatThaiDate(selectedRequest.decidedAt)}` : 'ไม่พบเวลาที่ดำเนินการ'}</span>
+                </div>
+              )}
+            </section>
+          ) : null}
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ไม่แก้รายการเดิม</p><h2>คำอุทธรณ์จากนักเรียน</h2></div><span className="counter">{openAppeals.length}</span></div>
-            {state.appeals.length ? <div className="record-list">{state.appeals.map((appeal) => { const student = state.students.find((item) => item.id === appeal.studentId); const source = state.transactions.find((item) => item.id === appeal.transactionId); const appealBusy = busyAction === `appeal-${appeal.id}`; return <article className="appeal-review-row" key={appeal.id}><div><strong>{student?.name} • {Math.abs(source?.appliedDelta ?? 0)} คะแนน</strong><span>{appeal.statement}</span><small>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</small></div>{appeal.status === 'submitted' || appeal.status === 'reviewing' ? <div className="inline-actions"><button className="button approve compact" disabled={appealBusy} onClick={() => decideAppeal(appeal.id, true)}>คืนคะแนน</button><button className="button reject compact" disabled={appealBusy} onClick={() => decideAppeal(appeal.id, false)}>ปฏิเสธ</button></div> : <span className={`badge status-${appeal.status === 'accepted' ? 'approved' : 'rejected'}`}>{appeal.status === 'accepted' ? 'คืนคะแนนแล้ว' : 'ไม่อนุมัติ'}</span>}</article> })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="คำอุทธรณ์ที่นักเรียนยื่นภายใน 7 วันจะแสดงที่นี่" />}
+            {state.appeals.length ? <div className="record-list">{state.appeals.map((appeal) => { const student = state.students.find((item) => item.id === appeal.studentId); const source = state.transactions.find((item) => item.id === appeal.transactionId); return <article className="appeal-review-row" key={appeal.id}><div><strong>{student?.name} • {Math.abs(source?.appliedDelta ?? 0)} คะแนน</strong><span>{appeal.statement}</span><small>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</small></div>{appeal.status === 'submitted' || appeal.status === 'reviewing' ? <div className="inline-actions"><button className="button approve compact" disabled={mutationBusy} onClick={() => decideAppeal(appeal.id, true)}>คืนคะแนน</button><button className="button reject compact" disabled={mutationBusy} onClick={() => decideAppeal(appeal.id, false)}>ปฏิเสธ</button></div> : <span className={`badge status-${appeal.status === 'accepted' ? 'approved' : 'rejected'}`}>{appeal.status === 'accepted' ? 'คืนคะแนนแล้ว' : 'ไม่อนุมัติ'}</span>}</article> })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="คำอุทธรณ์ที่นักเรียนยื่นภายใน 7 วันจะแสดงที่นี่" />}
           </section>
         </div>
       ) : null}
@@ -366,21 +547,33 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'manage' ? (
         <div className="manage-grid">
-          <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรง</h2></div></div>
-            <label>นักเรียน<select value={studentId} onChange={(event) => setStudentId(event.target.value)}>{state.students.map((student) => <option key={student.id} value={student.id}>{student.studentCode} • {student.name} ({student.score}/100)</option>)}</select></label>
-            <label>จำนวนคะแนน<input type="number" min="1" max="100" value={points} onChange={(event) => setPoints(Number(event.target.value))} /></label>
-            <label>เหตุผล<textarea value={reason} onChange={(event) => setReason(event.target.value)} required minLength={5} placeholder="เหตุผลจะถูกเก็บในประวัติตรวจสอบ" /></label>
-            <button className="button primary" type="submit" disabled={busyAction === 'admin-add'}>{busyAction === 'admin-add' ? 'กำลังบันทึก…' : 'เพิ่มคะแนนและบันทึกประวัติ'}</button>
+          <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรงพร้อมหลักฐาน</h2></div></div>
+            <label>นักเรียน<select disabled={adminAdditionBusy} value={studentId} onChange={(event) => { setStudentId(event.target.value); invalidateAdminRequest() }}>{state.students.map((student) => <option key={student.id} value={student.id}>{student.studentCode} • {student.name} ({student.score}/100)</option>)}</select></label>
+            <label>เกณฑ์การเพิ่มคะแนน<select disabled={adminAdditionBusy} value={adminPositiveRuleId} onChange={(event) => { const nextId = event.target.value; const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} required><option value="" disabled>เลือกเกณฑ์</option>{activePositiveRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.code} • {rule.title}</option>)}</select></label>
+            {adminPositiveRule ? <div className="positive-rule-summary"><div><span className="badge status-approved">{adminPositiveRule.code}</span><strong>{adminPositiveRule.title}</strong></div><p>{adminPositiveRule.description || adminPositiveRule.category}</p><small>{adminPositiveRule.discretionary ? `กำหนดได้ 1–${adminPositiveRule.maxPoints} คะแนน` : `คะแนนตามเกณฑ์ +${adminPositiveRule.defaultPoints ?? 0}`}</small></div> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
+            <div className="date-field-grid">
+              <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={adminAdditionBusy} max={toLocalDateTimeInputValue()} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdminRequest() }} required /></label>
+              <label>จำนวนคะแนน<input type="number" disabled={adminAdditionBusy} min="1" max={adminPositiveRule?.maxPoints ?? 100} readOnly={!adminPositiveRule?.discretionary} value={points} onChange={(event) => { setPoints(Number(event.target.value)); invalidateAdminRequest() }} /></label>
+            </div>
+            {!adminPointValidation.valid && adminPointValidation.message ? <p className="form-error">{adminPointValidation.message}</p> : null}
+            {adminAdditionPreview ? <div className="addition-preview"><span>คะแนนหลังบันทึก (สูงสุด 100)</span><strong>{adminAdditionPreview.before} <i>→</i> {adminAdditionPreview.after}</strong><small>ระบบจะเพิ่มจริง {adminAdditionPreview.appliedDelta} คะแนน</small></div> : null}
+            <label>เหตุผลภายใน<textarea disabled={adminAdditionBusy} value={reason} onChange={(event) => { setReason(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="อธิบายกิจกรรมหรือพฤติกรรมที่ตรงกับเกณฑ์" /></label>
+            <label>หลักฐานประกอบ<textarea disabled={adminAdditionBusy} value={adminEvidenceNote} onChange={(event) => { setAdminEvidenceNote(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="ระบุเอกสาร ภาพถ่าย หรือผู้รับรองที่ตรวจสอบได้" /></label>
+            <p className="scope-note"><Icon name="shield" size={18} /> นักเรียนเห็นเฉพาะชื่อเกณฑ์และคะแนน ไม่เห็นเหตุผลภายในหรือหลักฐาน</p>
+            <button className="button primary" type="submit" disabled={adminAdditionBusy || !adminPositiveRule || adminStudent?.score === 100}>{adminAdditionBusy ? 'กำลังบันทึก…' : 'เพิ่มคะแนนและบันทึกรายละเอียด'}</button>
           </form>
           <TermScheduleForm
             key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}`}
             term={state.term}
-            busy={busyAction === 'term-schedule'}
+            busy={mutationBusy}
             onSave={updateTermSchedule}
           />
-          <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || busyAction === 'initialize-term'} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
+          <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
+            {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{transaction.internalReason ? <span>เหตุผล: {transaction.internalReason}</span> : null}{transaction.evidenceNote ? <small>หลักฐาน: {transaction.evidenceNote}</small> : null}<small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
+          </section>
+          <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || mutationBusy} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
           <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ระเบียบตัวอย่าง</p><h2>เกณฑ์การตัดคะแนน</h2></div><span className="counter">{state.rules.length}</span></div><div className="rule-list">{state.rules.map((rule) => <div key={rule.id}><span><strong>{rule.title}</strong><small>{rule.category}</small></span><StatusBadge severity={rule.severity} /><b>−{rule.points}</b></div>)}</div></section>
-          {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}
+          {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" disabled={mutationBusy} onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}
         </div>
       ) : null}
     </AppShell>

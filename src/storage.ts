@@ -1,7 +1,7 @@
 import { createDemoState } from './demoData'
 import type { DemoState, Role } from './domain'
 
-const STORAGE_KEY = 'school-point:demo:v1'
+const STORAGE_KEY = 'school-point:demo:v2'
 const SESSION_KEY = 'school-point:session:v1'
 
 export interface DemoSession {
@@ -14,7 +14,7 @@ export function loadDemoState(): DemoState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return createDemoState()
     const parsed = JSON.parse(raw) as DemoState
-    if (parsed.version !== 1) return createDemoState()
+    if (parsed.version !== 2) return createDemoState()
     return parsed
   } catch {
     return createDemoState()

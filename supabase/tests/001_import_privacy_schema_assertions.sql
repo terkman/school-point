@@ -9,6 +9,10 @@ do $$
 declare
   v_import_definition text;
   v_record_definition text;
+  v_bulk_definition text;
+  v_addition_definition text;
+  v_review_definition text;
+  v_admin_addition_definition text;
   v_link_definition text;
   v_activation_definition text;
   v_session_definition text;
@@ -39,6 +43,366 @@ begin
 
   if to_regclass('public.positive_behavior_rules') is null then
     raise exception 'public.positive_behavior_rules is missing';
+  end if;
+
+  if to_regclass('private.deduction_batches') is null then
+    raise exception 'private.deduction_batches is missing';
+  end if;
+
+  if exists (
+    select 1
+    from (
+      values
+        ('id', 'bigint', 'int8', 'NO', 'YES'),
+        ('client_request_id', 'uuid', 'uuid', 'NO', 'NO'),
+        ('recorded_by', 'uuid', 'uuid', 'NO', 'NO'),
+        ('recorded_by_snapshot', 'text', 'text', 'NO', 'NO'),
+        ('term_id', 'bigint', 'int8', 'NO', 'NO'),
+        ('scope', 'text', 'text', 'NO', 'NO'),
+        ('classroom_id', 'bigint', 'int8', 'YES', 'NO'),
+        ('target_student_ids', 'ARRAY', '_int8', 'NO', 'NO'),
+        ('target_count', 'smallint', 'int2', 'NO', 'NO'),
+        ('rule_id', 'bigint', 'int8', 'NO', 'NO'),
+        ('rule_snapshot', 'jsonb', 'jsonb', 'NO', 'NO'),
+        ('requested_points_each', 'smallint', 'int2', 'NO', 'NO'),
+        ('occurred_at', 'timestamp with time zone', 'timestamptz', 'NO', 'NO'),
+        ('student_visible_note', 'text', 'text', 'YES', 'NO'),
+        ('internal_note', 'text', 'text', 'NO', 'NO'),
+        ('payload_hash', 'text', 'text', 'NO', 'NO'),
+        ('total_requested_points', 'integer', 'int4', 'NO', 'NO'),
+        ('total_applied_points', 'integer', 'int4', 'NO', 'NO'),
+        ('already_at_zero_count', 'smallint', 'int2', 'NO', 'NO'),
+        ('guardian_task_count', 'smallint', 'int2', 'NO', 'NO'),
+        ('result_summary', 'jsonb', 'jsonb', 'NO', 'NO'),
+        ('recorded_at', 'timestamp with time zone', 'timestamptz', 'NO', 'NO')
+    ) as expected(column_name, data_type, udt_name, is_nullable, is_identity)
+    left join information_schema.columns column_row
+      on column_row.table_schema = 'private'
+     and column_row.table_name = 'deduction_batches'
+     and column_row.column_name = expected.column_name
+     and column_row.data_type = expected.data_type
+     and column_row.udt_name = expected.udt_name
+     and column_row.is_nullable = expected.is_nullable
+     and column_row.is_identity = expected.is_identity
+    where column_row.column_name is null
+  ) then
+    raise exception 'private.deduction_batches core structure is incomplete';
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'public'
+      and column_row.table_name = 'incidents'
+      and column_row.column_name = 'deduction_batch_id'
+      and column_row.data_type = 'bigint'
+      and column_row.is_nullable = 'YES'
+  ) then
+    raise exception 'public.incidents.deduction_batch_id is missing or malformed';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'private.deduction_batches'::regclass
+      and constraint_row.contype = 'u'
+      and lower(pg_get_constraintdef(constraint_row.oid)) =
+          'unique (recorded_by, client_request_id)'
+  ) then
+    raise exception 'deduction batch idempotency key is not unique per recorder';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'private.deduction_batches'::regclass
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and position(
+        'char_length(payload_hash) = 64'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+  ) then
+    raise exception 'deduction batch payload hash must be a 64-character SHA-256 hex digest';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.incidents'::regclass
+      and constraint_row.confrelid = 'private.deduction_batches'::regclass
+      and constraint_row.contype = 'f'
+      and constraint_row.conkey = array[
+        (
+          select attribute.attnum
+          from pg_attribute attribute
+          where attribute.attrelid = 'public.incidents'::regclass
+            and attribute.attname = 'deduction_batch_id'
+            and not attribute.attisdropped
+        )
+      ]::smallint[]
+      and constraint_row.confkey = array[
+        (
+          select attribute.attnum
+          from pg_attribute attribute
+          where attribute.attrelid = 'private.deduction_batches'::regclass
+            and attribute.attname = 'id'
+            and not attribute.attisdropped
+        )
+      ]::smallint[]
+  ) then
+    raise exception 'incidents.deduction_batch_id foreign key is missing or incorrect';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_index index_row
+    join pg_class index_relation on index_relation.oid = index_row.indexrelid
+    where index_row.indrelid = 'public.incidents'::regclass
+      and index_relation.relname = 'incidents_batch_student_idx'
+      and index_row.indisunique
+      and position(
+        '(deduction_batch_id, student_id)'
+        in lower(pg_get_indexdef(index_row.indexrelid))
+      ) > 0
+      and position(
+        'deduction_batch_id is not null'
+        in lower(pg_get_expr(index_row.indpred, index_row.indrelid))
+      ) > 0
+  ) then
+    raise exception 'incident batch/student unique partial index is missing or incorrect';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_index index_row
+    join pg_class index_relation on index_relation.oid = index_row.indexrelid
+    where index_row.indrelid = 'private.deduction_batches'::regclass
+      and index_relation.relname = 'deduction_batches_term_recorded_idx'
+      and position(
+        '(term_id, recorded_at desc)'
+        in lower(pg_get_indexdef(index_row.indexrelid))
+      ) > 0
+  ) then
+    raise exception 'deduction batch term/date index is missing or incorrect';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_class relation
+    join pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'private'
+      and relation.relname = 'deduction_batches'
+      and relation.relrowsecurity
+      and relation.relforcerowsecurity
+  ) then
+    raise exception 'private.deduction_batches must have forced RLS';
+  end if;
+
+  if exists (
+    select 1
+    from pg_class relation
+    cross join lateral aclexplode(
+      coalesce(relation.relacl, acldefault('r', relation.relowner))
+    ) as acl_entry
+    where relation.oid = 'private.deduction_batches'::regclass
+      and acl_entry.grantee in (
+        0,
+        (select oid from pg_roles where rolname = 'anon'),
+        (select oid from pg_roles where rolname = 'authenticated'),
+        (select oid from pg_roles where rolname = 'service_role')
+      )
+  ) then
+    raise exception 'private.deduction_batches grants direct access to an API role';
+  end if;
+
+  if exists (
+    select 1
+    from (
+      values
+        ('activity_occurred_at', 'timestamp with time zone', 'timestamptz'),
+        ('client_request_id', 'uuid', 'uuid'),
+        ('request_payload_hash', 'text', 'text')
+    ) as expected(column_name, data_type, udt_name)
+    left join information_schema.columns column_row
+      on column_row.table_schema = 'public'
+     and column_row.table_name = 'point_addition_requests'
+     and column_row.column_name = expected.column_name
+     and column_row.data_type = expected.data_type
+     and column_row.udt_name = expected.udt_name
+     and column_row.is_nullable = 'YES'
+    where column_row.column_name is null
+  ) then
+    raise exception 'detailed addition-request columns are missing or malformed';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.point_addition_requests'::regclass
+      and constraint_row.conname = 'point_requests_idempotency_pair'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+  )
+  or not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.point_addition_requests'::regclass
+      and constraint_row.conname = 'point_requests_payload_hash_length'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and position(
+        'char_length(request_payload_hash) = 64'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+  )
+  or not exists (
+    select 1
+    from pg_index index_row
+    join pg_class index_relation on index_relation.oid = index_row.indexrelid
+    where index_row.indrelid = 'public.point_addition_requests'::regclass
+      and index_relation.relname = 'point_requests_requester_client_id_idx'
+      and index_row.indisunique
+      and position(
+        '(requested_by, client_request_id)'
+        in lower(pg_get_indexdef(index_row.indexrelid))
+      ) > 0
+      and position(
+        'client_request_id is not null'
+        in lower(pg_get_expr(index_row.indpred, index_row.indrelid))
+      ) > 0
+  ) then
+    raise exception 'addition-request idempotency constraints or index are incomplete';
+  end if;
+
+  if exists (
+    select 1
+    from (
+      values
+        ('positive_rule_id', 'bigint', 'int8'),
+        ('positive_rule_snapshot', 'jsonb', 'jsonb'),
+        ('activity_occurred_at', 'timestamp with time zone', 'timestamptz'),
+        ('internal_reason', 'text', 'text'),
+        ('evidence_note', 'text', 'text'),
+        ('client_request_id', 'uuid', 'uuid'),
+        ('request_payload_hash', 'text', 'text')
+    ) as expected(column_name, data_type, udt_name)
+    left join information_schema.columns column_row
+      on column_row.table_schema = 'public'
+     and column_row.table_name = 'score_ledger'
+     and column_row.column_name = expected.column_name
+     and column_row.data_type = expected.data_type
+     and column_row.udt_name = expected.udt_name
+     and column_row.is_nullable = 'YES'
+    where column_row.column_name is null
+  ) then
+    raise exception 'structured direct-addition score-ledger columns are missing or malformed';
+  end if;
+
+  if (
+    select count(*)
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.score_ledger'::regclass
+      and constraint_row.conname in (
+        'score_ledger_positive_rule_snapshot_pair',
+        'score_ledger_idempotency_pair',
+        'score_ledger_payload_hash_length',
+        'score_ledger_direct_addition_details'
+      )
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+  ) <> 4 then
+    raise exception 'structured direct-addition score-ledger constraints are incomplete';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.score_ledger'::regclass
+      and constraint_row.conname = 'score_ledger_positive_rule_snapshot_pair'
+      and position(
+        'positive_rule_id is null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'positive_rule_snapshot is null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'positive_rule_id is not null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'jsonb_typeof(positive_rule_snapshot) = ''object'''
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+  )
+  or not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.score_ledger'::regclass
+      and constraint_row.conname = 'score_ledger_idempotency_pair'
+      and position(
+        'client_request_id is null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'request_payload_hash is null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'client_request_id is not null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position(
+        'request_payload_hash is not null'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+  )
+  or not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.score_ledger'::regclass
+      and constraint_row.conname = 'score_ledger_payload_hash_length'
+      and position(
+        'char_length(request_payload_hash) = 64'
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+  )
+  or not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.score_ledger'::regclass
+      and constraint_row.conname = 'score_ledger_direct_addition_details'
+      and position(
+        'entry_type = ''admin_addition'''
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
+      and position('positive_rule_id is not null' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+      and position('activity_occurred_at is not null' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+      and position('internal_reason' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+      and position('evidence_note' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+  ) then
+    raise exception 'structured direct-addition score-ledger constraint definitions are unsafe';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_index index_row
+    join pg_class index_relation on index_relation.oid = index_row.indexrelid
+    where index_row.indrelid = 'public.score_ledger'::regclass
+      and index_relation.relname = 'score_ledger_actor_client_id_idx'
+      and index_row.indisunique
+      and position(
+        '(actor_user_id, client_request_id)'
+        in lower(pg_get_indexdef(index_row.indexrelid))
+      ) > 0
+      and position(
+        'client_request_id is not null'
+        in lower(pg_get_expr(index_row.indpred, index_row.indrelid))
+      ) > 0
+  ) then
+    raise exception 'direct-addition actor/request unique partial index is missing or incorrect';
   end if;
 
   if not exists (
@@ -210,6 +574,160 @@ begin
        'EXECUTE'
      ) then
     raise exception 'first-password activation RPC privileges are not least-privilege';
+  end if;
+
+  foreach v_helper_signature in array array[
+    'public.record_deductions_bulk(uuid,text,bigint[],bigint,bigint,timestamp with time zone,text,text,boolean)',
+    'public.request_point_addition_detailed(uuid,bigint,bigint,smallint,timestamp with time zone,text,text)',
+    'public.review_point_addition(bigint,boolean,text)',
+    'public.admin_add_points_detailed(uuid,bigint,bigint,smallint,timestamp with time zone,text,text,bigint)',
+    'public.get_my_score_history()',
+    'public.get_my_incident_history()'
+  ] loop
+    if to_regprocedure(v_helper_signature) is null then
+      raise exception 'required frontend RPC % is missing', v_helper_signature;
+    end if;
+
+    if not has_function_privilege(
+         'authenticated',
+         v_helper_signature,
+         'EXECUTE'
+       )
+       or has_function_privilege('anon', v_helper_signature, 'EXECUTE')
+       or has_function_privilege('service_role', v_helper_signature, 'EXECUTE')
+       or exists (
+         select 1
+         from pg_proc procedure
+         cross join lateral aclexplode(
+           coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+         ) as acl_entry
+         where procedure.oid = v_helper_signature::regprocedure
+           and acl_entry.grantee = 0
+           and acl_entry.privilege_type = 'EXECUTE'
+       ) then
+      raise exception 'frontend RPC % is not authenticated-only',
+        v_helper_signature;
+    end if;
+
+    if not exists (
+      select 1
+      from pg_proc procedure
+      where procedure.oid = v_helper_signature::regprocedure
+        and procedure.prosecdef
+        and exists (
+          select 1
+          from unnest(coalesce(procedure.proconfig, array[]::text[])) as setting(value)
+          where replace(setting.value, '"', '') = 'search_path='
+        )
+    ) then
+      raise exception 'frontend RPC % must be SECURITY DEFINER with empty search_path',
+        v_helper_signature;
+    end if;
+  end loop;
+
+  if to_regprocedure(
+       'public.request_point_addition(bigint,smallint,text,text)'
+     ) is null then
+    raise exception 'legacy request_point_addition RPC unexpectedly disappeared';
+  end if;
+
+  if has_function_privilege(
+       'authenticated',
+       'public.request_point_addition(bigint,smallint,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.request_point_addition(bigint,smallint,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.request_point_addition(bigint,smallint,text,text)',
+       'EXECUTE'
+     )
+     or exists (
+       select 1
+       from pg_proc procedure
+       cross join lateral aclexplode(
+         coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+       ) as acl_entry
+       where procedure.oid =
+             'public.request_point_addition(bigint,smallint,text,text)'::regprocedure
+         and acl_entry.grantee = 0
+         and acl_entry.privilege_type = 'EXECUTE'
+  ) then
+    raise exception 'legacy request_point_addition RPC is still executable by an API role';
+  end if;
+
+  if to_regprocedure(
+       'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)'
+     ) is null then
+    raise exception 'legacy record_deduction RPC unexpectedly disappeared';
+  end if;
+
+  if has_function_privilege(
+       'authenticated',
+       'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)',
+       'EXECUTE'
+     )
+     or exists (
+       select 1
+       from pg_proc procedure
+       cross join lateral aclexplode(
+         coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+       ) as acl_entry
+       where procedure.oid =
+             'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)'::regprocedure
+         and acl_entry.grantee = 0
+         and acl_entry.privilege_type = 'EXECUTE'
+  ) then
+    raise exception 'legacy record_deduction RPC is still executable by an API role';
+  end if;
+
+  if to_regprocedure(
+       'public.admin_add_points(bigint,smallint,text,bigint)'
+     ) is null then
+    raise exception 'legacy admin_add_points RPC unexpectedly disappeared';
+  end if;
+
+  if has_function_privilege(
+       'authenticated',
+       'public.admin_add_points(bigint,smallint,text,bigint)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.admin_add_points(bigint,smallint,text,bigint)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.admin_add_points(bigint,smallint,text,bigint)',
+       'EXECUTE'
+     )
+     or exists (
+       select 1
+       from pg_proc procedure
+       cross join lateral aclexplode(
+         coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+       ) as acl_entry
+       where procedure.oid =
+             'public.admin_add_points(bigint,smallint,text,bigint)'::regprocedure
+         and acl_entry.grantee = 0
+         and acl_entry.privilege_type = 'EXECUTE'
+     ) then
+    raise exception 'legacy admin_add_points RPC is still executable by an API role';
   end if;
 
   if to_regprocedure(
@@ -493,6 +1011,158 @@ begin
     end if;
   end loop;
 
+  select pg_get_viewdef(
+    'public.student_score_history'::regclass,
+    true
+  ) into v_view_definition;
+  if position('internal_reason' in lower(v_view_definition)) > 0
+     or position('evidence_note' in lower(v_view_definition)) > 0
+     or position('positive_rule_snapshot' in lower(v_view_definition)) = 0
+     or position('teacher_request_approved' in lower(v_view_definition)) = 0
+     or position('admin_addition' in lower(v_view_definition)) = 0
+     or position('กิจกรรมเพิ่มคะแนน' in v_view_definition) = 0
+     or position('else ledger.reason' in lower(v_view_definition)) = 0 then
+    raise exception 'student score history does not safely redact addition details and legacy reasons';
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'public'
+      and column_row.table_name = 'student_score_history'
+      and column_row.column_name in ('internal_reason', 'evidence_note')
+  ) then
+    raise exception 'student score history exposes staff-only reason or evidence columns';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc procedure
+    where procedure.oid = 'public.get_my_score_history()'::regprocedure
+      and procedure.pronargs = 0
+      and procedure.proretset
+      and procedure.provolatile = 's'
+      and procedure.proallargtypes = array[
+        'bigint'::regtype::oid,
+        'bigint'::regtype::oid,
+        'public.score_entry_type'::regtype::oid,
+        'smallint'::regtype::oid,
+        'smallint'::regtype::oid,
+        'smallint'::regtype::oid,
+        'smallint'::regtype::oid,
+        'text'::regtype::oid,
+        'bigint'::regtype::oid,
+        'timestamp with time zone'::regtype::oid
+      ]::oid[]
+      and procedure.proargmodes = array[
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char"
+      ]::"char"[]
+      and procedure.proargnames = array[
+        'id',
+        'term_id',
+        'entry_type',
+        'requested_delta',
+        'applied_delta',
+        'balance_before',
+        'balance_after',
+        'reason',
+        'incident_id',
+        'created_at'
+      ]::text[]
+  ) then
+    raise exception 'student score-history RPC return contract or STABLE volatility is incorrect';
+  end if;
+
+  select pg_get_functiondef(
+    'public.get_my_score_history()'::regprocedure
+  ) into v_helper_definition;
+  if position('private.current_student_id()' in lower(v_helper_definition)) = 0
+     or position('v_student_id is null' in lower(v_helper_definition)) = 0
+     or position('errcode = ''42501''' in lower(v_helper_definition)) = 0
+     or position('ledger.student_id = v_student_id' in lower(v_helper_definition)) = 0
+     or position('positive_rule_snapshot ->> ''title_th''' in lower(v_helper_definition)) = 0
+     or position('teacher_request_approved' in lower(v_helper_definition)) = 0
+     or position('admin_addition' in lower(v_helper_definition)) = 0
+     or position('กิจกรรมเพิ่มคะแนน' in v_helper_definition) = 0
+     or position('internal_reason' in lower(v_helper_definition)) > 0
+     or position('evidence_note' in lower(v_helper_definition)) > 0
+     or position('actor_' in lower(v_helper_definition)) > 0
+     or position('request_payload_hash' in lower(v_helper_definition)) > 0
+     or position('client_request_id' in lower(v_helper_definition)) > 0 then
+    raise exception 'student score-history RPC authorization or redaction contract is unsafe';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc procedure
+    where procedure.oid = 'public.get_my_incident_history()'::regprocedure
+      and procedure.pronargs = 0
+      and procedure.proretset
+      and procedure.provolatile = 's'
+      and procedure.proallargtypes = array[
+        'bigint'::regtype::oid,
+        'bigint'::regtype::oid,
+        'text'::regtype::oid,
+        'text'::regtype::oid,
+        'smallint'::regtype::oid,
+        'smallint'::regtype::oid,
+        'public.rule_severity'::regtype::oid,
+        'timestamp with time zone'::regtype::oid,
+        'timestamp with time zone'::regtype::oid,
+        'timestamp with time zone'::regtype::oid,
+        'text'::regtype::oid,
+        'boolean'::regtype::oid,
+        'bigint'::regtype::oid,
+        'public.appeal_status'::regtype::oid,
+        'text'::regtype::oid,
+        'timestamp with time zone'::regtype::oid
+      ]::oid[]
+      and procedure.proargmodes = array[
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
+        't'::"char"
+      ]::"char"[]
+      and procedure.proargnames = array[
+        'id',
+        'term_id',
+        'rule_code',
+        'rule_title',
+        'requested_points',
+        'applied_points',
+        'severity',
+        'occurred_at',
+        'recorded_at',
+        'appeal_deadline',
+        'student_visible_note',
+        'is_voided',
+        'appeal_id',
+        'appeal_status',
+        'decision_note',
+        'appeal_created_at'
+      ]::text[]
+  ) then
+    raise exception 'student incident-history RPC return contract or STABLE volatility is incorrect';
+  end if;
+
+  select pg_get_functiondef(
+    'public.get_my_incident_history()'::regprocedure
+  ) into v_helper_definition;
+  if position('private.current_student_id()' in lower(v_helper_definition)) = 0
+     or position('v_student_id is null' in lower(v_helper_definition)) = 0
+     or position('errcode = ''42501''' in lower(v_helper_definition)) = 0
+     or position('incident.student_id = v_student_id' in lower(v_helper_definition)) = 0
+     or position('incident.rule_snapshot ->> ''rule_code''' in lower(v_helper_definition)) = 0
+     or position('incident.rule_snapshot ->> ''title_th''' in lower(v_helper_definition)) = 0
+     or position('internal_note' in lower(v_helper_definition)) > 0
+     or position('evidence_note' in lower(v_helper_definition)) > 0
+     or position('student_statement' in lower(v_helper_definition)) > 0
+     or position('actor_' in lower(v_helper_definition)) > 0
+     or position('guardian' in lower(v_helper_definition)) > 0 then
+    raise exception 'student incident-history RPC authorization or redaction contract is unsafe';
+  end if;
+
   select pg_get_functiondef(
     'public.record_deduction(bigint,bigint,timestamp with time zone,text,text)'::regprocedure
   ) into v_record_definition;
@@ -503,6 +1173,101 @@ begin
      or position('v_rule.guardian_contact_required' in lower(v_record_definition)) = 0
      or position('insert into public.guardian_contact_tasks' in lower(v_record_definition)) = 0 then
     raise exception 'record_deduction does not create guardian contact for serious/critical rules';
+  end if;
+
+  select pg_get_functiondef(
+    'public.record_deductions_bulk(uuid,text,bigint[],bigint,bigint,timestamp with time zone,text,text,boolean)'::regprocedure
+  ) into v_bulk_definition;
+  if position('pg_advisory_xact_lock' in lower(v_bulk_definition)) = 0
+     or position('sha256(convert_to(v_payload::text' in lower(v_bulk_definition)) = 0
+     or position('order by distinct_target.student_id' in lower(v_bulk_definition)) = 0
+     or position('v_roster is distinct from v_target_ids' in lower(v_bulk_definition)) = 0
+     or position('v_authorized_count <> v_target_count' in lower(v_bulk_definition)) = 0
+     or position('p_confirm_serious_bulk' in lower(v_bulk_definition)) = 0
+     or position('unnest(v_existing.target_student_ids)' in lower(v_bulk_definition)) = 0
+     or regexp_count(
+          lower(v_bulk_definition),
+          'private\.teacher_has_student\([[:space:]]*target\.student_id,[[:space:]]*v_existing\.term_id'
+        ) = 0
+     or position('join public.students student' in lower(v_bulk_definition)) = 0
+     or position('student.status = ''active''' in lower(v_bulk_definition)) = 0
+     or position('public.record_deduction' in lower(v_bulk_definition)) = 0
+     or position('foreach v_student_id in array v_target_ids' in lower(v_bulk_definition)) = 0 then
+    raise exception 'bulk deduction RPC is missing SHA-256 idempotency, atomicity, authorization, active-student, roster, lock-order, or high-risk protections';
+  end if;
+
+  select pg_get_functiondef(
+    'public.request_point_addition_detailed(uuid,bigint,bigint,smallint,timestamp with time zone,text,text)'::regprocedure
+  ) into v_addition_definition;
+  if position('pg_advisory_xact_lock' in lower(v_addition_definition)) = 0
+     or position('sha256(convert_to(v_payload::text' in lower(v_addition_definition)) = 0
+     or position('public.positive_behavior_rules' in lower(v_addition_definition)) = 0
+     or position('v_rule.is_discretionary' in lower(v_addition_definition)) = 0
+     or position('v_rule.max_addition' in lower(v_addition_definition)) = 0
+     or position('v_rule.default_addition' in lower(v_addition_definition)) = 0
+     or position('activity_occurred_at' in lower(v_addition_definition)) = 0
+     or position('evidence_note' in lower(v_addition_definition)) = 0
+     or position('join public.students student' in lower(v_addition_definition)) = 0
+     or position('student.status = ''active''' in lower(v_addition_definition)) = 0
+     or regexp_count(
+          lower(v_addition_definition),
+          'private\.teacher_has_student\([[:space:]]*v_existing_student_id,[[:space:]]*v_existing_term_id'
+        ) = 0
+     or position('private.teacher_has_student' in lower(v_addition_definition)) = 0 then
+    raise exception 'detailed addition RPC is missing SHA-256 idempotency, replay authorization, rule, evidence, date, active-student, or teacher-scope validation';
+  end if;
+
+  select pg_get_functiondef(
+    'public.review_point_addition(bigint,boolean,text)'::regprocedure
+  ) into v_review_definition;
+  if position('p_approve is null' in lower(v_review_definition)) = 0
+     or position('v_review_note is null or char_length(v_review_note) < 5' in lower(v_review_definition)) = 0
+     or position('for update' in lower(v_review_definition)) = 0
+     or position('v_request.positive_rule_id is null' in lower(v_review_definition)) = 0
+     or position('v_request.activity_occurred_at is null' in lower(v_review_definition)) = 0
+     or position('v_request.evidence_note' in lower(v_review_definition)) = 0
+     or position('term.status = ''active''' in lower(v_review_definition)) = 0
+     or position('enrollment.is_active' in lower(v_review_definition)) = 0
+     or position('student.status = ''active''' in lower(v_review_definition)) = 0
+     or regexp_count(
+          lower(v_review_definition),
+          'internal_reason,[[:space:]]+evidence_note,[[:space:]]+reason'
+        ) = 0
+     or regexp_count(
+          lower(v_review_definition),
+          'v_request\.reason,[[:space:]]+v_request\.evidence_note,[[:space:]]+v_request\.rule_snapshot[[:space:]]*->>[[:space:]]*''title_th'''
+        ) = 0 then
+    raise exception 'addition review RPC is missing explicit decision, note, detail, lock, active-state, or snapshot-title privacy validation';
+  end if;
+
+  select pg_get_functiondef(
+    'public.admin_add_points_detailed(uuid,bigint,bigint,smallint,timestamp with time zone,text,text,bigint)'::regprocedure
+  ) into v_admin_addition_definition;
+  if position('private.is_admin' in lower(v_admin_addition_definition)) = 0
+     or position('pg_advisory_xact_lock' in lower(v_admin_addition_definition)) = 0
+     or position('sha256(convert_to(v_payload::text' in lower(v_admin_addition_definition)) = 0
+     or position('ledger.client_request_id = p_client_request_id' in lower(v_admin_addition_definition)) = 0
+     or position('term.status = ''active''' in lower(v_admin_addition_definition)) = 0
+     or position('enrollment.is_active' in lower(v_admin_addition_definition)) = 0
+     or position('student.status = ''active''' in lower(v_admin_addition_definition)) = 0
+     or position('v_rule.is_discretionary' in lower(v_admin_addition_definition)) = 0
+     or position('v_rule.max_addition' in lower(v_admin_addition_definition)) = 0
+     or position('v_rule.default_addition' in lower(v_admin_addition_definition)) = 0
+     or position('activity_occurred_at' in lower(v_admin_addition_definition)) = 0
+     or position('internal_reason' in lower(v_admin_addition_definition)) = 0
+     or position('evidence_note' in lower(v_admin_addition_definition)) = 0
+     or position('positive_rule_snapshot' in lower(v_admin_addition_definition)) = 0
+     or position('v_rule.title_th' in lower(v_admin_addition_definition)) = 0
+     or regexp_count(
+          lower(v_admin_addition_definition),
+          'internal_reason,[[:space:]]+evidence_note,[[:space:]]+client_request_id,[[:space:]]+request_payload_hash,[[:space:]]+reason'
+        ) = 0
+     or regexp_count(
+          lower(v_admin_addition_definition),
+          'v_reason,[[:space:]]+v_evidence,[[:space:]]+p_client_request_id,[[:space:]]+v_payload_hash,[[:space:]]+v_rule\.title_th'
+        ) = 0
+     or position('for update' in lower(v_admin_addition_definition)) = 0 then
+    raise exception 'detailed admin addition RPC is missing authorization, SHA-256 idempotency, structured details, active-state, rule, privacy, or score-lock validation';
   end if;
 
   select pg_get_functiondef(
