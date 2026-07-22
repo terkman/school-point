@@ -1,12 +1,40 @@
-import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 4173,
-  },
-  preview: {
-    port: 4173,
-  },
+import { sites } from './build/sites-vite-plugin'
+
+export default defineConfig(async ({ mode }) => {
+  process.env.WRANGLER_WRITE_LOGS ??= 'false'
+  process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs'
+  process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry'
+
+  const workerPlugins =
+    mode === 'test'
+      ? []
+      : (await import('@cloudflare/vite-plugin')).cloudflare({
+          viteEnvironment: { name: 'server' },
+          config: {
+            name: 'school-point',
+            main: './worker/index.ts',
+            compatibility_date: '2026-07-22',
+            assets: {
+              binding: 'ASSETS',
+              not_found_handling: 'single-page-application',
+            },
+          },
+        })
+
+  return {
+    plugins: [
+      react(),
+      sites(),
+      ...workerPlugins,
+    ],
+    server: {
+      port: 4173,
+    },
+    preview: {
+      port: 4173,
+    },
+  }
 })
