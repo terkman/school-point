@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,13 @@ import {
   parseDelimited,
 } from './lib/school-data-import.mjs'
 import { assertPrivateJsonPath, validatePlan } from './apply-supabase-import.mjs'
+import {
+  assertApplyConfirmation,
+  assertPrivateSqlPath,
+  buildImportSql,
+  chooseDollarQuoteDelimiter,
+  generateSqlArtifact,
+} from './generate-supabase-import-sql.mjs'
 import {
   assertAccountRequiresActivation,
   loadArtifact,
@@ -250,6 +257,73 @@ test('recomputes the import fingerprint before any remote write', () => {
 test('refuses tracked credential and import paths inside the repository', () => {
   assert.throws(() => assertPrivateJsonPath('activation-codes.json', '--output'), /private-data/)
   assert.match(assertPrivateJsonPath('private-data/activation-codes.json', '--output'), /private-data[\\/]activation-codes\.json$/)
+})
+
+test('builds collision-safe dry-run and apply SQL artifacts', () => {
+  const raw = validInput()
+  raw.students[0].ชื่อ = "$school_point_import$'; drop table public.students; -- $school_point_import_1$"
+  const result = buildImportPlan(raw)
+  assert.equal(result.ok, true)
+
+  const payload = JSON.stringify(result.plan)
+  const delimiter = chooseDollarQuoteDelimiter(payload)
+  assert.equal(delimiter, '$school_point_import_2$')
+
+  const dryRunSql = buildImportSql(result.plan)
+  assert.match(dryRunSql, /p_dry_run => true/)
+  assert.match(dryRunSql, /rollback;\s*$/)
+  assert.equal(dryRunSql.split(delimiter).length - 1, 2)
+
+  const applySql = buildImportSql(result.plan, true)
+  assert.match(applySql, /p_dry_run => false/)
+  assert.match(applySql, /commit;\s*$/)
+  assert.equal(applySql.split(delimiter).length - 1, 2)
+})
+
+test('requires an exact fingerprint before generating apply SQL', () => {
+  const { plan } = buildImportPlan(validInput())
+  assert.doesNotThrow(() => assertApplyConfirmation(false, undefined, plan.fingerprint))
+  assert.throws(() => assertApplyConfirmation(true, undefined, plan.fingerprint), /confirm-fingerprint/)
+  assert.throws(() => assertApplyConfirmation(true, '0'.repeat(64), plan.fingerprint), /ไม่ตรง/)
+  assert.doesNotThrow(() => assertApplyConfirmation(true, plan.fingerprint, plan.fingerprint))
+})
+
+test('writes only to an ignored private SQL path and returns a PII-free summary', async () => {
+  assert.throws(() => assertPrivateSqlPath('import.sql'), /private-data/)
+  assert.throws(() => assertPrivateSqlPath('private-data/import.json'), /\.sql/)
+
+  const marker = 'PII-MARKER-MUST-NOT-REACH-SUMMARY'
+  const raw = validInput()
+  raw.students[0].ชื่อ = marker
+  const { plan } = buildImportPlan(raw)
+  const privateRoot = join(process.cwd(), 'private-data')
+  const directory = await mkdtemp(join(privateRoot, 'sql-artifact-test-'))
+  const input = join(directory, 'plan.json')
+  const output = join(directory, 'dry-run.sql')
+  try {
+    await writeFile(input, JSON.stringify(plan))
+    const summary = await generateSqlArtifact({ input, output, apply: false })
+    const sql = await readFile(output, 'utf8')
+
+    assert.equal(summary.mode, 'dry-run')
+    assert.equal(summary.fingerprint, plan.fingerprint)
+    assert.deepEqual(summary.counts, {
+      classrooms: 1,
+      students: 1,
+      guardians: 1,
+      staff: 1,
+      assignments: 1,
+    })
+    assert.match(summary.output, /^private-data\//)
+    assert.equal(JSON.stringify(summary).includes(marker), false)
+    assert.equal(sql.includes(marker), true)
+    await assert.rejects(
+      generateSqlArtifact({ input, output, apply: false }),
+      /มีอยู่แล้ว/,
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('keeps activation artifacts scoped to one Supabase project', async () => {

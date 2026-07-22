@@ -13,6 +13,7 @@
     "test": "vitest run && node scripts/import-school-data.node-tests.mjs",
     "test:import": "node scripts/import-school-data.node-tests.mjs",
     "supabase:import": "node scripts/apply-supabase-import.mjs",
+    "supabase:import:sql": "node scripts/generate-supabase-import-sql.mjs",
     "supabase:activation": "node scripts/issue-supabase-activation.mjs",
     "preview": "vite preview"
   },

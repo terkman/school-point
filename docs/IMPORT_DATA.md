@@ -114,6 +114,26 @@ npm run supabase:import -- `
   --provision
 ```
 
+ถ้าเครื่องเข้าสู่ระบบ Supabase CLI และ link project ไว้แล้ว สามารถนำเข้าโดยไม่ต้องอ่านหรือเก็บ `service_role` key ได้ ตัวสร้างจะตรวจ fingerprint ใหม่ ตรวจว่าไฟล์ปลายทางถูก `.gitignore` จริง และแสดงเฉพาะโหมด fingerprint จำนวนรายการ และตำแหน่งไฟล์บน console:
+
+```powershell
+# สร้างและเรียก dry-run; transaction ในไฟล์จะจบด้วย ROLLBACK
+npm run supabase:import:sql -- `
+  --input private-data/import-plan.json `
+  --output private-data/import-dry-run.sql
+npx.cmd supabase db query --linked --file private-data/import-dry-run.sql
+
+# สร้างไฟล์ apply แยกต่างหากเมื่อ fingerprint ตรงกับรอบที่ตรวจแล้ว
+npm run supabase:import:sql -- `
+  --input private-data/import-plan.json `
+  --output private-data/import-apply.sql `
+  --apply `
+  --confirm-fingerprint CLIENT_PLAN_FINGERPRINT
+npx.cmd supabase db query --linked --file private-data/import-apply.sql
+```
+
+ไฟล์ SQL มี payload ที่รวมข้อมูลส่วนบุคคล แม้ console summary จะไม่แสดงข้อมูลเหล่านั้น จึงห้ามเปิดเผย อัปโหลด หรือย้ายออกจาก `private-data/` และ `imports/` ตัวสร้างจะไม่เขียนทับไฟล์เดิมเพื่อป้องกันการสลับไฟล์ dry-run กับ apply โดยไม่ตั้งใจ
+
 บัญชีที่ provision จะยังไม่มีรหัสผ่านและยังถูกฐานข้อมูลกั้นจากข้อมูลโรงเรียน เมื่อต้องการส่งรหัสให้ผู้ใช้ ให้ออกรหัสเปิดใช้ครั้งเดียวใกล้เวลาส่งจริง:
 
 ```powershell
