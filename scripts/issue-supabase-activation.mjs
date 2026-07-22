@@ -112,12 +112,40 @@ async function listUserByEmail(client, email) {
   }
 }
 
-export async function assertAccountRequiresActivation(client, userId) {
-  const { data, error } = await client
-    .from('profiles')
-    .select('is_active,activation_required')
-    .eq('user_id', userId)
-    .maybeSingle()
+async function readProfileWithAdminKey(projectUrl, adminKey, userId, fetchImpl = fetch) {
+  const endpoint = new URL('/rest/v1/profiles', projectUrl)
+  endpoint.searchParams.set('select', 'is_active,activation_required')
+  endpoint.searchParams.set('user_id', `eq.${userId}`)
+  endpoint.searchParams.set('limit', '1')
+
+  const response = await fetchImpl(endpoint, {
+    headers: {
+      Accept: 'application/json',
+      apikey: adminKey,
+    },
+  })
+  if (!response.ok) {
+    return { data: null, error: { status: response.status } }
+  }
+
+  const rows = await response.json()
+  return { data: Array.isArray(rows) ? (rows[0] ?? null) : null, error: null }
+}
+
+export async function assertAccountRequiresActivation(client, userId, adminAccess) {
+  const result = adminAccess
+    ? await readProfileWithAdminKey(
+        adminAccess.projectUrl,
+        adminAccess.adminKey,
+        userId,
+        adminAccess.fetchImpl,
+      )
+    : await client
+        .from('profiles')
+        .select('is_active,activation_required')
+        .eq('user_id', userId)
+        .maybeSingle()
+  const { data, error } = result
 
   if (error) {
     throw new Error(`ตรวจสถานะเปิดใช้บัญชีไม่สำเร็จ (${error.status ?? error.code ?? 'unknown'})`)
@@ -147,7 +175,10 @@ async function main() {
   const email = `${username}@${domain}`
   const user = await listUserByEmail(client, email)
   if (!user) throw new Error('ไม่พบบัญชีที่ provision แล้ว')
-  await assertAccountRequiresActivation(client, user.id)
+  await assertAccountRequiresActivation(client, user.id, {
+    projectUrl: url,
+    adminKey: serviceRoleKey,
+  })
   const { data, error } = await client.auth.admin.generateLink({ type: 'magiclink', email })
   const activationCode = data?.properties?.email_otp
   if (error || !activationCode) throw new Error(`ออกรหัสเปิดใช้ไม่สำเร็จ (${error?.status ?? 'unknown'})`)

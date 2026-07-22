@@ -577,3 +577,29 @@ test('issues activation only for a linked active profile that still requires act
     /ยังไม่ได้ผูก/,
   )
 })
+
+test('checks activation with a new Supabase secret key without sending it as bearer auth', async () => {
+  const calls = []
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), options })
+    return {
+      ok: true,
+      async json() {
+        return [{ is_active: true, activation_required: true }]
+      },
+    }
+  }
+
+  await assert.doesNotReject(
+    assertAccountRequiresActivation(null, 'user-secret-key', {
+      projectUrl: 'https://example.supabase.co',
+      adminKey: 'sb_secret_test-only',
+      fetchImpl,
+    }),
+  )
+
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].url, /profiles\?select=is_active%2Cactivation_required/)
+  assert.equal(calls[0].options.headers.apikey, 'sb_secret_test-only')
+  assert.equal('Authorization' in calls[0].options.headers, false)
+})
