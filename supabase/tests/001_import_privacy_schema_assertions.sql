@@ -12,6 +12,8 @@ declare
   v_link_definition text;
   v_activation_definition text;
   v_session_definition text;
+  v_term_schedule_definition text;
+  v_guardian_guard_definition text;
   v_helper_definition text;
   v_helper_signature text;
   v_teacher_scope_definition text;
@@ -208,6 +210,92 @@ begin
        'EXECUTE'
      ) then
     raise exception 'first-password activation RPC privileges are not least-privilege';
+  end if;
+
+  if to_regprocedure(
+       'public.admin_update_term_schedule(bigint,date,date)'
+     ) is null then
+    raise exception 'admin term-schedule RPC is missing';
+  end if;
+
+  if not has_function_privilege(
+       'authenticated',
+       'public.admin_update_term_schedule(bigint,date,date)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.admin_update_term_schedule(bigint,date,date)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.admin_update_term_schedule(bigint,date,date)',
+       'EXECUTE'
+     ) then
+    raise exception 'admin term-schedule RPC privileges are not least-privilege';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conname = 'behavior_rules_guardian_contact_severity'
+      and constraint_row.conrelid = 'public.behavior_rules'::regclass
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+  ) then
+    raise exception 'guardian-contact severity CHECK is missing or unvalidated';
+  end if;
+
+  if exists (
+    select 1
+    from public.behavior_rules rule
+    where rule.guardian_contact_required is distinct from
+          (rule.severity in ('serious', 'critical'))
+  ) then
+    raise exception 'guardian-contact rule mapping is not serious/critical only';
+  end if;
+
+  if to_regprocedure(
+       'private.enforce_guardian_contact_task_severity()'
+     ) is null
+     or has_function_privilege(
+       'authenticated',
+       'private.enforce_guardian_contact_task_severity()',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'private.enforce_guardian_contact_task_severity()',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'private.enforce_guardian_contact_task_severity()',
+       'EXECUTE'
+     ) then
+    raise exception 'guardian-contact task guard has unsafe privileges';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid = 'public.guardian_contact_tasks'::regclass
+      and trigger_row.tgname = 'guardian_contact_task_severity_guard'
+      and trigger_row.tgenabled <> 'D'
+      and not trigger_row.tgisinternal
+  ) then
+    raise exception 'guardian-contact task severity trigger is missing or disabled';
+  end if;
+
+  if exists (
+    select 1
+    from public.guardian_contact_tasks task
+    join public.incidents incident on incident.id = task.incident_id
+    where incident.severity not in ('serious', 'critical')
+       or task.student_id is distinct from incident.student_id
+  ) then
+    raise exception 'guardian-contact task references an ineligible incident';
   end if;
 
   foreach v_helper_signature in array array[
@@ -411,6 +499,11 @@ begin
   if position('v_role is null' in lower(v_record_definition)) = 0 then
     raise exception 'record_deduction does not reject a gated NULL role';
   end if;
+  if position('v_rule.severity in (''serious'', ''critical'')' in lower(v_record_definition)) = 0
+     or position('v_rule.guardian_contact_required' in lower(v_record_definition)) = 0
+     or position('insert into public.guardian_contact_tasks' in lower(v_record_definition)) = 0 then
+    raise exception 'record_deduction does not create guardian contact for serious/critical rules';
+  end if;
 
   select pg_get_functiondef(
     'public.admin_link_provisioned_account(text,uuid)'::regprocedure
@@ -449,6 +542,62 @@ begin
       )
   ) then
     raise exception 'first-password activation RPC must be SECURITY DEFINER with empty search_path';
+  end if;
+
+  select pg_get_functiondef(
+    'public.admin_update_term_schedule(bigint,date,date)'::regprocedure
+  ) into v_term_schedule_definition;
+  if position('private.is_admin' in lower(v_term_schedule_definition)) = 0
+     or position('for update' in lower(v_term_schedule_definition)) = 0
+     or position('not in (''planned'', ''active'')' in lower(v_term_schedule_definition)) = 0
+     or position('p_starts_on is null' in lower(v_term_schedule_definition)) = 0
+     or position('p_ends_on is null' in lower(v_term_schedule_definition)) = 0
+     or position('p_starts_on > p_ends_on' in lower(v_term_schedule_definition)) = 0
+     or position('is not distinct from' in lower(v_term_schedule_definition)) = 0
+     or position('private.write_audit' in lower(v_term_schedule_definition)) = 0 then
+    raise exception 'admin term-schedule RPC is missing authorization, validation, locking, idempotency, or audit';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc procedure
+    join pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'admin_update_term_schedule'
+      and procedure.pronargs = 3
+      and procedure.prosecdef
+      and exists (
+        select 1
+        from unnest(coalesce(procedure.proconfig, array[]::text[])) as setting(value)
+        where replace(setting.value, '"', '') = 'search_path='
+      )
+  ) then
+    raise exception 'admin term-schedule RPC must be SECURITY DEFINER with empty search_path';
+  end if;
+
+  select pg_get_functiondef(
+    'private.enforce_guardian_contact_task_severity()'::regprocedure
+  ) into v_guardian_guard_definition;
+  if position('v_incident_severity not in (''serious'', ''critical'')' in lower(v_guardian_guard_definition)) = 0
+     or position('new.student_id is distinct from v_incident_student_id' in lower(v_guardian_guard_definition)) = 0 then
+    raise exception 'guardian-contact task guard does not enforce severity and student identity';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc procedure
+    join pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'private'
+      and procedure.proname = 'enforce_guardian_contact_task_severity'
+      and procedure.pronargs = 0
+      and procedure.prosecdef
+      and exists (
+        select 1
+        from unnest(coalesce(procedure.proconfig, array[]::text[])) as setting(value)
+        where replace(setting.value, '"', '') = 'search_path='
+      )
+  ) then
+    raise exception 'guardian-contact task guard must be SECURITY DEFINER with empty search_path';
   end if;
 
   select lower(coalesce(policy.qual, ''))

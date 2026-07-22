@@ -6,7 +6,8 @@ import {
   type Account,
   type DemoState,
 } from './domain'
-import type { AppDataActions } from './dataActions'
+import type { AppDataActions, UpdateTermScheduleInput } from './dataActions'
+import { validateTermSchedule } from './termSchedule'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
 type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
@@ -18,6 +19,78 @@ interface AdminDashboardProps {
   actions?: AppDataActions
   onResetDemo?: () => void
   onLogout: () => void
+}
+
+interface TermScheduleFormProps {
+  term: DemoState['term']
+  busy: boolean
+  onSave: (input: UpdateTermScheduleInput) => Promise<void>
+}
+
+function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
+  const [startsOn, setStartsOn] = useState(term.startsOn ?? '')
+  const [endsOn, setEndsOn] = useState(term.endsOn ?? '')
+  const [error, setError] = useState('')
+  const unchanged = startsOn === (term.startsOn ?? '') && endsOn === (term.endsOn ?? '')
+  const hasSavedSchedule = Boolean(term.startsOn && term.endsOn)
+
+  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const validationError = validateTermSchedule(startsOn, endsOn)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+    if (unchanged) return
+    setError('')
+    try {
+      await onSave({ termId: term.id, startsOn, endsOn })
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถบันทึกวันที่ภาคเรียนได้')
+    }
+  }
+
+  return (
+    <form className="panel stack-form term-schedule-form" onSubmit={saveSchedule} noValidate>
+      <div className="section-heading">
+        <div><p className="eyebrow">ปฏิทินภาคเรียน</p><h2>กำหนดวันเปิด–ปิด</h2></div>
+        <span className={`badge ${term.isActive ? 'status-approved' : 'status-pending'}`}>
+          {term.isActive ? 'กำลังใช้งาน' : 'เตรียมเปิดใช้'}
+        </span>
+      </div>
+      <p id="term-schedule-help" className="form-help">ปรับวันที่ได้เองเมื่อปฏิทินโรงเรียนเปลี่ยน การแก้ไขในระบบจริงจะถูกเก็บในประวัติตรวจสอบ</p>
+      <div className="date-field-grid">
+        <label>วันเปิดภาคเรียน
+          <input
+            type="date"
+            value={startsOn}
+            max={endsOn || undefined}
+            required
+            aria-invalid={Boolean(error)}
+            aria-describedby={`term-schedule-help${error ? ' term-schedule-error' : ''}`}
+            onChange={(event) => { setStartsOn(event.target.value); setError('') }}
+          />
+        </label>
+        <label>วันปิดภาคเรียน
+          <input
+            type="date"
+            value={endsOn}
+            min={startsOn || undefined}
+            required
+            aria-invalid={Boolean(error)}
+            aria-describedby={`term-schedule-help${error ? ' term-schedule-error' : ''}`}
+            onChange={(event) => { setEndsOn(event.target.value); setError('') }}
+          />
+        </label>
+      </div>
+      {error ? <p className="form-error" id="term-schedule-error" role="alert">{error}</p> : null}
+      <button className="button primary full" type="submit" disabled={busy || unchanged}>
+        {busy ? 'กำลังบันทึก…' : unchanged
+          ? hasSavedSchedule ? 'วันที่เป็นปัจจุบันแล้ว' : 'กรุณาระบุวันเปิด–ปิด'
+          : 'บันทึกวันเปิด–ปิด'}
+      </button>
+    </form>
+  )
 }
 
 export function AdminDashboard({ account, state, onChange, actions, onResetDemo, onLogout }: AdminDashboardProps) {
@@ -229,6 +302,24 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setAnnouncement(`รีเซ็ตคะแนนเป็น 100 แล้ว และคงเคสติดตาม ${openCases.length} เคสไว้ต่อเนื่อง`)
   }
 
+  async function updateTermSchedule(input: UpdateTermScheduleInput) {
+    setBusyAction('term-schedule')
+    setAnnouncement('')
+    try {
+      if (actions) {
+        await actions.updateTermSchedule(input)
+      } else {
+        onChange({
+          ...state,
+          term: { ...state.term, startsOn: input.startsOn, endsOn: input.endsOn },
+        })
+      }
+      setAnnouncement(`บันทึกวันเปิด–ปิด ${state.term.label} เรียบร้อยแล้ว`)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
       <div className="page-heading">
@@ -281,6 +372,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             <label>เหตุผล<textarea value={reason} onChange={(event) => setReason(event.target.value)} required minLength={5} placeholder="เหตุผลจะถูกเก็บในประวัติตรวจสอบ" /></label>
             <button className="button primary" type="submit" disabled={busyAction === 'admin-add'}>{busyAction === 'admin-add' ? 'กำลังบันทึก…' : 'เพิ่มคะแนนและบันทึกประวัติ'}</button>
           </form>
+          <TermScheduleForm
+            key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}`}
+            term={state.term}
+            busy={busyAction === 'term-schedule'}
+            onSave={updateTermSchedule}
+          />
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || busyAction === 'initialize-term'} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
           <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ระเบียบตัวอย่าง</p><h2>เกณฑ์การตัดคะแนน</h2></div><span className="counter">{state.rules.length}</span></div><div className="rule-list">{state.rules.map((rule) => <div key={rule.id}><span><strong>{rule.title}</strong><small>{rule.category}</small></span><StatusBadge severity={rule.severity} /><b>−{rule.points}</b></div>)}</div></section>
           {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}

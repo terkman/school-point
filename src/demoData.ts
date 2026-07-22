@@ -14,6 +14,8 @@ export function createDemoState(): DemoState {
       id: 'term-2569-1',
       label: 'ภาคเรียนที่ 1/2569',
       isActive: true,
+      startsOn: '2026-05-18',
+      endsOn: '2026-10-09',
     },
     accounts: [
       {

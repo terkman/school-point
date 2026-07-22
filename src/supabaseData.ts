@@ -30,6 +30,9 @@ interface ProfileRow {
 interface TermRow {
   id: number | string
   name: string
+  starts_on: string | null
+  ends_on: string | null
+  status: 'planned' | 'active' | 'closed'
 }
 
 interface RuleRow {
@@ -241,17 +244,54 @@ async function loadProfile(client: SupabaseClient, user: User): Promise<ProfileR
   return profile
 }
 
-async function loadActiveTermAndRules(client: SupabaseClient): Promise<{ term: TermRow; rules: BehaviorRule[] }> {
-  const [termResult, rulesResult] = await Promise.all([
-    client.from('academic_terms').select('id,name').eq('status', 'active').limit(1).maybeSingle(),
-    fetchAllPages<RuleRow>('โหลดระเบียบ', (from, to) => client
-      .from('behavior_rules')
-      .select('id,category,title_th,default_deduction,severity,guardian_contact_required,is_active')
-      .order('rule_code')
-      .order('id')
-      .range(from, to)),
+export function selectAccessibleTerm(role: Role, activeTerm: TermRow | null, plannedTerm: TermRow | null): TermRow | null {
+  if (activeTerm) return activeTerm
+  return role === 'admin' ? plannedTerm : null
+}
+
+async function loadAccessibleTermAndRules(client: SupabaseClient, role: Role): Promise<{ term: TermRow; rules: BehaviorRule[] }> {
+  const termColumns = 'id,name,starts_on,ends_on,status'
+  const activeTermQuery = client
+    .from('academic_terms')
+    .select(termColumns)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle()
+  const rulesQuery = fetchAllPages<RuleRow>('โหลดระเบียบ', (from, to) => client
+    .from('behavior_rules')
+    .select('id,category,title_th,default_deduction,severity,guardian_contact_required,is_active')
+    .order('rule_code')
+    .order('id')
+    .range(from, to))
+
+  if (role !== 'admin') {
+    const [activeResult, rulesResult] = await Promise.all([activeTermQuery, rulesQuery])
+    const term = unwrap<TermRow>('โหลดภาคเรียนปัจจุบัน', activeResult as QueryResult<TermRow>)
+    return { term, rules: mapRules(rulesResult) }
+  }
+
+  const plannedTermQuery = client
+    .from('academic_terms')
+    .select(termColumns)
+    .eq('status', 'planned')
+    .order('school_year', { ascending: false })
+    .order('semester', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const [activeResult, plannedResult, rulesResult] = await Promise.all([
+    activeTermQuery,
+    plannedTermQuery,
+    rulesQuery,
   ])
-  const term = unwrap<TermRow>('โหลดภาคเรียนปัจจุบัน', termResult as QueryResult<TermRow>)
+  if (activeResult.error) throw new Error(`โหลดภาคเรียนปัจจุบัน: ${activeResult.error.message}`)
+  const activeTerm = activeResult.data as TermRow | null
+  let plannedTerm: TermRow | null = null
+  if (!activeTerm) {
+    if (plannedResult.error) throw new Error(`โหลดภาคเรียนที่วางแผนไว้: ${plannedResult.error.message}`)
+    plannedTerm = plannedResult.data as TermRow | null
+  }
+  const term = selectAccessibleTerm(role, activeTerm, plannedTerm)
+  if (!term) throw new Error('โหลดภาคเรียน: ไม่พบภาคเรียนที่กำลังใช้งานหรือวางแผนไว้')
   return { term, rules: mapRules(rulesResult) }
 }
 
@@ -334,7 +374,13 @@ async function loadStudentState(
   const account = { ...profileAccount(profile, user, getSessionUsername(user)), studentId }
   return {
     version: 1,
-    term: { id: termId, label: term.name, isActive: true },
+    term: {
+      id: termId,
+      label: term.name,
+      isActive: term.status === 'active',
+      startsOn: term.starts_on ?? undefined,
+      endsOn: term.ends_on ?? undefined,
+    },
     accounts: [account],
     students: [student],
     teachers: [],
@@ -545,7 +591,14 @@ async function loadStaffState(
     : undefined
   return {
     version: 1,
-    term: { id: asId(term.id), label: term.name, isActive: true, resetCompletedAt: initializedAt },
+    term: {
+      id: asId(term.id),
+      label: term.name,
+      isActive: term.status === 'active',
+      startsOn: term.starts_on ?? undefined,
+      endsOn: term.ends_on ?? undefined,
+      resetCompletedAt: initializedAt,
+    },
     accounts: [account],
     students,
     teachers,
@@ -559,7 +612,7 @@ async function loadStaffState(
 
 export async function loadSupabaseState(client: SupabaseClient, user: User): Promise<DemoState> {
   const profile = await loadProfile(client, user)
-  const { term, rules } = await loadActiveTermAndRules(client)
+  const { term, rules } = await loadAccessibleTermAndRules(client, profile.role)
   return profile.role === 'student'
     ? loadStudentState(client, user, profile, term, rules)
     : loadStaffState(client, user, profile, term, rules)
@@ -610,5 +663,10 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_term_id: input.termId,
     }),
     initializeTermScores: (termId) => mutate('initialize_term_scores', { p_term_id: termId }),
+    updateTermSchedule: (input) => mutate('admin_update_term_schedule', {
+      p_term_id: input.termId,
+      p_starts_on: input.startsOn,
+      p_ends_on: input.endsOn,
+    }),
   }
 }

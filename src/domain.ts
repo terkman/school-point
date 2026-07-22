@@ -96,6 +96,8 @@ export interface DemoState {
     id: string
     label: string
     isActive: boolean
+    startsOn?: string
+    endsOn?: string
     resetCompletedAt?: string
   }
   accounts: Account[]

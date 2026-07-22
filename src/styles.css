@@ -364,6 +364,9 @@ tbody tr:hover td { background: #fbfcfe; }
 .mini-case-list article > span:last-child { grid-column: 2; color: var(--muted); font-size: .72rem; }
 
 .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.term-schedule-form .section-heading { margin-bottom: 2px; }
+.form-help { margin: 0; font-size: .78rem; }
+.date-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .reset-preview { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0; padding: 14px; background: #f8fafc; border: 1px solid var(--line); font-size: .77rem; color: var(--muted); }
 .reset-preview span { display: flex; flex-direction: column; }
 .reset-preview strong { color: var(--navy); font-size: 1.2rem; }
@@ -445,7 +448,7 @@ tbody tr:hover td { background: #fbfcfe; }
   .score-message { width: 100%; align-items: flex-start; }
   .panel { padding: 17px; border-radius: 9px; }
   .section-heading { align-items: flex-start; }
-  .two-column, .two-column.wide-left, .manage-grid { grid-template-columns: 1fr; }
+  .two-column, .two-column.wide-left, .manage-grid, .date-field-grid { grid-template-columns: 1fr; }
   .rules-panel { grid-column: auto; }
   .rule-grid, .rule-list { grid-template-columns: 1fr; }
   .selected-student-bar { align-items: flex-start; }

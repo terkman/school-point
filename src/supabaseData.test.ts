@@ -1,6 +1,25 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
-import { createSupabaseActions, fetchAllPages } from './supabaseData'
+import { createSupabaseActions, fetchAllPages, selectAccessibleTerm } from './supabaseData'
+
+describe('Supabase term selection', () => {
+  const plannedTerm = {
+    id: '9',
+    name: 'ภาคเรียนที่ 1/2569',
+    starts_on: null,
+    ends_on: null,
+    status: 'planned' as const,
+  }
+
+  it('lets an admin open the latest planned term to fill missing dates', () => {
+    expect(selectAccessibleTerm('admin', null, plannedTerm)).toBe(plannedTerm)
+  })
+
+  it('keeps planned terms unavailable to students and teachers', () => {
+    expect(selectAccessibleTerm('student', null, plannedTerm)).toBeNull()
+    expect(selectAccessibleTerm('teacher', null, plannedTerm)).toBeNull()
+  })
+})
 
 describe('Supabase pagination', () => {
   it('fetches every row beyond the 1,000-row API cap and stops after the final partial page', async () => {
@@ -41,6 +60,7 @@ describe('Supabase score mutations', () => {
 
     await actions.recordDeduction({ studentId: '12', ruleId: '4', note: 'รายละเอียดภายใน' })
     await actions.requestPointAddition({ studentId: '12', points: 3, reason: 'ทำกิจกรรมครบ' })
+    await actions.updateTermSchedule({ termId: '9', startsOn: '2026-05-18', endsOn: '2026-10-09' })
 
     expect(rpc).toHaveBeenNthCalledWith(1, 'record_deduction', expect.objectContaining({
       p_student_id: '12',
@@ -52,7 +72,12 @@ describe('Supabase score mutations', () => {
       p_student_id: '12',
       p_points: 3,
     }))
-    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(rpc).toHaveBeenNthCalledWith(3, 'admin_update_term_schedule', {
+      p_term_id: '9',
+      p_starts_on: '2026-05-18',
+      p_ends_on: '2026-10-09',
+    })
+    expect(refresh).toHaveBeenCalledTimes(3)
   })
 
   it('does not refresh stale data when an RPC is rejected', async () => {

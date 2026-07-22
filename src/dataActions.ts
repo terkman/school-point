@@ -34,6 +34,12 @@ export interface AdminAddPointsInput {
   termId: string
 }
 
+export interface UpdateTermScheduleInput {
+  termId: string
+  startsOn: string
+  endsOn: string
+}
+
 export interface AppDataActions {
   recordDeduction: (input: RecordDeductionInput) => Promise<void>
   requestPointAddition: (input: RequestPointAdditionInput) => Promise<void>
@@ -42,4 +48,5 @@ export interface AppDataActions {
   reviewAppeal: (input: ReviewAppealInput) => Promise<void>
   adminAddPoints: (input: AdminAddPointsInput) => Promise<void>
   initializeTermScores: (termId: string) => Promise<void>
+  updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
 }
