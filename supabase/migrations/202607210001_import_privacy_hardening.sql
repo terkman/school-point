@@ -693,7 +693,7 @@ using (
 -- Keep the existing view contract and append the appeal timestamp requested by the
 -- real-data loader. Actor identity remains intentionally absent.
 create or replace view public.student_current_scores
-with (security_barrier = true)
+with (security_barrier = true, security_invoker = true)
 as
 select account.id as score_account_id,
        account.term_id,
@@ -711,7 +711,7 @@ where student.user_id = (select auth.uid())
   and not profile.activation_required;
 
 create or replace view public.student_score_history
-with (security_barrier = true)
+with (security_barrier = true, security_invoker = true)
 as
 select ledger.id,
        ledger.term_id,
@@ -733,7 +733,7 @@ where student.user_id = (select auth.uid())
   and not profile.activation_required;
 
 create or replace view public.student_incident_history
-with (security_barrier = true)
+with (security_barrier = true, security_invoker = true)
 as
 select i.id,
        i.term_id,

@@ -651,21 +651,21 @@ end;
 $$;
 
 -- Students use these views; actor identity is intentionally absent.
-create view public.student_current_scores with (security_barrier = true) as
+create view public.student_current_scores with (security_barrier = true, security_invoker = true) as
 select a.id as score_account_id, a.term_id, t.name as term_name, a.balance, a.updated_at
 from public.score_accounts a
 join public.students s on s.id = a.student_id
 join public.academic_terms t on t.id = a.term_id
 where s.user_id = (select auth.uid());
 
-create view public.student_score_history with (security_barrier = true) as
+create view public.student_score_history with (security_barrier = true, security_invoker = true) as
 select l.id, l.term_id, l.entry_type, l.requested_delta, l.applied_delta,
        l.balance_before, l.balance_after, l.reason, l.incident_id, l.created_at
 from public.score_ledger l
 join public.students s on s.id = l.student_id
 where s.user_id = (select auth.uid());
 
-create view public.student_incident_history with (security_barrier = true) as
+create view public.student_incident_history with (security_barrier = true, security_invoker = true) as
 select i.id, i.term_id, i.rule_snapshot ->> 'rule_code' as rule_code,
        i.rule_snapshot ->> 'title_th' as rule_title, i.requested_points,
        i.applied_points, i.severity, i.occurred_at, i.recorded_at,

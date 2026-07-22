@@ -202,6 +202,14 @@ begin
     raise exception 'service_role cannot execute activation-completion RPC';
   end if;
 
+  if to_regprocedure('public.rls_auto_enable()') is not null
+     and (
+       has_function_privilege('anon', 'public.rls_auto_enable()', 'EXECUTE')
+       or has_function_privilege('authenticated', 'public.rls_auto_enable()', 'EXECUTE')
+     ) then
+    raise exception 'automatic RLS event-trigger function is callable by a frontend role';
+  end if;
+
   if has_function_privilege(
        'authenticated',
        'private.clear_activation_after_first_password()',
@@ -274,6 +282,16 @@ begin
     ) into v_view_definition;
     if position('activation_required' in lower(v_view_definition)) = 0 then
       raise exception '% does not enforce activation gate', v_view_name;
+    end if;
+    if not exists (
+      select 1
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and relation.relname = v_view_name
+        and coalesce(relation.reloptions, array[]::text[]) @> array['security_invoker=true']
+    ) then
+      raise exception '% must run with caller permissions', v_view_name;
     end if;
   end loop;
 
