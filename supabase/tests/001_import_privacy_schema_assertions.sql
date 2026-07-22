@@ -240,6 +240,15 @@ begin
     raise exception 're-import does not preserve disabled provisioning records';
   end if;
 
+  if regexp_count(lower(v_import_definition), '::public\.person_status') < 2 then
+    raise exception 'import staff/student status CASE expressions are not cast to person_status';
+  end if;
+
+  if position('''active''::public.person_status' in lower(v_import_definition)) = 0
+     or position('''archived''::public.person_status' in lower(v_import_definition)) = 0 then
+    raise exception 'import person status CASE expressions need explicit enum casts';
+  end if;
+
   select pg_get_functiondef('private.current_role()'::regprocedure)
   into v_role_definition;
   if position('activation_required' in lower(v_role_definition)) = 0 then

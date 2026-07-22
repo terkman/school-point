@@ -1534,7 +1534,10 @@ begin
         nullif(btrim(v_item ->> 'title'), ''),
         btrim(v_item ->> 'givenName'),
         btrim(v_item ->> 'familyName'),
-        case when v_is_active then 'active' else 'archived' end,
+        case
+          when v_is_active then 'active'::public.person_status
+          else 'archived'::public.person_status
+        end,
         v_role
       )
       on conflict ((lower(btrim(employee_code))))
@@ -1608,7 +1611,10 @@ begin
         nullif(btrim(v_item ->> 'title'), ''),
         btrim(v_item ->> 'givenName'),
         btrim(v_item ->> 'familyName'),
-        case when v_is_active then 'active' else 'archived' end
+        case
+          when v_is_active then 'active'::public.person_status
+          else 'archived'::public.person_status
+        end
       )
       on conflict ((lower(btrim(student_code))))
       do update set
