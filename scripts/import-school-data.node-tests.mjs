@@ -8,7 +8,12 @@ import {
   normalizeGrade,
   parseDelimited,
 } from './lib/school-data-import.mjs'
-import { assertPrivateJsonPath, validatePlan } from './apply-supabase-import.mjs'
+import {
+  assertPublicSignupDisabled,
+  assertPrivateJsonPath,
+  provisionAccounts,
+  validatePlan,
+} from './apply-supabase-import.mjs'
 import {
   assertApplyConfirmation,
   assertPrivateSqlPath,
@@ -257,6 +262,178 @@ test('recomputes the import fingerprint before any remote write', () => {
 test('refuses tracked credential and import paths inside the repository', () => {
   assert.throws(() => assertPrivateJsonPath('activation-codes.json', '--output'), /private-data/)
   assert.match(assertPrivateJsonPath('private-data/activation-codes.json', '--output'), /private-data[\\/]activation-codes\.json$/)
+})
+
+function provisioningClient(existingUsers, { linkedUserIds = [], profileError = null } = {}) {
+  const calls = []
+  const linked = new Set(linkedUserIds)
+  return {
+    calls,
+    client: {
+      auth: {
+        admin: {
+          async listUsers(options) {
+            calls.push(['listUsers', options])
+            return { data: { users: existingUsers }, error: null }
+          },
+          async createUser(input) {
+            calls.push(['createUser', input])
+            return {
+              data: { user: { id: `created-${input.email}`, email: input.email } },
+              error: null,
+            }
+          },
+        },
+      },
+      from(table) {
+        calls.push(['from', table])
+        return {
+          select(columns) {
+            calls.push(['select', columns])
+            return this
+          },
+          eq(column, value) {
+            calls.push(['eq', column, value])
+            this.userId = value
+            return this
+          },
+          async maybeSingle() {
+            calls.push(['maybeSingle'])
+            return {
+              data: linked.has(this.userId) ? { user_id: this.userId } : null,
+              error: profileError,
+            }
+          },
+        }
+      },
+      async rpc(name, input) {
+        calls.push(['rpc', name, input])
+        if (name === 'admin_mark_account_activated') {
+          throw new Error('provisioning must never infer activation from an Auth password hash')
+        }
+        return { data: { ok: true }, error: null }
+      },
+    },
+  }
+}
+
+test('re-provisions an existing Auth user without changing its activation gate', async () => {
+  const mock = provisioningClient([
+    { id: 'existing-student', email: '69001@accounts.school-point.invalid' },
+  ], { linkedUserIds: ['existing-student'] })
+
+  const summary = await provisionAccounts(
+    mock.client,
+    [{ username: '69001', role: 'student' }],
+    'accounts.school-point.invalid',
+  )
+
+  assert.deepEqual(summary, { total: 1, created: 0, existing: 1, adoptedExisting: 0, linked: 1 })
+  assert.deepEqual(mock.calls, [
+    ['listUsers', { page: 1, perPage: 1000 }],
+    ['from', 'profiles'],
+    ['select', 'user_id'],
+    ['eq', 'user_id', 'existing-student'],
+    ['maybeSingle'],
+    ['rpc', 'admin_link_provisioned_account', {
+      p_username: '69001',
+      p_user_id: 'existing-student',
+    }],
+  ])
+  assert.equal(mock.calls.some((call) => call[1] === 'admin_mark_account_activated'), false)
+})
+
+test('provisions mixed new and existing users without auto-activating either account', async () => {
+  const mock = provisioningClient([
+    { id: 'existing-teacher', email: 'teacher.demo@accounts.school-point.invalid' },
+  ], { linkedUserIds: ['existing-teacher'] })
+
+  const summary = await provisionAccounts(
+    mock.client,
+    [
+      { username: 'teacher.demo', role: 'teacher' },
+      { username: '69002', role: 'student' },
+    ],
+    'accounts.school-point.invalid',
+  )
+
+  assert.deepEqual(summary, { total: 2, created: 1, existing: 1, adoptedExisting: 0, linked: 2 })
+  assert.equal(mock.calls.filter((call) => call[0] === 'createUser').length, 1)
+  assert.equal(mock.calls.filter((call) => call[0] === 'rpc' && call[1] === 'admin_link_provisioned_account').length, 2)
+  assert.equal(mock.calls.some((call) => call[1] === 'admin_mark_account_activated'), false)
+})
+
+test('refuses to adopt a pre-existing unlinked Auth user by default', async () => {
+  const marker = 'private-existing-user@example.invalid'
+  const mock = provisioningClient([
+    { id: 'unlinked-existing-user', email: marker },
+  ])
+
+  await assert.rejects(
+    provisionAccounts(
+      mock.client,
+      [{ username: 'private-existing-user', role: 'student' }],
+      'example.invalid',
+    ),
+    (error) => {
+      assert.match(error.message, /--adopt-existing-users/)
+      assert.equal(error.message.includes(marker), false)
+      return true
+    },
+  )
+  assert.equal(mock.calls.some((call) => call[0] === 'rpc'), false)
+})
+
+test('adopts a pre-existing unlinked Auth user only with explicit acknowledgement', async () => {
+  const mock = provisioningClient([
+    { id: 'reviewed-existing-user', email: 'reviewed@accounts.school-point.invalid' },
+  ])
+
+  const summary = await provisionAccounts(
+    mock.client,
+    [{ username: 'reviewed', role: 'teacher' }],
+    'accounts.school-point.invalid',
+    { adoptExistingUsers: true },
+  )
+
+  assert.deepEqual(summary, { total: 1, created: 0, existing: 1, adoptedExisting: 1, linked: 1 })
+  assert.equal(mock.calls.filter((call) => call[0] === 'rpc' && call[1] === 'admin_link_provisioned_account').length, 1)
+})
+
+test('fails provisioning closed unless the hosted Auth settings disable public signup', async () => {
+  const requests = []
+  await assertPublicSignupDisabled(
+    'https://school-project.supabase.co',
+    'server-key-marker',
+    async (url, options) => {
+      requests.push([url.toString(), options])
+      return { ok: true, json: async () => ({ disable_signup: true }) }
+    },
+  )
+  assert.equal(requests[0][0], 'https://school-project.supabase.co/auth/v1/settings')
+  assert.equal(requests[0][1].headers.apikey, 'server-key-marker')
+
+  await assert.rejects(
+    assertPublicSignupDisabled(
+      'https://school-project.supabase.co',
+      'server-key-marker',
+      async () => ({ ok: true, json: async () => ({ disable_signup: false }) }),
+    ),
+    /public signup/,
+  )
+
+  await assert.rejects(
+    assertPublicSignupDisabled(
+      'https://school-project.supabase.co',
+      'secret-that-must-not-leak',
+      async () => { throw new Error('network error with secret-that-must-not-leak') },
+    ),
+    (error) => {
+      assert.match(error.message, /หยุด provisioning/)
+      assert.equal(error.message.includes('secret-that-must-not-leak'), false)
+      return true
+    },
+  )
 })
 
 test('builds collision-safe dry-run and apply SQL artifacts', () => {

@@ -1,9 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { Icon } from './ui'
 
+export const ONE_TIME_ACTIVATION_COPY = 'ยืนยันด้วยรหัสเปิดใช้ครั้งเดียวแล้ว'
+
 interface PasswordActivationPageProps {
   username: string
   onSetPassword: (password: string) => Promise<void>
+  onResumeActivation?: () => Promise<void>
+  passwordAuthenticated?: boolean
+  initialError?: string
   onLogout: () => void
 }
 
@@ -15,29 +20,43 @@ export function validatePersonalPassword(password: string): string | null {
   return null
 }
 
-export function PasswordActivationPage({ username, onSetPassword, onLogout }: PasswordActivationPageProps) {
+export function PasswordActivationPage({
+  username,
+  onSetPassword,
+  onResumeActivation,
+  passwordAuthenticated = false,
+  initialError = '',
+  onLogout,
+}: PasswordActivationPageProps) {
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
+  const canResume = passwordAuthenticated && Boolean(onResumeActivation)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const validationError = validatePersonalPassword(password)
-    if (validationError) {
-      setError(validationError)
-      return
-    }
-    if (password !== confirmation) {
-      setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน')
-      return
+    if (!canResume) {
+      const validationError = validatePersonalPassword(password)
+      if (validationError) {
+        setError(validationError)
+        return
+      }
+      if (password !== confirmation) {
+        setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน')
+        return
+      }
     }
     setBusy(true)
     setError('')
     try {
-      await onSetPassword(password)
+      if (canResume) {
+        await onResumeActivation?.()
+      } else {
+        await onSetPassword(password)
+      }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'ไม่สามารถตั้งรหัสผ่านได้')
+      setError(nextError instanceof Error ? nextError.message : 'ไม่สามารถเปิดใช้บัญชีได้')
     } finally {
       setBusy(false)
     }
@@ -47,41 +66,49 @@ export function PasswordActivationPage({ username, onSetPassword, onLogout }: Pa
     <main className="status-page activation-page">
       <section className="status-card activation-card" aria-labelledby="activation-title">
         <div className="brand-mark">SP</div>
-        <p className="eyebrow">เปิดใช้งานบัญชีครั้งแรก</p>
-        <h1 id="activation-title">ตั้งรหัสผ่านส่วนตัว</h1>
+        <p className="eyebrow">{canResume ? 'ดำเนินการเปิดใช้บัญชีต่อ' : 'เปิดใช้งานบัญชีครั้งแรก'}</p>
+        <h1 id="activation-title">{canResume ? 'ยืนยันการเปิดใช้บัญชี' : 'ตั้งรหัสผ่านส่วนตัว'}</h1>
         <p>
-          บัญชี <strong>{username}</strong> เข้าสู่ระบบด้วยรหัสชั่วคราวแล้ว กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งานระบบ
+          {canResume ? (
+            <>บัญชี <strong>{username}</strong> เข้าสู่ระบบด้วยรหัสผ่านส่วนตัวแล้ว กรุณาดำเนินการยืนยันบัญชีให้เสร็จสมบูรณ์</>
+          ) : (
+            <>บัญชี <strong>{username}</strong> {ONE_TIME_ACTIVATION_COPY} กรุณาตั้งรหัสผ่านส่วนตัวก่อนใช้งานระบบ</>
+          )}
         </p>
         <form className="login-form" onSubmit={submit}>
-          <label>
-            รหัสผ่านใหม่
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              minLength={10}
-              required
-            />
-          </label>
-          <label>
-            ยืนยันรหัสผ่านใหม่
-            <input
-              type="password"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              autoComplete="new-password"
-              minLength={10}
-              required
-            />
-          </label>
-          <div className="activation-hint">
-            <Icon name="shield" />
-            <span>อย่างน้อย 10 ตัวอักษร และมีทั้งตัวอักษรภาษาอังกฤษกับตัวเลข</span>
-          </div>
+          {canResume ? null : (
+            <>
+              <label>
+                รหัสผ่านใหม่
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="new-password"
+                  minLength={10}
+                  required
+                />
+              </label>
+              <label>
+                ยืนยันรหัสผ่านใหม่
+                <input
+                  type="password"
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  autoComplete="new-password"
+                  minLength={10}
+                  required
+                />
+              </label>
+              <div className="activation-hint">
+                <Icon name="shield" />
+                <span>อย่างน้อย 10 ตัวอักษร และมีทั้งตัวอักษรภาษาอังกฤษกับตัวเลข</span>
+              </div>
+            </>
+          )}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <button className="button primary full" type="submit" disabled={busy}>
-            {busy ? 'กำลังบันทึก…' : 'ตั้งรหัสผ่านและเข้าสู่ระบบ'}
+            {busy ? (canResume ? 'กำลังยืนยัน…' : 'กำลังบันทึก…') : (canResume ? 'ยืนยันและเข้าสู่ระบบ' : 'ตั้งรหัสผ่านและเข้าสู่ระบบ')}
           </button>
           <button className="button ghost full" type="button" onClick={onLogout} disabled={busy}>ออกจากระบบ</button>
         </form>

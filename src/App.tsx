@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 import { AdminDashboard } from './AdminDashboard'
 import type { Account, DemoState } from './domain'
+import {
+  completeFirstPasswordActivation,
+  completePasswordAuthenticatedActivation,
+  sessionHasPasswordAuthentication,
+} from './firstPasswordActivation'
 import { LoginPage } from './LoginPage'
 import { PasswordActivationPage } from './PasswordActivationPage'
 import { StudentDashboard } from './StudentDashboard'
@@ -76,12 +81,17 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [activationRequired, setActivationRequired] = useState<boolean | undefined>(undefined)
+  const [activationInProgress, setActivationInProgress] = useState(false)
+  const [activationLoginError, setActivationLoginError] = useState('')
+  const [activationError, setActivationError] = useState('')
+  const activationInProgressRef = useRef(false)
 
   useEffect(() => {
     if (!session?.user) {
       setActivationRequired(undefined)
       return
     }
+    if (activationInProgress) return
     let active = true
     setActivationRequired(undefined)
     setLoadError('')
@@ -100,12 +110,14 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
           setLoadError('ไม่พบข้อมูลบัญชีโรงเรียน โปรดติดต่อผู้ดูแลระบบ')
           return
         }
-        setActivationRequired(data.activation_required === true)
+        const required = data.activation_required === true
+        setActivationRequired(required)
+        if (!required) setActivationError('')
       })
     return () => {
       active = false
     }
-  }, [client, session?.user])
+  }, [activationInProgress, client, session?.user])
 
   useEffect(() => {
     let active = true
@@ -119,7 +131,10 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
       setSession(data.session)
     })
     const { data: { subscription } } = client.auth.onAuthStateChange((_event, nextSession) => {
-      if (active) setSession(nextSession)
+      if (!active) return
+      // Keep the activation page mounted during the intentional sign-out/sign-in handoff.
+      if (activationInProgressRef.current && !nextSession) return
+      setSession(nextSession)
     })
     return () => {
       active = false
@@ -161,6 +176,8 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   const actions = useMemo(() => createSupabaseActions(client, refresh), [client, refresh])
 
   async function authenticate(username: string, password: string) {
+    setActivationLoginError('')
+    setActivationError('')
     const email = usernameToInternalEmail(username)
     const { data, error } = await client.auth.signInWithPassword({ email, password })
     if (error) {
@@ -173,6 +190,8 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
 
   async function activate(username: string, activationCode: string) {
+    setActivationLoginError('')
+    setActivationError('')
     const email = usernameToInternalEmail(username)
     const { data, error } = await client.auth.verifyOtp({ email, token: activationCode.trim(), type: 'magiclink' })
     if (error || !data.session) throw new Error('รหัสเปิดใช้ไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว')
@@ -180,6 +199,8 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
 
   async function logout() {
+    setActivationLoginError('')
+    setActivationError('')
     const { error } = await client.auth.signOut()
     if (error) {
       setLoadError(error.message)
@@ -190,24 +211,67 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
 
   async function setPersonalPassword(password: string) {
-    const { data, error } = await client.auth.updateUser({
-      password,
-      data: { must_change_password: false },
-    })
-    if (error) throw new Error(error.message)
-    const { data: activation, error: activationError } = await client
-      .from('profiles')
-      .select('activation_required')
-      .eq('user_id', data.user.id)
-      .maybeSingle()
-    if (activationError || !activation || activation.activation_required === true) {
-      throw new Error('ตั้งรหัสผ่านแล้ว แต่ระบบยังยืนยันการเปิดใช้ไม่สำเร็จ โปรดติดต่อผู้ดูแลระบบ')
+    if (!session?.user) throw new Error('เซสชันเปิดใช้บัญชีหมดอายุ โปรดเริ่มเปิดใช้บัญชีใหม่')
+    const username = getSessionUsername(session.user)
+    activationInProgressRef.current = true
+    setActivationInProgress(true)
+    setActivationLoginError('')
+    setActivationError('')
+    try {
+      const nextSession = await completeFirstPasswordActivation(client, username, password)
+      setSession(nextSession)
+      setActivationRequired(false)
+    } catch (error) {
+      let recoveredSession: Session | null = null
+      try {
+        const currentSession = await client.auth.getSession()
+        recoveredSession = currentSession.data.session
+      } catch {
+        // A failed session recovery is handled as a signed-out activation failure below.
+      }
+      if (recoveredSession) {
+        setSession(recoveredSession)
+        setActivationRequired(true)
+        setActivationError(error instanceof Error ? error.message : 'ไม่สามารถเปิดใช้บัญชีได้ โปรดลองอีกครั้ง')
+      } else {
+        setSession(null)
+        setState(null)
+        setActivationLoginError(error instanceof Error ? error.message : 'ไม่สามารถเปิดใช้บัญชีได้ โปรดลองเข้าสู่ระบบอีกครั้ง')
+      }
+      throw error
+    } finally {
+      activationInProgressRef.current = false
+      setActivationInProgress(false)
     }
-    setSession((current) => current ? { ...current, user: data.user } : current)
-    setActivationRequired(false)
+  }
+
+  async function resumePasswordActivation() {
+    if (!session?.user) throw new Error('เซสชันเปิดใช้บัญชีหมดอายุ โปรดเข้าสู่ระบบใหม่')
+    activationInProgressRef.current = true
+    setActivationInProgress(true)
+    setActivationError('')
+    try {
+      await completePasswordAuthenticatedActivation(client, session.user.id)
+      setActivationRequired(false)
+    } catch (error) {
+      setActivationError(error instanceof Error ? error.message : 'ไม่สามารถเปิดใช้บัญชีได้ โปรดลองอีกครั้ง')
+      throw error
+    } finally {
+      activationInProgressRef.current = false
+      setActivationInProgress(false)
+    }
   }
 
   if (session === undefined) return <StatusPage title="กำลังตรวจสอบการเข้าสู่ระบบ" detail="กรุณารอสักครู่" />
+  if (!session && activationLoginError) {
+    return (
+      <StatusPage
+        title="เปิดใช้บัญชียังไม่สำเร็จ"
+        detail={activationLoginError}
+        action={{ label: 'กลับไปเข้าสู่ระบบ', run: () => setActivationLoginError('') }}
+      />
+    )
+  }
   if (!session) return <LoginPage mode="supabase" onAuthenticate={authenticate} onActivate={activate} />
   if (activationRequired === undefined) {
     return <StatusPage title={loadError ? 'ยังเปิดระบบไม่ได้' : 'กำลังตรวจสอบบัญชี'} detail={loadError || 'กรุณารอสักครู่'} />
@@ -217,6 +281,9 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
       <PasswordActivationPage
         username={getSessionUsername(session.user)}
         onSetPassword={setPersonalPassword}
+        onResumeActivation={resumePasswordActivation}
+        passwordAuthenticated={sessionHasPasswordAuthentication(session)}
+        initialError={activationError}
         onLogout={() => void logout()}
       />
     )

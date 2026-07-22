@@ -80,10 +80,11 @@ npm run preview
 4. ใส่ project URL และ publishable/anon key เท่านั้น ห้ามใส่ service-role key ในตัวแปร `VITE_*`
 5. ตั้ง `VITE_SUPABASE_AUTH_EMAIL_DOMAIN` ให้ตรงกับสคริปต์ provision บัญชี (ค่าเริ่มต้น `accounts.school-point.invalid`)
 6. รัน migration ใน `supabase/migrations` และรัน assertions ใน `supabase/tests`
-7. ตรวจ import plan แล้วนำเข้าด้วย `npm run supabase:import` จาก trusted local process
-8. บัญชีใหม่ถูกสร้างโดยยังไม่มีรหัสผ่าน; ออกรหัสเปิดใช้ครั้งเดียวด้วย `npm run supabase:activation`
-9. เติมวันเปิด–ปิดและเปลี่ยนภาคเรียนจาก `planned` เป็น `active` ก่อนเริ่มตัดคะแนน
-10. ทดสอบ RLS ด้วยบัญชีนักเรียน ครูต่างห้อง และแอดมินก่อนเปิดใช้งานจริง
+7. ปิด **Allow new users to sign up** ใน Hosted Auth และตรวจว่า Auth users เดิมเป็นบัญชีที่โรงเรียนยืนยันแล้ว
+8. ตรวจ import plan แล้วนำเข้าด้วย `npm run supabase:import` จาก trusted local process; provisioning จะตรวจสถานะ public signup ซ้ำและหยุดแบบ fail-closed
+9. บัญชีใหม่ถูกสร้างโดยยังไม่มีรหัสผ่านส่วนตัวที่ผู้ใช้กำหนด; ออกรหัสเปิดใช้ครั้งเดียวด้วย `npm run supabase:activation`
+10. เติมวันเปิด–ปิดและเปลี่ยนภาคเรียนจาก `planned` เป็น `active` ก่อนเริ่มตัดคะแนนจริง
+11. ทดสอบ RLS ด้วยบัญชีนักเรียน ครูต่างห้อง และแอดมินก่อนเปิดใช้งานจริง
 
 ```powershell
 npx supabase login
@@ -93,7 +94,7 @@ npx supabase db push
 
 หน้าเว็บรับ username แต่ Supabase Auth ใช้อีเมลภายในแบบ deterministic: `trim().toLowerCase()` แล้วต่อกับ `VITE_SUPABASE_AUTH_EMAIL_DOMAIN` โดย username อนุญาตเฉพาะ `a-z`, `0-9`, `.`, `_`, `-` เท่านั้น สคริปต์ provision ต้องใช้สูตรและ domain เดียวกัน อีเมลนี้ไม่ใช่อีเมลจริงของนักเรียน และ client ใช้เพียง anon key ส่วนการสร้างผู้ใช้ยังต้องทำผ่าน trusted server/Edge Function เท่านั้น
 
-บัญชีใหม่ไม่มีรหัสผ่านจนกว่าจะยืนยัน OTP ที่ออกโดย Supabase แล้วตั้งรหัสผ่านส่วนตัว ฐานข้อมูลใช้ `activation_required` กั้นข้อมูลโรงเรียนและ RPC คะแนนจนตรวจพบว่ามีการตั้งรหัสผ่านแรกจริง จึงไม่ใช้วันเกิดเป็นรหัสผ่านถาวร ดูขั้นตอนเต็มใน `docs/IMPORT_DATA.md`
+บัญชีใหม่เริ่มเปิดใช้ด้วย OTP หรือรหัสเปิดใช้ครั้งเดียว ซึ่งไม่ใช่รหัสผ่านชั่วคราว ผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว แล้วเข้าสู่ระบบใหม่ด้วยรหัสนั้นเพื่อรับ JWT ที่ Supabase ลงลายเซ็นและมี `amr.method = password` ก่อนเรียก RPC เพื่อปลด `activation_required` ข้อมูลโรงเรียนและ RPC คะแนนทุก session ต้องผ่านทั้ง activation gate และ password AMR ส่วน OTP อ่านได้เฉพาะโปรไฟล์ของตนเอง จึงไม่ใช้วันเกิดหรือค่า password hash ภายในเป็นหลักฐาน ดูขั้นตอนเต็มใน `docs/IMPORT_DATA.md`
 
 ## การนำเข้าข้อมูลภายหลัง
 

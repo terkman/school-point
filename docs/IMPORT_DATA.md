@@ -95,9 +95,13 @@ RPC ไม่เชื่อค่า `fingerprint` ที่มากับไ�
 
 หลัง backend ที่เชื่อถือได้สร้าง Supabase Auth user แล้ว ให้เรียก `public.admin_link_provisioned_account(username, user_id)` ด้วย `service_role` เพื่อผูกบัญชีเข้ากับ `profiles`, นักเรียน/บุคลากร และ username directory แบบ idempotent RPC นี้ไม่รับรหัสผ่าน รหัสเปิดใช้ หรือ token ใด ๆ และ frontend เรียกไม่ได้
 
-บัญชีใหม่ถูกผูกด้วย `activation_required = true` เสมอ ให้ backend สร้าง Auth user โดยยังไม่ตั้งรหัสผ่าน แล้วส่ง magic-link/OTP ครั้งเดียว เมื่อผู้ใช้ตั้งรหัสผ่านแรก Supabase จะเปลี่ยน `auth.users.encrypted_password` และ trigger ฝั่งฐานข้อมูลจะปลด gate ให้เอง ระหว่างนั้น session อ่านได้เฉพาะโปรไฟล์ของตนเองและเรียกข้อมูลโรงเรียน/RPC คะแนนไม่ได้ ห้ามใช้ `user_metadata` จาก client เป็นหลักฐานการเปิดใช้งาน หาก Auth user มีรหัสผ่านอยู่ก่อนการผูกบัญชีหรือ hosted environment ไม่เรียก trigger ให้ backend ใช้ `public.admin_mark_account_activated(user_id)` ซึ่งตรวจ password hash ฝั่ง `auth.users` ก่อนและเรียกได้ด้วย `service_role` เท่านั้น
+บัญชีใหม่ถูกผูกด้วย `activation_required = true` เสมอ ให้ backend สร้าง Auth user โดยยังไม่ตั้งรหัสผ่าน แล้วส่ง magic-link/OTP ครั้งเดียว หลังยืนยัน OTP ผู้ใช้ตั้งรหัสผ่านส่วนตัวและเข้าสู่ระบบใหม่ด้วยรหัสนั้นเพื่อรับ JWT ที่มี `amr.method = password` จากนั้น frontend จึงเรียก `public.complete_first_password_activation()` RPC จะตรวจ `auth.uid()`, สถานะโปรไฟล์ และ AMR ที่ Supabase ลงลายเซ็นไว้ก่อนปลด gate พร้อมเขียน audit ระหว่างนั้น session อ่านได้เฉพาะโปรไฟล์ของตนเองและเรียกข้อมูลโรงเรียน/RPC คะแนนไม่ได้ ห้ามใช้ `encrypted_password` หรือ `user_metadata` เป็นหลักฐานการเปิดใช้งาน
+
+ระบบยกเลิก `public.admin_mark_account_activated(user_id)` และคำสั่ง provisioning จะไม่เปิดบัญชีอัตโนมัติเมื่อพบ Auth user เดิม เพราะ Supabase อาจเก็บ password hash ภายในให้บัญชีที่สร้างโดยไม่ส่งรหัสผ่าน การรันซ้ำจึงทำเพียงผูกบัญชีแบบ idempotent และรักษาค่า `activation_required` เดิมไว้ การปลด gate ต้องเกิดจาก password session ที่ยืนยันแล้วเท่านั้น
 
 Repository มีคำสั่ง trusted local import ที่เรียก dry-run, apply และ provisioning ตามลำดับให้แล้ว โดยอ่าน secret จาก environment เท่านั้น:
+
+ก่อน provisioning คำสั่งจะอ่าน `/auth/v1/settings` และหยุดทันทีถ้า Hosted Auth ยังอนุญาต public signup หรืออ่านสถานะไม่ได้ เพื่อป้องกันบุคคลอื่นจองอีเมลภายในก่อนโรงเรียนสร้างบัญชี ต้องปิด **Allow new users to sign up** ใน Supabase Dashboard ก่อนเสมอ
 
 ```powershell
 $env:SUPABASE_URL='https://PROJECT.supabase.co'
@@ -112,6 +116,17 @@ npm run supabase:import -- `
   --apply `
   --confirm-fingerprint CLIENT_PLAN_FINGERPRINT_FROM_DRY_RUN `
   --provision
+```
+
+ถ้าพบ Auth user เดิม สคริปต์จะยอมทำงานต่อโดยไม่ถามเฉพาะบัญชีที่มี `profiles` ผูกกับระบบโรงเรียนอยู่แล้ว ซึ่งทำให้ rerun ปกติยังเป็น idempotent หากเป็น Auth user เดิมที่ยังไม่เคยผูก สคริปต์จะหยุดโดยไม่แสดง username หรืออีเมล ต้องตรวจบัญชีนั้นใน Supabase Dashboard ก่อน แล้วจึงยืนยันรับบัญชีเดิมอย่างชัดเจนด้วย `--adopt-existing-users` เฉพาะกรณีที่ตรวจสอบเจ้าของแล้ว:
+
+```powershell
+npm run supabase:import -- `
+  --input private-data/import-plan.json `
+  --apply `
+  --confirm-fingerprint CLIENT_PLAN_FINGERPRINT_FROM_DRY_RUN `
+  --provision `
+  --adopt-existing-users
 ```
 
 ถ้าเครื่องเข้าสู่ระบบ Supabase CLI และ link project ไว้แล้ว สามารถนำเข้าโดยไม่ต้องอ่านหรือเก็บ `service_role` key ได้ ตัวสร้างจะตรวจ fingerprint ใหม่ ตรวจว่าไฟล์ปลายทางถูก `.gitignore` จริง และแสดงเฉพาะโหมด fingerprint จำนวนรายการ และตำแหน่งไฟล์บน console:
@@ -142,4 +157,76 @@ npm run supabase:activation -- `
   --output private-data/activation-codes.json
 ```
 
-ไฟล์ activation codes มี username และ OTP จึงต้องอยู่ใต้ `private-data/` หรือ `imports/` เท่านั้น รหัสมีอายุตามค่า Auth ของ Supabase และใช้ได้ครั้งเดียว หน้าเว็บจะให้ผู้ใช้ตั้งรหัสผ่านส่วนตัว (อย่างน้อย 10 ตัวอักษร มีตัวอักษรภาษาอังกฤษและตัวเลข) จากนั้นฐานข้อมูลจึงเปิดสิทธิ์ ข้อความบน console ไม่มี OTP ห้ามแชร์ service-role key หรือเก็บไว้ใน `.env.example`, `VITE_*`, Google Sheets และ repository
+ไฟล์ activation codes มี username และ OTP จึงต้องอยู่ใต้ `private-data/` หรือ `imports/` เท่านั้น รหัสมีอายุตามค่า Auth ของ Supabase และใช้ได้ครั้งเดียว หน้าเว็บจะให้ผู้ใช้ตั้งรหัสผ่านส่วนตัว (อย่างน้อย 10 ตัวอักษร มีตัวอักษรภาษาอังกฤษและตัวเลข) เข้าสู่ระบบใหม่ด้วยรหัสนั้น แล้วเรียก activation RPC จาก password session จากนั้นฐานข้อมูลจึงเปิดสิทธิ์ ข้อความบน console ไม่มี OTP ห้ามแชร์ service-role key หรือเก็บไว้ใน `.env.example`, `VITE_*`, Google Sheets และ repository
+
+## ตรวจสถานะ activation และซ่อมแบบมีหลักฐาน
+
+`activation_required` เป็นสถานะถาวรของบัญชี ส่วน `amr.method = password` เป็นหลักฐานของ session ปัจจุบัน ข้อมูลโรงเรียนและ RPC ธุรกิจต้องผ่านทั้งสองเงื่อนไขทุกครั้ง การมี password hash ใน `auth.users` ไม่ใช่หลักฐานว่าผู้ใช้ตั้งรหัสผ่านแล้ว
+
+หลัง migration ให้ตรวจสรุปก่อน โดยคำสั่งนี้ไม่แก้ข้อมูล:
+
+```sql
+select activation_required, count(*)
+from public.profiles
+group by activation_required
+order by activation_required desc;
+
+select profile.user_id,
+       profile.activation_required,
+       max(log.created_at) filter (
+         where log.action = 'mark_account_activated'
+       ) as legacy_marked_at,
+       max(log.created_at) filter (
+         where log.action = 'complete_first_password_activation'
+       ) as password_verified_at
+from public.profiles profile
+left join public.audit_logs log
+  on log.entity_type = 'profile'
+ and log.entity_id = profile.user_id::text
+group by profile.user_id, profile.activation_required
+having not profile.activation_required
+   and max(log.created_at) filter (
+     where log.action = 'complete_first_password_activation'
+   ) is null;
+```
+
+ถ้าทุกบัญชียังเป็น `activation_required = true` ไม่ต้องซ่อมอะไร ห้ามอัปเดตทุกบัญชีจากผลของ `encrypted_password` หากพบผู้สมัครซ่อม ให้ผู้ดูแลตรวจเจ้าของบัญชีและ audit ทีละรายก่อน แล้วใส่เฉพาะ UUID ที่อนุมัติใน transaction นี้:
+
+```sql
+begin;
+
+create temporary table reviewed_activation_repairs (
+  user_id uuid primary key
+) on commit drop;
+
+-- ตัวอย่างรูปแบบเท่านั้น: ใส่เฉพาะ UUID ที่ตรวจสอบแล้ว
+-- insert into reviewed_activation_repairs(user_id) values ('00000000-0000-0000-0000-000000000000');
+
+with repaired as (
+  update public.profiles profile
+  set activation_required = true
+  from reviewed_activation_repairs reviewed
+  where profile.user_id = reviewed.user_id
+    and not profile.activation_required
+  returning profile.user_id
+)
+insert into public.audit_logs(
+  actor_user_id,
+  action,
+  entity_type,
+  entity_id,
+  before_state,
+  after_state
+)
+select null,
+       'repair_activation_gate',
+       'profile',
+       repaired.user_id::text,
+       jsonb_build_object('activation_required', false),
+       jsonb_build_object('activation_required', true, 'reviewed', true)
+from repaired;
+
+commit;
+```
+
+ควรตรวจจำนวนแถวใน temporary table และผล `UPDATE` ก่อน `COMMIT`; หากไม่ตรงกับรายการที่อนุมัติให้ `ROLLBACK` แทน

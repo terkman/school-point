@@ -26,15 +26,22 @@ Environment ที่ต้องมี (ห้ามใช้ VITE_*):
 
 ตัวเลือก:
   --auth-domain DOMAIN   ค่าเริ่มต้น accounts.school-point.invalid
+  --adopt-existing-users ยอมรับ Auth users เดิมที่ยังไม่เคยผูกกับข้อมูลโรงเรียน
   --help                 แสดงวิธีใช้`
 }
 
 function parseArgs(argv) {
-  const options = { apply: false, provision: false, authDomain: 'accounts.school-point.invalid' }
+  const options = {
+    apply: false,
+    provision: false,
+    adoptExistingUsers: false,
+    authDomain: 'accounts.school-point.invalid',
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === '--apply') options.apply = true
     else if (value === '--provision') options.provision = true
+    else if (value === '--adopt-existing-users') options.adoptExistingUsers = true
     else if (value === '--help' || value === '-h') options.help = true
     else if (value === '--input') options.input = argv[++index]
     else if (value === '--confirm-fingerprint') options.confirmFingerprint = argv[++index]
@@ -42,6 +49,29 @@ function parseArgs(argv) {
     else throw new Error(`ไม่รู้จักตัวเลือก: ${value}`)
   }
   return options
+}
+
+export async function assertPublicSignupDisabled(projectUrl, apiKey, fetchImpl = fetch) {
+  let response
+  let settings
+  try {
+    const settingsUrl = new URL('/auth/v1/settings', projectUrl)
+    response = await fetchImpl(settingsUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        apikey: apiKey,
+      },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) throw new Error('Auth settings request failed')
+    settings = await response.json()
+  } catch {
+    throw new Error('ตรวจสอบการตั้งค่า Supabase Auth ไม่สำเร็จ จึงหยุด provisioning เพื่อความปลอดภัย')
+  }
+  if (!settings || settings.disable_signup !== true) {
+    throw new Error('Supabase Auth ยังอนุญาต public signup; ต้องปิด Allow new users to sign up ก่อน provisioning')
+  }
 }
 
 function normalizeUsername(value) {
@@ -145,18 +175,29 @@ async function listAllUsers(client) {
   return users
 }
 
-async function provisionAccounts(client, accounts, authDomain) {
+async function hasLinkedSchoolProfile(client, userId) {
+  const { data, error } = await client
+    .from('profiles')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) {
+    throw new Error('ตรวจสอบสถานะการผูก Auth user เดิมไม่สำเร็จ จึงหยุด provisioning เพื่อความปลอดภัย')
+  }
+  return data?.user_id === userId
+}
+
+export async function provisionAccounts(client, accounts, authDomain, { adoptExistingUsers = false } = {}) {
   const existingUsers = await listAllUsers(client)
   const userByEmail = new Map(existingUsers.flatMap((user) => user.email ? [[user.email.toLowerCase(), user]] : []))
   let created = 0
   let linked = 0
   let existing = 0
-  let activatedExisting = 0
+  let adoptedExisting = 0
 
   for (const account of accounts) {
     const email = `${account.username}@${authDomain}`
     let user = userByEmail.get(email)
-    const wasExisting = Boolean(user)
     if (!user) {
       const { data, error } = await client.auth.admin.createUser({
         email,
@@ -169,6 +210,11 @@ async function provisionAccounts(client, accounts, authDomain) {
       created += 1
     } else {
       existing += 1
+      const alreadyLinked = await hasLinkedSchoolProfile(client, user.id)
+      if (!alreadyLinked && !adoptExistingUsers) {
+        throw new Error('พบ Auth user เดิมที่ยังไม่เคยผูกกับข้อมูลโรงเรียน; ตรวจสอบบัญชีแล้วรันใหม่ด้วย --adopt-existing-users หากยืนยันว่าจะรับบัญชีเดิมนี้')
+      }
+      if (!alreadyLinked) adoptedExisting += 1
     }
 
     const { data, error } = await client.rpc('admin_link_provisioned_account', {
@@ -177,18 +223,9 @@ async function provisionAccounts(client, accounts, authDomain) {
     })
     if (error || data?.ok !== true) throw new Error(`ผูกบัญชีลำดับที่ ${linked + 1} ไม่สำเร็จ: ${error?.message ?? 'RPC response ไม่ถูกต้อง'}`)
     linked += 1
-    if (wasExisting) {
-      const { data: activation, error: activationError } = await client.rpc('admin_mark_account_activated', {
-        p_user_id: user.id,
-      })
-      if (activationError || activation?.ok !== true) {
-        throw new Error(`ยืนยันบัญชีเดิมลำดับที่ ${linked} ไม่สำเร็จ: ${activationError?.message ?? 'RPC response ไม่ถูกต้อง'}`)
-      }
-      if (activation.activated === true) activatedExisting += 1
-    }
   }
 
-  return { total: accounts.length, created, existing, linked, activatedExisting }
+  return { total: accounts.length, created, existing, adoptedExisting, linked }
 }
 
 async function main() {
@@ -199,6 +236,7 @@ async function main() {
   }
   if (!options.input) throw new Error('ต้องระบุ --input')
   if (options.provision && !options.apply) throw new Error('--provision ใช้ได้เมื่อระบุ --apply เท่านั้น')
+  if (options.adoptExistingUsers && !options.provision) throw new Error('--adopt-existing-users ใช้ได้เมื่อระบุ --provision เท่านั้น')
   if (options.apply && options.confirmFingerprint === undefined) throw new Error('การเขียนจริงต้องระบุ --confirm-fingerprint')
 
   const url = String(process.env.SUPABASE_URL ?? '').trim()
@@ -214,7 +252,10 @@ async function main() {
   const importSummary = await importSchoolData(client, plan, options.apply)
   const result = { mode: options.apply ? 'apply' : 'dry-run', import: importSummary }
   if (options.provision) {
-    result.provisioning = await provisionAccounts(client, collectAccounts(plan), authDomain)
+    await assertPublicSignupDisabled(url, serviceRoleKey)
+    result.provisioning = await provisionAccounts(client, collectAccounts(plan), authDomain, {
+      adoptExistingUsers: options.adoptExistingUsers,
+    })
   }
   console.log(JSON.stringify(result, null, 2))
 }
