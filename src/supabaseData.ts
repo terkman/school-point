@@ -26,6 +26,11 @@ import {
   validateEvidenceFiles,
   type EvidenceAttachment,
 } from './evidence'
+import {
+  getProfileAvatar,
+  PROFILE_AVATAR_BUCKET,
+  PROFILE_AVATAR_OUTPUT_BYTES,
+} from './profileAvatars'
 
 interface QueryResult<T> {
   data: T | null
@@ -38,6 +43,8 @@ interface ProfileRow {
   display_name: string
   is_active: boolean
   activation_required: boolean
+  avatar_preset: string | null
+  avatar_path: string | null
 }
 
 interface TermRow {
@@ -251,13 +258,16 @@ function ledgerKind(entryType: string): ScoreTransaction['kind'] {
   return 'addition'
 }
 
-function profileAccount(profile: ProfileRow, user: User, username: string): Account {
+function profileAccount(profile: ProfileRow, user: User, username: string, avatarUrl?: string): Account {
   return {
     id: user.id,
     username,
     password: '',
     displayName: profile.display_name,
     role: profile.role,
+    ...(profile.avatar_preset ? { avatarPreset: profile.avatar_preset } : {}),
+    ...(profile.avatar_path ? { avatarPath: profile.avatar_path } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
   }
 }
 
@@ -414,7 +424,7 @@ export function getSessionUsername(user: User): string {
 async function loadProfile(client: SupabaseClient, user: User): Promise<ProfileRow> {
   const result = await client
     .from('profiles')
-    .select('user_id,role,display_name,is_active,activation_required')
+    .select('user_id,role,display_name,is_active,activation_required,avatar_preset,avatar_path')
     .eq('user_id', user.id)
     .maybeSingle()
   const profile = unwrap<ProfileRow>('โหลดสิทธิ์ผู้ใช้', result as QueryResult<ProfileRow>)
@@ -422,6 +432,18 @@ async function loadProfile(client: SupabaseClient, user: User): Promise<ProfileR
   if (profile.activation_required) throw new Error('ต้องตั้งรหัสผ่านส่วนตัวก่อนใช้งานข้อมูลโรงเรียน')
   if (!['student', 'teacher', 'admin'].includes(profile.role)) throw new Error('บทบาทผู้ใช้ไม่ถูกต้อง')
   return profile
+}
+
+async function createProfileAvatarUrl(client: SupabaseClient, profile: ProfileRow): Promise<string | undefined> {
+  if (!profile.avatar_path) return undefined
+  if (profile.avatar_path !== `${profile.user_id}/profile.webp`) {
+    throw new Error('ตำแหน่งรูปโปรไฟล์ไม่ถูกต้อง')
+  }
+  const { data, error } = await client.storage
+    .from(PROFILE_AVATAR_BUCKET)
+    .createSignedUrl(profile.avatar_path, 3600)
+  if (error) throw new Error(`โหลดรูปโปรไฟล์ไม่สำเร็จ: ${error.message}`)
+  return data.signedUrl
 }
 
 export function selectAccessibleTerm(role: Role, activeTerm: TermRow | null, plannedTerm: TermRow | null): TermRow | null {
@@ -510,7 +532,8 @@ async function loadStudentState(
   rules: BehaviorRule[],
 ): Promise<DemoState> {
   const termId = asId(term.id)
-  const [studentResult, enrollmentResult, classroomResult, scoreResult, history] = await Promise.all([
+  const [avatarUrl, studentResult, enrollmentResult, classroomResult, scoreResult, history] = await Promise.all([
+    createProfileAvatarUrl(client, profile),
     client.from('students').select('id,user_id,student_code,title,given_name,family_name,status').eq('user_id', user.id).maybeSingle(),
     client.from('enrollments').select('classroom_id,student_id').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
     client.from('classrooms').select('id,display_name,grade_level,room_number').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
@@ -568,7 +591,7 @@ async function loadStudentState(
     score: score?.balance ?? 100,
     status: studentRow.status === 'graduated' ? 'graduated' : 'active',
   }
-  const account = { ...profileAccount(profile, user, getSessionUsername(user)), studentId }
+  const account = { ...profileAccount(profile, user, getSessionUsername(user), avatarUrl), studentId }
   return {
     version: 2,
     term: {
@@ -1047,6 +1070,37 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_status: input.status,
       p_note: input.note.trim(),
     }),
+    setMyAvatarPreset: async (preset) => {
+      if (!getProfileAvatar(preset)) throw new Error('ไม่พบตัวการ์ตูนที่เลือก')
+      const result = await runRpc<{ previousPath?: string | null }>(client, 'update_my_profile_avatar', {
+        p_preset: preset,
+        p_avatar_path: null,
+      })
+      if (result.previousPath) {
+        await client.storage.from(PROFILE_AVATAR_BUCKET).remove([result.previousPath])
+      }
+      await refresh()
+    },
+    uploadMyAvatar: async (file) => {
+      if (file.type !== 'image/webp') throw new Error('รูปโปรไฟล์ต้องเป็นไฟล์ WEBP ที่ระบบเตรียมไว้')
+      if (file.size > PROFILE_AVATAR_OUTPUT_BYTES) throw new Error('รูปโปรไฟล์มีขนาดเกิน 2 MB')
+      const { data: sessionData, error: sessionError } = await client.auth.getSession()
+      if (sessionError) throw new Error(`ตรวจสอบสิทธิ์อัปโหลดรูปไม่สำเร็จ: ${sessionError.message}`)
+      const userId = sessionData.session?.user.id
+      if (!userId) throw new Error('กรุณาเข้าสู่ระบบใหม่ก่อนอัปโหลดรูป')
+      const path = `${userId}/profile.webp`
+      const { error: uploadError } = await client.storage.from(PROFILE_AVATAR_BUCKET).upload(path, file, {
+        cacheControl: '60',
+        contentType: 'image/webp',
+        upsert: true,
+      })
+      if (uploadError) throw new Error(`อัปโหลดรูปโปรไฟล์ไม่สำเร็จ: ${uploadError.message}`)
+      await runRpc(client, 'update_my_profile_avatar', {
+        p_preset: null,
+        p_avatar_path: path,
+      })
+      await refresh()
+    },
     activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
   }
 }

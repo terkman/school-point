@@ -147,6 +147,68 @@ describe('Supabase private score evidence', () => {
   })
 })
 
+describe('Supabase student profile avatars', () => {
+  it('stores the selected preset, removes the previous private upload, and refreshes once', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { ok: true, preset: 'student-girl-2', path: null, previousPath: 'user-1/profile.webp' },
+      error: null,
+    })
+    const remove = vi.fn().mockResolvedValue({ data: [], error: null })
+    const from = vi.fn().mockReturnValue({ remove })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({
+      rpc,
+      storage: { from },
+    } as unknown as SupabaseClient, refresh)
+
+    await actions.setMyAvatarPreset('student-girl-2')
+
+    expect(rpc).toHaveBeenCalledWith('update_my_profile_avatar', {
+      p_preset: 'student-girl-2',
+      p_avatar_path: null,
+    })
+    expect(from).toHaveBeenCalledWith('student-profile-images')
+    expect(remove).toHaveBeenCalledWith(['user-1/profile.webp'])
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('uploads one prepared WEBP under the signed-in student folder and records its path', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { ok: true, preset: null, path: '9ba2f967-4192-45fc-aa31-30bf91862aef/profile.webp' },
+      error: null,
+    })
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'stored' }, error: null })
+    const from = vi.fn().mockReturnValue({ upload })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const client = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({
+          data: { session: { user: { id: '9ba2f967-4192-45fc-aa31-30bf91862aef' } } },
+          error: null,
+        }),
+      },
+      storage: { from },
+      rpc,
+    }
+    const actions = createSupabaseActions(client as unknown as SupabaseClient, refresh)
+    const file = { name: 'profile.webp', type: 'image/webp', size: 120_000 } as File
+
+    await actions.uploadMyAvatar(file)
+
+    expect(from).toHaveBeenCalledWith('student-profile-images')
+    expect(upload).toHaveBeenCalledWith(
+      '9ba2f967-4192-45fc-aa31-30bf91862aef/profile.webp',
+      file,
+      { cacheControl: '60', contentType: 'image/webp', upsert: true },
+    )
+    expect(rpc).toHaveBeenCalledWith('update_my_profile_avatar', {
+      p_preset: null,
+      p_avatar_path: '9ba2f967-4192-45fc-aa31-30bf91862aef/profile.webp',
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('Supabase score mutations', () => {
   it('loads guardian contacts only for the selected task without refreshing school state', async () => {
     const rpc = vi.fn().mockResolvedValue({

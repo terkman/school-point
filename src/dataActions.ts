@@ -184,5 +184,7 @@ export interface AppDataActions {
   getGuardianContacts: (taskId: string) => Promise<GuardianContact[]>
   completeGuardianContact: (input: CompleteGuardianContactInput) => Promise<void>
   updateFollowUpCase: (input: UpdateFollowUpCaseInput) => Promise<void>
+  setMyAvatarPreset: (preset: string) => Promise<void>
+  uploadMyAvatar: (file: File) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
 }

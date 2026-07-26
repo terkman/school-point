@@ -25,6 +25,7 @@ export function createDemoState(): DemoState {
         displayName: 'นักเรียนตัวอย่าง 01',
         role: 'student',
         studentId: 'student-01',
+        avatarPreset: 'student-boy-1',
       },
       {
         id: 'acc-teacher-01',

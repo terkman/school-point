@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Account, DemoState, Severity } from './domain'
+import { ProfileAvatar } from './ProfileAvatar'
 import { dataMode } from './supabaseClient'
 
 export type IconName =
@@ -118,7 +119,7 @@ export function AppShell<T extends string>({
       <div className="app-layout">
         <aside className="sidebar" aria-label="เมนูหลัก">
           <div className="profile-block">
-            <div className="avatar">{account.displayName.slice(0, 1)}</div>
+            <ProfileAvatar account={account} />
             <div>
               <strong>{account.displayName}</strong>
               <span>{roleLabels[account.role]}</span>

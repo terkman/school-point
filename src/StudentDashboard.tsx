@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   appealDeadline,
   canAppeal,
@@ -10,14 +10,21 @@ import {
   type ScoreTransaction,
 } from './domain'
 import type { AppDataActions } from './dataActions'
+import { ProfileAvatar } from './ProfileAvatar'
+import {
+  prepareProfileAvatar,
+  PROFILE_AVATARS,
+  validateProfileAvatarFile,
+} from './profileAvatars'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
 
-type StudentTab = 'overview' | 'history' | 'appeals'
+type StudentTab = 'overview' | 'history' | 'appeals' | 'profile'
 
 const navItems: NavItem<StudentTab>[] = [
   { id: 'overview', label: 'ภาพรวม', icon: 'home' },
   { id: 'history', label: 'ประวัติคะแนน', icon: 'history' },
   { id: 'appeals', label: 'การอุทธรณ์', icon: 'approval' },
+  { id: 'profile', label: 'รูปโปรไฟล์', icon: 'users' },
 ]
 
 interface StudentDashboardProps {
@@ -26,6 +33,7 @@ interface StudentDashboardProps {
   onChange: (next: DemoState) => void
   actions?: AppDataActions
   onLogout: () => void
+  initialTab?: StudentTab
 }
 
 function TransactionRow({
@@ -56,12 +64,13 @@ function TransactionRow({
   )
 }
 
-export function StudentDashboard({ account, state, onChange, actions, onLogout }: StudentDashboardProps) {
-  const [tab, setTab] = useState<StudentTab>('overview')
+export function StudentDashboard({ account, state, onChange, actions, onLogout, initialTab = 'overview' }: StudentDashboardProps) {
+  const [tab, setTab] = useState<StudentTab>(initialTab)
   const [appealTarget, setAppealTarget] = useState<ScoreTransaction | null>(null)
   const [statement, setStatement] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [busy, setBusy] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
   const student = state.students.find((item) => item.id === account.studentId)
   const transactions = useMemo(
     () => state.transactions
@@ -124,10 +133,71 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout }
     setStatement('')
   }
 
+  function updateDemoAvatar(next: Pick<Account, 'avatarPreset' | 'avatarUrl' | 'avatarPath'>) {
+    onChange({
+      ...state,
+      accounts: state.accounts.map((item) => item.id === account.id
+        ? {
+            ...item,
+            avatarPreset: next.avatarPreset,
+            avatarUrl: next.avatarUrl,
+            avatarPath: next.avatarPath,
+          }
+        : item),
+    })
+  }
+
+  async function chooseAvatar(preset: string) {
+    setAvatarBusy(true)
+    setAnnouncement('')
+    try {
+      if (actions) {
+        await actions.setMyAvatarPreset(preset)
+      } else {
+        updateDemoAvatar({ avatarPreset: preset, avatarUrl: undefined, avatarPath: undefined })
+      }
+      setAnnouncement('เปลี่ยนรูปโปรไฟล์เรียบร้อยแล้ว')
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนรูปโปรไฟล์ได้')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  async function uploadAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    const validationError = validateProfileAvatarFile(file)
+    if (validationError) {
+      setAnnouncement(validationError)
+      return
+    }
+    setAvatarBusy(true)
+    setAnnouncement('กำลังเตรียมรูปโปรไฟล์…')
+    try {
+      const preparedFile = await prepareProfileAvatar(file)
+      if (actions) {
+        await actions.uploadMyAvatar(preparedFile)
+      } else {
+        updateDemoAvatar({
+          avatarPreset: undefined,
+          avatarPath: 'demo/profile.webp',
+          avatarUrl: URL.createObjectURL(preparedFile),
+        })
+      }
+      setAnnouncement('อัปโหลดรูปโปรไฟล์เรียบร้อยแล้ว')
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถอัปโหลดรูปโปรไฟล์ได้')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
       <div className="page-heading">
-        <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : 'การอุทธรณ์'}</h1></div>
+        <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : tab === 'appeals' ? 'การอุทธรณ์' : 'รูปโปรไฟล์ของฉัน'}</h1></div>
         <span className="class-chip">{currentStudent.classroomName} • {currentStudent.studentCode}</span>
       </div>
       <div className="sr-only" aria-live="polite">{announcement}</div>
@@ -187,6 +257,67 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout }
               const statusClass = appeal.status === 'accepted' ? 'approved' : appeal.status === 'rejected' ? 'rejected' : 'pending'
               return <article className="record-row" key={appeal.id}><div><strong>{rule?.title ?? transaction?.reason ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span></div><span className={`badge status-${statusClass}`}>{label}</span></article>
             })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="เมื่อยื่นคำอุทธรณ์แล้ว สถานะจะแสดงที่นี่" />}
+          </section>
+        </div>
+      ) : null}
+
+      {tab === 'profile' ? (
+        <div className="profile-settings">
+          <section className="panel profile-preview-panel">
+            <p className="eyebrow">รูปปัจจุบัน</p>
+            <ProfileAvatar account={account} className="profile-avatar-preview" decorative={false} />
+            <h2>{account.displayName}</h2>
+            <p>{currentStudent.classroomName} • รหัสนักเรียน {currentStudent.studentCode}</p>
+            {announcement ? <div className="profile-avatar-status" role="status">{announcement}</div> : null}
+          </section>
+
+          <section className="panel profile-avatar-options">
+            <div className="section-heading">
+              <div><p className="eyebrow">เลือกได้ทันที</p><h2>ตัวการ์ตูน</h2></div>
+              <span className="counter">10 แบบ</span>
+            </div>
+            {(['boy', 'girl'] as const).map((group) => (
+              <div className="avatar-option-group" key={group}>
+                <h3>{group === 'boy' ? 'ตัวละครชาย' : 'ตัวละครหญิง'}</h3>
+                <div className="avatar-option-grid">
+                  {PROFILE_AVATARS.filter((avatar) => avatar.group === group).map((avatar) => (
+                    <button
+                      type="button"
+                      className={account.avatarPreset === avatar.id ? 'avatar-option selected' : 'avatar-option'}
+                      key={avatar.id}
+                      aria-label={avatar.label}
+                      aria-pressed={account.avatarPreset === avatar.id}
+                      disabled={avatarBusy}
+                      onClick={() => void chooseAvatar(avatar.id)}
+                    >
+                      <img src={avatar.src} alt="" />
+                      <span>{avatar.label.replace(`ตัวละคร${group === 'boy' ? 'ชาย' : 'หญิง'}`, '')}</span>
+                      {account.avatarPreset === avatar.id ? <b><Icon name="check" size={15} /> เลือกอยู่</b> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <section className="panel profile-upload-panel">
+            <span className="profile-upload-icon"><Icon name="upload" size={28} /></span>
+            <div>
+              <h2>ใช้รูปของตัวเอง</h2>
+              <p>รองรับ JPG, PNG และ WEBP ขนาดไม่เกิน 10 MB ระบบจะตัดภาพตรงกลางเป็นสี่เหลี่ยมและย่อขนาดให้อัตโนมัติ</p>
+            </div>
+            <label className={`button secondary ${avatarBusy ? 'disabled' : ''}`}>
+              <Icon name="upload" size={18} />
+              {avatarBusy ? 'กำลังบันทึก…' : 'เลือกรูปจากเครื่อง'}
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={avatarBusy}
+                onChange={(event) => void uploadAvatar(event)}
+              />
+            </label>
+            <p className="privacy-note profile-upload-privacy"><Icon name="shield" /><span>รูปที่อัปโหลดเก็บแบบส่วนตัว นักเรียนเข้าถึงได้เฉพาะรูปของตนเอง</span></p>
           </section>
         </div>
       ) : null}

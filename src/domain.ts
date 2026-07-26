@@ -10,6 +10,9 @@ export interface Account {
   role: Role
   studentId?: string
   teacherId?: string
+  avatarPreset?: string
+  avatarPath?: string
+  avatarUrl?: string
 }
 
 export interface Student {
