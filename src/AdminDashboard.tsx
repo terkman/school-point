@@ -43,15 +43,19 @@ type DetailedAdditionRequest = DemoState['additionRequests'][number] & {
 interface TermScheduleFormProps {
   term: DemoState['term']
   busy: boolean
+  activating: boolean
   onSave: (input: UpdateTermScheduleInput) => Promise<void>
+  onActivate: (termId: string) => Promise<void>
 }
 
-function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
+export function TermScheduleForm({ term, busy, activating, onSave, onActivate }: TermScheduleFormProps) {
   const [startsOn, setStartsOn] = useState(term.startsOn ?? '')
   const [endsOn, setEndsOn] = useState(term.endsOn ?? '')
   const [error, setError] = useState('')
+  const [activationConfirmed, setActivationConfirmed] = useState(false)
   const unchanged = startsOn === (term.startsOn ?? '') && endsOn === (term.endsOn ?? '')
   const hasSavedSchedule = Boolean(term.startsOn && term.endsOn)
+  const activationReady = hasSavedSchedule && unchanged
 
   async function saveSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -67,6 +71,16 @@ function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
       await onSave({ termId: term.id, startsOn, endsOn })
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถบันทึกวันที่ภาคเรียนได้')
+    }
+  }
+
+  async function activateSchedule() {
+    if (busy || !activationReady || !activationConfirmed) return
+    setError('')
+    try {
+      await onActivate(term.id)
+    } catch (activationError) {
+      setError(activationError instanceof Error ? activationError.message : 'ไม่สามารถเปิดใช้งานภาคเรียนได้')
     }
   }
 
@@ -111,6 +125,31 @@ function TermScheduleForm({ term, busy, onSave }: TermScheduleFormProps) {
           ? hasSavedSchedule ? 'วันที่เป็นปัจจุบันแล้ว' : 'กรุณาระบุวันเปิด–ปิด'
           : 'บันทึกวันเปิด–ปิด'}
       </button>
+      {!term.isActive ? (
+        <div className="term-activation">
+          <div className="warning-note">
+            <Icon name="alert" />
+            <span>เมื่อเปิดใช้งานแล้ว คุณครูและนักเรียนจะเข้าสู่ภาคเรียนนี้ได้ ระบบไม่อนุญาตให้มีภาคเรียนที่กำลังใช้งานพร้อมกันมากกว่าหนึ่งภาคเรียน</span>
+          </div>
+          <label className="confirmation-check">
+            <input
+              type="checkbox"
+              checked={activationConfirmed}
+              disabled={busy || !activationReady}
+              onChange={(event) => setActivationConfirmed(event.target.checked)}
+            />
+            <span>ยืนยันว่าตรวจสอบวันเปิด–ปิดและรายชื่อนักเรียนของภาคเรียนนี้แล้ว</span>
+          </label>
+          <button
+            className="button warning full"
+            type="button"
+            disabled={busy || !activationReady || !activationConfirmed}
+            onClick={() => void activateSchedule()}
+          >
+            {activating ? 'กำลังเปิดใช้งานภาคเรียน…' : activationReady ? 'เปิดใช้งานภาคเรียน' : 'บันทึกวันเปิด–ปิดก่อน'}
+          </button>
+        </div>
+      ) : null}
     </form>
   )
 }
@@ -601,6 +640,25 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
   }
 
+  async function activateTerm(termId: string) {
+    if (mutationBusy || state.term.isActive) return
+    setBusyAction('term-activate')
+    setAnnouncement('')
+    try {
+      if (actions) {
+        await actions.activateTerm(termId)
+      } else {
+        onChange({
+          ...state,
+          term: { ...state.term, isActive: true },
+        })
+      }
+      setAnnouncement(`เปิดใช้งาน ${state.term.label} แล้ว คุณครูและนักเรียนสามารถเข้าสู่ระบบได้`)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
       <div className="page-heading">
@@ -810,10 +868,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </form>
           )}
           <TermScheduleForm
-            key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}`}
+            key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}:${state.term.isActive}`}
             term={state.term}
             busy={mutationBusy}
+            activating={busyAction === 'term-activate'}
             onSave={updateTermSchedule}
+            onActivate={activateTerm}
           />
           <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
             {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{transaction.internalReason ? <span>เหตุผล: {transaction.internalReason}</span> : null}{transaction.evidenceNote ? <small>หลักฐาน: {transaction.evidenceNote}</small> : null}<small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}

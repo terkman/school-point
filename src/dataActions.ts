@@ -158,4 +158,5 @@ export interface AppDataActions {
   adminAddPointsBulk: (input: AdminAddPointsBulkInput) => Promise<AdminAddPointsBulkResult>
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
+  activateTerm: (termId: string) => Promise<void>
 }

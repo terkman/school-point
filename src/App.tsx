@@ -62,14 +62,34 @@ function DemoApp() {
   return <AdminDashboard account={account} state={state} onChange={setState} onResetDemo={resetDemo} onLogout={logout} />
 }
 
-function StatusPage({ title, detail, action }: { title: string; detail: string; action?: { label: string; run: () => void } }) {
+interface StatusPageAction {
+  label: string
+  run: () => void
+}
+
+export function StatusPage({
+  title,
+  detail,
+  action,
+  secondaryAction,
+}: {
+  title: string
+  detail: string
+  action?: StatusPageAction
+  secondaryAction?: StatusPageAction
+}) {
   return (
     <main className="status-page">
       <section className="status-card" aria-live="polite">
         <div className="brand-mark">SP</div>
         <h1>{title}</h1>
         <p>{detail}</p>
-        {action ? <button className="button primary" type="button" onClick={action.run}>{action.label}</button> : null}
+        {action || secondaryAction ? (
+          <div className="status-actions">
+            {action ? <button className="button primary" type="button" onClick={action.run}>{action.label}</button> : null}
+            {secondaryAction ? <button className="button secondary" type="button" onClick={secondaryAction.run}>{secondaryAction.label}</button> : null}
+          </div>
+        ) : null}
       </section>
     </main>
   )
@@ -274,7 +294,13 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
   if (!session) return <LoginPage mode="supabase" onAuthenticate={authenticate} onActivate={activate} />
   if (activationRequired === undefined) {
-    return <StatusPage title={loadError ? 'ยังเปิดระบบไม่ได้' : 'กำลังตรวจสอบบัญชี'} detail={loadError || 'กรุณารอสักครู่'} />
+    return (
+      <StatusPage
+        title={loadError ? 'ยังเปิดระบบไม่ได้' : 'กำลังตรวจสอบบัญชี'}
+        detail={loadError || 'กรุณารอสักครู่'}
+        action={loadError ? { label: 'ออกจากระบบ', run: () => void logout() } : undefined}
+      />
+    )
   }
   if (activationRequired) {
     return (
@@ -290,10 +316,25 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
   if (loading && !state) return <StatusPage title="กำลังโหลดข้อมูลโรงเรียน" detail="ระบบกำลังตรวจสอบสิทธิ์และเตรียมข้อมูลตามบทบาทของคุณ" />
   if (loadError && !state) {
-    return <StatusPage title="ยังเปิดระบบไม่ได้" detail={loadError} action={{ label: 'ลองโหลดใหม่', run: () => void refresh().catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลได้')) }} />
+    return (
+      <StatusPage
+        title="ยังเปิดระบบไม่ได้"
+        detail={loadError}
+        action={{ label: 'ลองโหลดใหม่', run: () => void refresh().catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลได้')) }}
+        secondaryAction={{ label: 'ออกจากระบบ', run: () => void logout() }}
+      />
+    )
   }
   const account = state?.accounts[0]
-  if (!state || !account) return <StatusPage title="ไม่พบข้อมูลบัญชี" detail="โปรดติดต่อผู้ดูแลระบบเพื่อตรวจสอบการผูกบัญชีกับข้อมูลโรงเรียน" />
+  if (!state || !account) {
+    return (
+      <StatusPage
+        title="ไม่พบข้อมูลบัญชี"
+        detail="โปรดติดต่อผู้ดูแลระบบเพื่อตรวจสอบการผูกบัญชีกับข้อมูลโรงเรียน"
+        action={{ label: 'ออกจากระบบ', run: () => void logout() }}
+      />
+    )
+  }
 
   if (account.role === 'student') {
     return <StudentDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />

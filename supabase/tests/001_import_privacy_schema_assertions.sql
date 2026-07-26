@@ -17,6 +17,7 @@ declare
   v_activation_definition text;
   v_session_definition text;
   v_term_schedule_definition text;
+  v_term_activation_definition text;
   v_guardian_guard_definition text;
   v_helper_definition text;
   v_helper_signature text;
@@ -754,6 +755,28 @@ begin
     raise exception 'admin term-schedule RPC privileges are not least-privilege';
   end if;
 
+  if to_regprocedure('public.admin_activate_term(bigint)') is null then
+    raise exception 'admin term-activation RPC is missing';
+  end if;
+
+  if not has_function_privilege(
+       'authenticated',
+       'public.admin_activate_term(bigint)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.admin_activate_term(bigint)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.admin_activate_term(bigint)',
+       'EXECUTE'
+     ) then
+    raise exception 'admin term-activation RPC privileges are not least-privilege';
+  end if;
+
   if not exists (
     select 1
     from pg_constraint constraint_row
@@ -1338,6 +1361,38 @@ begin
       )
   ) then
     raise exception 'admin term-schedule RPC must be SECURITY DEFINER with empty search_path';
+  end if;
+
+  select pg_get_functiondef(
+    'public.admin_activate_term(bigint)'::regprocedure
+  ) into v_term_activation_definition;
+  if position('private.is_admin' in lower(v_term_activation_definition)) = 0
+     or position('pg_advisory_xact_lock' in lower(v_term_activation_definition)) = 0
+     or position('for update' in lower(v_term_activation_definition)) = 0
+     or position('v_term.status = ''active''' in lower(v_term_activation_definition)) = 0
+     or position('v_term.status <> ''planned''' in lower(v_term_activation_definition)) = 0
+     or position('v_term.starts_on is null' in lower(v_term_activation_definition)) = 0
+     or position('v_term.ends_on is null' in lower(v_term_activation_definition)) = 0
+     or position('another academic term is already active' in lower(v_term_activation_definition)) = 0
+     or position('private.write_audit' in lower(v_term_activation_definition)) = 0 then
+    raise exception 'admin term-activation RPC is missing authorization, serialization, validation, idempotency, or audit';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc procedure
+    join pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'admin_activate_term'
+      and procedure.pronargs = 1
+      and procedure.prosecdef
+      and exists (
+        select 1
+        from unnest(coalesce(procedure.proconfig, array[]::text[])) as setting(value)
+        where replace(setting.value, '"', '') = 'search_path='
+      )
+  ) then
+    raise exception 'admin term-activation RPC must be SECURITY DEFINER with empty search_path';
   end if;
 
   select pg_get_functiondef(

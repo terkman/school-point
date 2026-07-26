@@ -444,7 +444,9 @@ async function loadAccessibleTermAndRules(
       rulesQuery,
       positiveRulesQuery,
     ])
-    const term = unwrap<TermRow>('โหลดภาคเรียนปัจจุบัน', activeResult as QueryResult<TermRow>)
+    if (activeResult.error) throw new Error(`โหลดภาคเรียนปัจจุบัน: ${activeResult.error.message}`)
+    const term = activeResult.data as TermRow | null
+    if (!term) throw new Error('ภาคเรียนยังไม่เปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ')
     return {
       term,
       rules: mapRules(rulesResult),
@@ -935,5 +937,6 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_starts_on: input.startsOn,
       p_ends_on: input.endsOn,
     }),
+    activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
   }
 }

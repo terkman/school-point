@@ -340,6 +340,20 @@ describe('Supabase score mutations', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('activates a planned term through the admin-only RPC and refreshes once', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { ok: true, updated: true, term_id: 9, status: 'active' },
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await actions.activateTerm('9')
+
+    expect(rpc).toHaveBeenCalledWith('admin_activate_term', { p_term_id: '9' })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('does not refresh stale data when an RPC is rejected', async () => {
     const rpc = vi.fn().mockResolvedValue({ error: { message: 'permission denied' } })
     const refresh = vi.fn().mockResolvedValue(undefined)

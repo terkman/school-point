@@ -107,6 +107,7 @@ p { line-height: 1.65; color: var(--muted); }
 .status-card .brand-mark { margin: 0 auto 20px; background: var(--navy); }
 .status-card h1 { color: var(--navy); }
 .status-card p { margin-bottom: 22px; }
+.status-actions { display: flex; justify-content: center; gap: 9px; }
 
 .activation-page { padding-block: 32px; }
 .activation-card { max-width: 520px; text-align: left; }
@@ -469,6 +470,7 @@ tbody tr:hover td { background: #fbfcfe; }
 
 .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 .term-schedule-form .section-heading { margin-bottom: 2px; }
+.term-activation { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
 .form-help { margin: 0; font-size: .78rem; }
 .date-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .reset-preview { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0; padding: 14px; background: #f8fafc; border: 1px solid var(--line); font-size: .77rem; color: var(--muted); }
