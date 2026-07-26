@@ -11,7 +11,7 @@ interface StudentTargetSelectorProps {
   value: StudentTargetSelection
   onChange: (next: StudentTargetSelection) => void
   disabled: boolean
-  actionLabel: 'หักคะแนน' | 'เพิ่มคะแนน'
+  actionLabel: 'ตัดคะแนน' | 'หักคะแนน' | 'เพิ่มคะแนน'
   stepStart?: number
 }
 
