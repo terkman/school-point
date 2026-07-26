@@ -281,6 +281,15 @@ tbody tr:hover td { background: #fbfcfe; }
 .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 .two-column.wide-left { grid-template-columns: 1.25fr .9fr; }
 .target-selector { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.score-action-selector { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: white; }
+.action-step-heading { padding: 0; }
+.score-action-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.score-action-options button { min-height: 68px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 11px 15px; border: 1px solid var(--line-strong); border-radius: 9px; background: white; color: var(--ink); text-align: left; }
+.score-action-options button:hover { border-color: #9eb3df; background: #f9fbff; }
+.score-action-options button.addition.active { border-color: var(--teal); background: #eaf8f5; box-shadow: inset 0 0 0 1px var(--teal); color: #155f58; }
+.score-action-options button.deduction.active { border-color: var(--coral); background: #fff1f0; box-shadow: inset 0 0 0 1px var(--coral); color: #9a2f34; }
+.score-action-options strong { font-size: .88rem; }
+.score-action-options span { color: var(--muted); font-size: .7rem; }
 .selection-path { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: white; }
 .selection-path label { gap: 7px; }
 .selection-path label > span, .selection-step-heading > span { display: flex; align-items: center; gap: 7px; color: var(--navy); font-size: .76rem; font-weight: 900; }
@@ -530,6 +539,7 @@ tbody tr:hover td { background: #fbfcfe; }
   .two-column, .two-column.wide-left, .manage-grid, .date-field-grid { grid-template-columns: 1fr; }
   .scope-switch { grid-template-columns: 1fr; gap: 7px; }
   .selection-path { grid-template-columns: 1fr; }
+  .score-action-options { grid-template-columns: 1fr; }
   .selection-step-heading { align-items: flex-start; flex-direction: column; }
   .scope-switch button { min-height: 54px; }
   .rules-panel { grid-column: auto; }

@@ -18,7 +18,7 @@ import {
   toLocalDateTimeInputValue,
   validatePositiveRulePoints,
 } from './teacherWorkflows'
-import { StudentTargetSelector } from './StudentTargetSelector'
+import { ScoreActionSelector, StudentTargetSelector } from './StudentTargetSelector'
 import {
   buildClassroomGroups,
   createInitialStudentSelection,
@@ -367,12 +367,18 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
 
       {tab === 'deduct' ? (
         <div className="workspace-grid">
+            <ScoreActionSelector
+              value="deduction"
+              onChange={(next) => setTab(next === 'addition' ? 'request' : 'deduct')}
+              disabled={busy}
+            />
             <StudentTargetSelector
               students={assignedStudents}
               value={deductionSelection}
               onChange={changeDeductionSelection}
               disabled={busy}
               actionLabel="หักคะแนน"
+              stepStart={2}
             />
             <form className="panel action-form" onSubmit={recordDeductions}>
               <div className="selected-student-bar batch-target-bar">
@@ -421,12 +427,18 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
       {tab === 'request' ? (
         <>
           <div className="workspace-grid">
+          <ScoreActionSelector
+            value="addition"
+            onChange={(next) => setTab(next === 'addition' ? 'request' : 'deduct')}
+            disabled={busy}
+          />
           <StudentTargetSelector
             students={assignedStudents}
             value={additionSelection}
             onChange={changeAdditionSelection}
             disabled={busy}
             actionLabel="เพิ่มคะแนน"
+            stepStart={2}
           />
           <form className="panel stack-form" onSubmit={submitAdditionRequest}>
             <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน</h2></div></div>

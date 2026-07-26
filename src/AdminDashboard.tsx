@@ -6,10 +6,15 @@ import {
   type Account,
   type DemoState,
 } from './domain'
-import type { AdminAddPointsBulkResult, AppDataActions, UpdateTermScheduleInput } from './dataActions'
+import type {
+  AdminAddPointsBulkResult,
+  AppDataActions,
+  RecordDeductionsResult,
+  UpdateTermScheduleInput,
+} from './dataActions'
 import { validateTermSchedule } from './termSchedule'
 import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
-import { StudentTargetSelector } from './StudentTargetSelector'
+import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './StudentTargetSelector'
 import { createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
@@ -116,6 +121,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const openAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
   const [tab, setTab] = useState<AdminTab>('overview')
+  const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('addition')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students))
   const activePositiveRules = state.positiveRules.filter((rule) => rule.active)
   const initialPositiveRule = activePositiveRules[0]
@@ -126,6 +132,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
   const [adminRequestId, setAdminRequestId] = useState(() => newRequestId())
   const [adminAdditionResult, setAdminAdditionResult] = useState<AdminAddPointsBulkResult | null>(null)
+  const [adminDeductionRuleId, setAdminDeductionRuleId] = useState(state.rules.find((rule) => rule.active)?.id ?? '')
+  const [adminDeductionOccurredAt, setAdminDeductionOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [adminDeductionNote, setAdminDeductionNote] = useState('')
+  const [adminDeductionReview, setAdminDeductionReview] = useState(false)
+  const [adminConfirmSeriousBulk, setAdminConfirmSeriousBulk] = useState(false)
+  const [adminDeductionRequestId, setAdminDeductionRequestId] = useState(() => newRequestId())
+  const [adminDeductionResult, setAdminDeductionResult] = useState<RecordDeductionsResult | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
@@ -134,9 +147,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const adminTargets = resolveStudentTargets(state.students, adminSelection)
   const adminPositiveRule = activePositiveRules.find((item) => item.id === adminPositiveRuleId)
   const adminPointValidation = validatePositiveRulePoints(adminPositiveRule, points)
+  const adminDeductionRule = state.rules.find((rule) => rule.id === adminDeductionRuleId)
   const adminAdditionBeforeTotal = adminTargets.reduce((sum, student) => sum + student.score, 0)
   const adminAdditionAfterTotal = adminTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, points).after, 0)
   const adminAdditionAppliedTotal = adminAdditionAfterTotal - adminAdditionBeforeTotal
+  const adminDeductionBeforeTotal = adminTargets.reduce((sum, student) => sum + student.score, 0)
+  const adminDeductionAfterTotal = adminTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, -(adminDeductionRule?.points ?? 0)).after, 0)
+  const adminSeriousBulk = Boolean(adminDeductionRule && ['serious', 'critical'].includes(adminDeductionRule.severity) && adminTargets.length > 1)
   const mutationBusy = Boolean(busyAction)
   const adminAdditionBusy = mutationBusy
   const selectedRequest = (state.additionRequests.find((item) => item.id === selectedRequestId)
@@ -285,9 +302,22 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setAdminRequestId(newRequestId())
   }
 
+  function invalidateAdminDeduction() {
+    setAdminDeductionReview(false)
+    setAdminConfirmSeriousBulk(false)
+    setAdminDeductionResult(null)
+    setAdminDeductionRequestId(newRequestId())
+  }
+
   function changeAdminSelection(next: typeof adminSelection) {
     setAdminSelection(next)
     invalidateAdminRequest()
+    invalidateAdminDeduction()
+  }
+
+  function changeAdminScoreAction(next: ScoreAction) {
+    setAdminScoreAction(next)
+    setAnnouncement('')
   }
 
   async function addPointsDirectly(event: FormEvent<HTMLFormElement>) {
@@ -393,6 +423,124 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setAdminRequestId(newRequestId())
     setAdminAdditionResult(localResult)
     setAnnouncement(`เพิ่มคะแนนครบ ${localResult.targetCount} คน รวมเพิ่มจริง ${localResult.totalAppliedPoints} คะแนนเรียบร้อยแล้ว`)
+  }
+
+  async function deductPointsDirectly(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (mutationBusy) return
+    const eventIso = localDateTimeToIso(adminDeductionOccurredAt)
+    if (!adminDeductionRule || !eventIso || adminDeductionNote.trim().length < 5) {
+      setAnnouncement('กรุณาเลือกเกณฑ์ วันเวลา และระบุรายละเอียดเหตุการณ์อย่างน้อย 5 ตัวอักษร')
+      return
+    }
+    if (adminSelection.scope === 'selected' && adminTargets.length < 2) {
+      setAnnouncement('โหมดเฉพาะกลุ่มต้องเลือกนักเรียนอย่างน้อย 2 คน')
+      return
+    }
+    if (!adminTargets.length) {
+      setAnnouncement('กรุณาเลือกนักเรียนหรือห้องเรียนที่ต้องการตัดคะแนน')
+      return
+    }
+    if (!adminDeductionReview) {
+      setAdminDeductionReview(true)
+      setAnnouncement(`ตรวจสอบรายชื่อ ${adminTargets.length} คนและคะแนนก่อนยืนยันบันทึก`)
+      return
+    }
+    if (adminSeriousBulk && !adminConfirmSeriousBulk) {
+      setAnnouncement('กรุณายืนยันว่าตรวจสอบรายชื่อนักเรียนกรณีร้ายแรงครบถ้วนแล้ว')
+      return
+    }
+
+    setBusyAction('admin-deduct')
+    try {
+      let result: RecordDeductionsResult
+      if (actions) {
+        result = await actions.recordDeductions({
+          clientRequestId: adminDeductionRequestId,
+          scope: adminSelection.scope,
+          studentIds: adminTargets.map((student) => student.id),
+          classroomId: adminSelection.classroomId,
+          ruleId: adminDeductionRule.id,
+          occurredAt: eventIso,
+          internalNote: adminDeductionNote.trim(),
+          confirmSeriousBulk: adminSeriousBulk && adminConfirmSeriousBulk,
+        })
+      } else {
+        const resultRows = adminTargets.map((student) => {
+          const change = applyScoreDelta(student.score, -adminDeductionRule.points)
+          return {
+            studentId: student.id,
+            incidentId: createId('incident'),
+            requestedPoints: adminDeductionRule.points,
+            appliedPoints: Math.abs(change.appliedDelta),
+            balanceBefore: change.before,
+            balanceAfter: change.after,
+          }
+        })
+        const resultByStudent = new Map(resultRows.map((row) => [row.studentId, row]))
+        const newTransactions = resultRows.map((row) => ({
+          id: createId('tx'),
+          studentId: row.studentId,
+          termId: state.term.id,
+          kind: 'deduction' as const,
+          requestedDelta: -row.requestedPoints,
+          appliedDelta: -row.appliedPoints,
+          scoreBefore: row.balanceBefore,
+          scoreAfter: row.balanceAfter,
+          ruleId: adminDeductionRule.id,
+          reason: adminDeductionNote.trim(),
+          occurredAt: eventIso,
+          actorId: account.id,
+          incidentId: row.incidentId,
+        }))
+        const newCases = ['serious', 'critical'].includes(adminDeductionRule.severity)
+          ? newTransactions.map((transaction) => ({
+            id: createId('case'),
+            transactionId: transaction.id,
+            studentId: transaction.studentId,
+            severity: adminDeductionRule.severity as 'serious' | 'critical',
+            status: 'open' as const,
+            guardianContactRequired: adminDeductionRule.guardianContactRequired,
+            guardianContactStatus: adminDeductionRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
+            createdAt: eventIso,
+            internalNote: `ติดตามเหตุการณ์: ${adminDeductionNote.trim()}`,
+          }))
+          : []
+        onChange({
+          ...state,
+          students: state.students.map((student) => {
+            const row = resultByStudent.get(student.id)
+            return row ? { ...student, score: row.balanceAfter } : student
+          }),
+          transactions: [...newTransactions, ...state.transactions],
+          seriousCases: [...newCases, ...state.seriousCases],
+        })
+        result = {
+          ok: true,
+          replayed: false,
+          batchId: createId('deduction-batch'),
+          scope: adminSelection.scope,
+          classroomId: adminSelection.classroomId,
+          targetCount: resultRows.length,
+          requestedPointsEach: adminDeductionRule.points,
+          totalRequestedPoints: resultRows.length * adminDeductionRule.points,
+          totalAppliedPoints: resultRows.reduce((sum, row) => sum + row.appliedPoints, 0),
+          alreadyAtZeroCount: resultRows.filter((row) => row.appliedPoints === 0).length,
+          guardianTaskCount: adminDeductionRule.guardianContactRequired ? resultRows.length : 0,
+          results: resultRows,
+        }
+      }
+      setAdminDeductionResult(result)
+      setAdminDeductionNote('')
+      setAdminDeductionReview(false)
+      setAdminConfirmSeriousBulk(false)
+      setAdminDeductionRequestId(newRequestId())
+      setAnnouncement(`บันทึกครบ ${result.targetCount} คน ตัดคะแนนจริงรวม ${result.totalAppliedPoints} คะแนนเรียบร้อยแล้ว`)
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกการตัดคะแนนทั้งชุดได้ ระบบไม่ได้บันทึกเพียงบางคน')
+    } finally {
+      setBusyAction('')
+    }
   }
 
   async function resetTermScores() {
@@ -596,13 +744,20 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'manage' ? (
         <div className="manage-grid">
+          <ScoreActionSelector
+            value={adminScoreAction}
+            onChange={changeAdminScoreAction}
+            disabled={mutationBusy}
+          />
           <StudentTargetSelector
             students={state.students}
             value={adminSelection}
             onChange={changeAdminSelection}
-            disabled={adminAdditionBusy}
-            actionLabel="เพิ่มคะแนน"
+            disabled={mutationBusy}
+            actionLabel={adminScoreAction === 'addition' ? 'เพิ่มคะแนน' : 'หักคะแนน'}
+            stepStart={2}
           />
+          {adminScoreAction === 'addition' ? (
           <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรงพร้อมหลักฐาน</h2></div></div>
             <div className="selected-student-bar batch-target-bar">
               <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
@@ -622,6 +777,38 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             <button className="button primary" type="submit" disabled={adminAdditionBusy || !adminPositiveRule || !adminTargets.length}>{adminAdditionBusy ? 'กำลังบันทึกทั้งชุด…' : `เพิ่มคะแนน ${adminTargets.length} คนและบันทึกรายละเอียด`}</button>
             {adminAdditionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminAdditionResult.targetCount} คน</strong><span>เพิ่มจริงรวม {adminAdditionResult.totalAppliedPoints} คะแนน</span></div> : null}
           </form>
+          ) : (
+          <form className="panel stack-form" onSubmit={deductPointsDirectly}>
+            <div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div></div>
+            <div className="selected-student-bar batch-target-bar">
+              <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>ทุกคนจะใช้เกณฑ์ วันเวลา และรายละเอียดเหตุการณ์เดียวกัน</small></div></div>
+              <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
+            </div>
+            <fieldset disabled={mutationBusy}><legend>เลือกระเบียบ / ประเภทการกระทำ</legend><div className="rule-grid">{state.rules.filter((rule) => rule.active).map((rule) => <button type="button" key={rule.id} className={rule.id === adminDeductionRuleId ? 'rule-option selected' : 'rule-option'} onClick={() => { setAdminDeductionRuleId(rule.id); invalidateAdminDeduction() }} aria-pressed={rule.id === adminDeductionRuleId}><span><strong>{rule.title}</strong><small>{rule.category}</small></span><span className="rule-points">−{rule.points}</span></button>)}</div></fieldset>
+            {adminDeductionRule ? <div className="rule-summary"><div><StatusBadge severity={adminDeductionRule.severity} /> <span>{adminDeductionRule.category} • คนละ {adminDeductionRule.points} คะแนน</span></div><strong>{adminDeductionBeforeTotal} <span>→</span> {adminDeductionAfterTotal}</strong></div> : null}
+            <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={mutationBusy} max={toLocalDateTimeInputValue()} value={adminDeductionOccurredAt} onChange={(event) => { setAdminDeductionOccurredAt(event.target.value); invalidateAdminDeduction() }} required /></label>
+            <label>รายละเอียดเหตุการณ์ (เฉพาะบุคลากร)<textarea disabled={mutationBusy} value={adminDeductionNote} onChange={(event) => { setAdminDeductionNote(event.target.value); invalidateAdminDeduction() }} placeholder="ระบุข้อเท็จจริง สถานที่ และบริบทที่จำเป็น" minLength={5} required /></label>
+            {adminDeductionRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนโดยอัตโนมัติ</span></div> : null}
+            {adminDeductionReview ? (
+              <section className="deduction-review" aria-label="ตรวจสอบก่อนยืนยัน">
+                <div className="review-heading"><div><p className="eyebrow">ขั้นตอนสุดท้าย</p><h2>ตรวจสอบรายชื่อก่อนบันทึก</h2></div><span className="counter">{adminTargets.length}</span></div>
+                <div className="review-roster">
+                  {adminTargets.map((student) => {
+                    const change = applyScoreDelta(student.score, -(adminDeductionRule?.points ?? 0))
+                    return <div className="review-student" key={student.id}><span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
+                  })}
+                </div>
+                <dl className="review-facts"><div><dt>เกณฑ์</dt><dd>{adminDeductionRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(adminDeductionOccurredAt) ?? adminDeductionOccurredAt)}</dd></div><div><dt>รายละเอียด</dt><dd>{adminDeductionNote.trim()}</dd></div></dl>
+                {adminSeriousBulk ? <label className="confirmation-check"><input type="checkbox" disabled={mutationBusy} checked={adminConfirmSeriousBulk} onChange={(event) => setAdminConfirmSeriousBulk(event.target.checked)} /><span>ยืนยันว่าตรวจสอบรายชื่อกรณีร้ายแรงทั้ง {adminTargets.length} คนแล้ว และรับทราบว่าจะสร้างงานแจ้งผู้ปกครองรายคน</span></label> : null}
+              </section>
+            ) : null}
+            <div className="form-actions">
+              <button type="button" className="button secondary" disabled={mutationBusy} onClick={() => { if (!adminDeductionReview) setAdminDeductionNote(''); invalidateAdminDeduction() }}>{adminDeductionReview ? 'กลับไปแก้ไข' : 'ล้างรายละเอียด'}</button>
+              <button type="submit" className="button primary" disabled={mutationBusy || !adminDeductionRule || !adminTargets.length}>{busyAction === 'admin-deduct' ? 'กำลังบันทึกทั้งชุด…' : adminDeductionReview ? `ยืนยันตัดคะแนน ${adminTargets.length} คน` : 'ตรวจสอบก่อนยืนยัน'}</button>
+            </div>
+            {adminDeductionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminDeductionResult.targetCount} คน</strong><span>ตัดคะแนนจริงรวม {adminDeductionResult.totalAppliedPoints} คะแนน</span></div> : null}
+          </form>
+          )}
           <TermScheduleForm
             key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}`}
             term={state.term}

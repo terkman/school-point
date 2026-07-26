@@ -12,6 +12,36 @@ interface StudentTargetSelectorProps {
   onChange: (next: StudentTargetSelection) => void
   disabled: boolean
   actionLabel: 'หักคะแนน' | 'เพิ่มคะแนน'
+  stepStart?: number
+}
+
+export type ScoreAction = 'addition' | 'deduction'
+
+export function ScoreActionSelector({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ScoreAction
+  onChange: (next: ScoreAction) => void
+  disabled: boolean
+}) {
+  return (
+    <section className="score-action-selector" aria-label="เลือกว่าจะเพิ่มหรือตัดคะแนน">
+      <div className="selection-step-heading action-step-heading">
+        <span><b>1</b> เลือกงานที่ต้องการทำ</span>
+        <small>เลือกก่อนระบุชั้น ห้อง และรายชื่อนักเรียน</small>
+      </div>
+      <div className="score-action-options" role="group" aria-label="ประเภทการจัดการคะแนน">
+        <button type="button" disabled={disabled} className={value === 'addition' ? 'addition active' : 'addition'} aria-pressed={value === 'addition'} onClick={() => onChange('addition')}>
+          <strong>เพิ่มคะแนน</strong><span>กิจกรรมหรือพฤติกรรมเชิงบวก</span>
+        </button>
+        <button type="button" disabled={disabled} className={value === 'deduction' ? 'deduction active' : 'deduction'} aria-pressed={value === 'deduction'} onClick={() => onChange('deduction')}>
+          <strong>ตัดคะแนน</strong><span>บันทึกการกระทำผิดระเบียบ</span>
+        </button>
+      </div>
+    </section>
+  )
 }
 
 export function StudentTargetSelector({
@@ -20,6 +50,7 @@ export function StudentTargetSelector({
   onChange,
   disabled,
   actionLabel,
+  stepStart = 1,
 }: StudentTargetSelectorProps) {
   const [query, setQuery] = useState('')
   const classrooms = useMemo(() => buildClassroomGroups(students), [students])
@@ -91,20 +122,20 @@ export function StudentTargetSelector({
     <section className="target-selector" aria-label={`เลือกนักเรียนสำหรับ${actionLabel}`}>
       <div className="selection-path">
         <label>
-          <span><b>1</b> เลือกชั้น</span>
+          <span><b>{stepStart}</b> เลือกชั้น</span>
           <select disabled={disabled || !grades.length} value={value.gradeLevel} onChange={(event) => selectGrade(event.target.value)}>
             {grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.label}</option>)}
           </select>
         </label>
         <label>
-          <span><b>2</b> เลือกห้อง</span>
+          <span><b>{stepStart + 1}</b> เลือกห้อง</span>
           <select disabled={disabled || !gradeClassrooms.length} value={value.classroomId} onChange={(event) => selectClassroom(event.target.value)}>
             {gradeClassrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name} • {classroom.students.length} คน</option>)}
           </select>
         </label>
       </div>
 
-      <div className="selection-step-heading"><span><b>3</b> เลือกขอบเขต</span><small>{selectedClassroom?.name ?? 'ยังไม่มีห้องเรียน'} • เลือกแล้ว {targets.length} คน</small></div>
+      <div className="selection-step-heading"><span><b>{stepStart + 2}</b> เลือกขอบเขต</span><small>{selectedClassroom?.name ?? 'ยังไม่มีห้องเรียน'} • เลือกแล้ว {targets.length} คน</small></div>
       <div className="scope-switch compact-scope" role="group" aria-label="รูปแบบการเลือกนักเรียน">
         <button type="button" disabled={disabled || !roomStudents.length} className={value.scope === 'single' ? 'active' : ''} aria-pressed={value.scope === 'single'} onClick={() => selectScope('single')}><strong>รายคน</strong><span>เลือก 1 คน</span></button>
         <button type="button" disabled={disabled || !roomStudents.length} className={value.scope === 'selected' ? 'active' : ''} aria-pressed={value.scope === 'selected'} onClick={() => selectScope('selected')}><strong>เฉพาะกลุ่ม</strong><span>เลือกหลายคน</span></button>
