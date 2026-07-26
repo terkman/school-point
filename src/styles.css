@@ -412,6 +412,7 @@ tbody tr:hover td { background: #fbfcfe; }
 .positive-rule-summary strong { color: #155f58; font-size: .84rem; }
 .positive-rule-summary p { margin: 0; color: #3d6864; font-size: .76rem; line-height: 1.55; }
 .positive-rule-summary > small { color: var(--teal); font-size: .7rem; font-weight: 900; }
+.rules-reference-button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .addition-preview { display: grid; grid-template-columns: 1fr auto; gap: 2px 15px; align-items: center; padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: #f9fbfe; }
 .addition-preview > span { color: var(--muted); font-size: .76rem; font-weight: 800; }
 .addition-preview > strong { grid-row: span 2; color: var(--navy); font-size: 1.45rem; }
@@ -477,13 +478,106 @@ tbody tr:hover td { background: #fbfcfe; }
 .reset-preview span { display: flex; flex-direction: column; }
 .reset-preview strong { color: var(--navy); font-size: 1.2rem; }
 .rules-panel { grid-column: 1 / -1; }
-.rule-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
-.rule-list > div { min-height: 58px; display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; border-bottom: 1px solid var(--line); }
-.rule-list > div > span:first-child { display: flex; flex-direction: column; }
-.rule-list strong { font-size: .8rem; }
-.rule-list small { color: var(--muted); font-size: .68rem; }
-.rule-list b { min-width: 34px; color: var(--coral); text-align: right; }
 .danger-zone { border-color: #efc4c7; }
+
+.score-rules-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 24, 54, .58);
+  backdrop-filter: blur(3px);
+}
+.score-rules-dialog {
+  width: min(880px, 100%);
+  max-height: min(86vh, 780px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.65);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 28px 90px rgba(9, 24, 58, .3);
+}
+.score-rules-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 21px 23px 17px;
+  border-bottom: 1px solid var(--line);
+}
+.score-rules-dialog-header h2 { margin: 0; color: var(--navy); font-size: 1.25rem; }
+.score-rules-dialog-close {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #647089;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.score-rules-dialog-close:hover { border-color: #9eb3df; background: var(--indigo-soft); color: var(--indigo); }
+.score-rules-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 13px 23px 0; }
+.score-rules-tabs button {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 3px solid var(--line);
+  background: white;
+  color: #647089;
+  font-weight: 900;
+}
+.score-rules-tabs button span { min-width: 27px; padding: 3px 7px; border-radius: 99px; background: #edf1f7; font-size: .68rem; }
+.score-rules-tabs button.active.deduction { border-bottom-color: var(--coral); color: #96333a; }
+.score-rules-tabs button.active.addition { border-bottom-color: var(--teal); color: #17655d; }
+.score-rules-search { padding: 15px 23px 9px; }
+.score-rules-search input { margin-top: 1px; background: #f8fafc; }
+.score-rules-dialog-meta { padding: 0 23px 9px; color: var(--muted); font-size: .7rem; font-weight: 800; }
+.score-rules-dialog-list { min-height: 150px; overflow-y: auto; overscroll-behavior: contain; padding: 0 23px 22px; }
+.score-rule-dialog-row {
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+}
+.score-rule-dialog-row + .score-rule-dialog-row { margin-top: 8px; }
+.score-rule-dialog-row.deduction { border-left: 4px solid #e6a4aa; }
+.score-rule-dialog-row.addition { border-left: 4px solid #8bcfc6; }
+.score-rule-dialog-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.score-rule-dialog-copy > strong, .score-rule-dialog-title strong { color: var(--ink); font-size: .82rem; line-height: 1.5; }
+.score-rule-dialog-copy > small { color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.score-rule-dialog-title { display: flex; align-items: center; gap: 8px; }
+.score-rule-dialog-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.score-rule-dialog-points { min-width: 66px; text-align: right; font-size: 1.05rem; }
+.score-rule-dialog-points.deduction { color: var(--coral); }
+.score-rule-dialog-points.addition { color: var(--teal); }
+.score-rules-dialog-empty {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  text-align: center;
+}
+.score-rules-dialog-empty strong { color: var(--navy); font-size: .86rem; }
+.score-rules-dialog-empty span { font-size: .72rem; }
 
 .mobile-nav { display: none; }
 
@@ -563,7 +657,19 @@ tbody tr:hover td { background: #fbfcfe; }
   .selection-step-heading { align-items: flex-start; flex-direction: column; }
   .scope-switch button { min-height: 54px; }
   .rules-panel { grid-column: auto; }
-  .rule-grid, .rule-list { grid-template-columns: 1fr; }
+  .rule-grid { grid-template-columns: 1fr; }
+  .rules-reference-button { width: 100%; justify-content: center; }
+  .score-rules-dialog-backdrop { place-items: stretch; padding: 0; }
+  .score-rules-dialog { width: 100%; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; }
+  .score-rules-dialog-header { padding: 17px 16px 13px; }
+  .score-rules-tabs { padding: 10px 16px 0; }
+  .score-rules-tabs button { min-height: 54px; flex-direction: column; gap: 3px; font-size: .75rem; }
+  .score-rules-search { padding: 13px 16px 8px; }
+  .score-rules-dialog-meta { padding-inline: 16px; }
+  .score-rules-dialog-list { padding: 0 16px 18px; }
+  .score-rule-dialog-row { align-items: start; gap: 10px; padding: 12px; }
+  .score-rule-dialog-title { align-items: flex-start; flex-direction: column; }
+  .score-rule-dialog-points { min-width: 52px; font-size: .92rem; }
   .selected-student-bar { align-items: flex-start; }
   .batch-target-bar { flex-direction: column; }
   .batch-target-bar > div:last-child { align-items: flex-start; }

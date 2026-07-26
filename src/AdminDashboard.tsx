@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import {
   applyScoreDelta,
   createId,
@@ -14,6 +14,7 @@ import type {
 } from './dataActions'
 import { validateTermSchedule } from './termSchedule'
 import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
+import { DeductionRuleSelect, ScoreRulesDialog, type ScoreRulesDialogTab } from './ScoreRulesDialog'
 import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './StudentTargetSelector'
 import { createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
@@ -162,7 +163,18 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [tab, setTab] = useState<AdminTab>('overview')
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('addition')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students))
-  const activePositiveRules = state.positiveRules.filter((rule) => rule.active)
+  const activePositiveRules = useMemo(
+    () => state.positiveRules.filter((rule) => rule.active),
+    [state.positiveRules],
+  )
+  const activeDeductionRules = useMemo(
+    () => state.rules
+      .filter((rule) => rule.active)
+      .sort((left, right) => left.points - right.points
+        || left.category.localeCompare(right.category, 'th')
+        || left.title.localeCompare(right.title, 'th')),
+    [state.rules],
+  )
   const initialPositiveRule = activePositiveRules[0]
   const [adminPositiveRuleId, setAdminPositiveRuleId] = useState(initialPositiveRule?.id ?? '')
   const [points, setPoints] = useState(initialPositiveRule?.defaultPoints ?? 1)
@@ -171,7 +183,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
   const [adminRequestId, setAdminRequestId] = useState(() => newRequestId())
   const [adminAdditionResult, setAdminAdditionResult] = useState<AdminAddPointsBulkResult | null>(null)
-  const [adminDeductionRuleId, setAdminDeductionRuleId] = useState(state.rules.find((rule) => rule.active)?.id ?? '')
+  const [adminDeductionRuleId, setAdminDeductionRuleId] = useState(activeDeductionRules[0]?.id ?? '')
   const [adminDeductionOccurredAt, setAdminDeductionOccurredAt] = useState(() => toLocalDateTimeInputValue())
   const [adminDeductionNote, setAdminDeductionNote] = useState('')
   const [adminDeductionReview, setAdminDeductionReview] = useState(false)
@@ -180,13 +192,14 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminDeductionResult, setAdminDeductionResult] = useState<RecordDeductionsResult | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
+  const [rulesDialogTab, setRulesDialogTab] = useState<ScoreRulesDialogTab | null>(null)
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionError, setDecisionError] = useState('')
   const adminTargets = resolveStudentTargets(state.students, adminSelection)
   const adminPositiveRule = activePositiveRules.find((item) => item.id === adminPositiveRuleId)
   const adminPointValidation = validatePositiveRulePoints(adminPositiveRule, points)
-  const adminDeductionRule = state.rules.find((rule) => rule.id === adminDeductionRuleId)
+  const adminDeductionRule = activeDeductionRules.find((rule) => rule.id === adminDeductionRuleId)
   const adminAdditionBeforeTotal = adminTargets.reduce((sum, student) => sum + student.score, 0)
   const adminAdditionAfterTotal = adminTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, points).after, 0)
   const adminAdditionAppliedTotal = adminAdditionAfterTotal - adminAdditionBeforeTotal
@@ -816,7 +829,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             stepStart={2}
           />
           {adminScoreAction === 'addition' ? (
-          <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรงพร้อมหลักฐาน</h2></div></div>
+          <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรงพร้อมหลักฐาน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
@@ -837,12 +850,17 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </form>
           ) : (
           <form className="panel stack-form" onSubmit={deductPointsDirectly}>
-            <div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div></div>
+            <div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>ทุกคนจะใช้เกณฑ์ วันเวลา และรายละเอียดเหตุการณ์เดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
             </div>
-            <fieldset disabled={mutationBusy}><legend>เลือกระเบียบ / ประเภทการกระทำ</legend><div className="rule-grid">{state.rules.filter((rule) => rule.active).map((rule) => <button type="button" key={rule.id} className={rule.id === adminDeductionRuleId ? 'rule-option selected' : 'rule-option'} onClick={() => { setAdminDeductionRuleId(rule.id); invalidateAdminDeduction() }} aria-pressed={rule.id === adminDeductionRuleId}><span><strong>{rule.title}</strong><small>{rule.category}</small></span><span className="rule-points">−{rule.points}</span></button>)}</div></fieldset>
+            <DeductionRuleSelect
+              rules={activeDeductionRules}
+              value={adminDeductionRuleId}
+              disabled={mutationBusy}
+              onChange={(ruleId) => { setAdminDeductionRuleId(ruleId); invalidateAdminDeduction() }}
+            />
             {adminDeductionRule ? <div className="rule-summary"><div><StatusBadge severity={adminDeductionRule.severity} /> <span>{adminDeductionRule.category} • คนละ {adminDeductionRule.points} คะแนน</span></div><strong>{adminDeductionBeforeTotal} <span>→</span> {adminDeductionAfterTotal}</strong></div> : null}
             <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={mutationBusy} max={toLocalDateTimeInputValue()} value={adminDeductionOccurredAt} onChange={(event) => { setAdminDeductionOccurredAt(event.target.value); invalidateAdminDeduction() }} required /></label>
             <label>รายละเอียดเหตุการณ์ (เฉพาะบุคลากร)<textarea disabled={mutationBusy} value={adminDeductionNote} onChange={(event) => { setAdminDeductionNote(event.target.value); invalidateAdminDeduction() }} placeholder="ระบุข้อเท็จจริง สถานที่ และบริบทที่จำเป็น" minLength={5} required /></label>
@@ -879,8 +897,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{transaction.internalReason ? <span>เหตุผล: {transaction.internalReason}</span> : null}{transaction.evidenceNote ? <small>หลักฐาน: {transaction.evidenceNote}</small> : null}<small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
           </section>
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || mutationBusy} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
-          <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ระเบียบตัวอย่าง</p><h2>เกณฑ์การตัดคะแนน</h2></div><span className="counter">{state.rules.length}</span></div><div className="rule-list">{state.rules.map((rule) => <div key={rule.id}><span><strong>{rule.title}</strong><small>{rule.category}</small></span><StatusBadge severity={rule.severity} /><b>−{rule.points}</b></div>)}</div></section>
           {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" disabled={mutationBusy} onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}
+          {rulesDialogTab ? <ScoreRulesDialog initialTab={rulesDialogTab} deductionRules={state.rules} positiveRules={state.positiveRules} onClose={() => setRulesDialogTab(null)} /> : null}
         </div>
       ) : null}
     </AppShell>
