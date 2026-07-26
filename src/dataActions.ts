@@ -149,6 +149,12 @@ export interface UpdateTermScheduleInput {
   endsOn: string
 }
 
+export interface UpdateTeacherClassroomsInput {
+  termId: string
+  teacherId: string
+  classroomIds: string[]
+}
+
 export interface AppDataActions {
   uploadEvidenceFiles: (files: File[]) => Promise<EvidenceAttachment[]>
   createEvidenceUrl: (attachment: EvidenceAttachment) => Promise<string>
@@ -162,5 +168,6 @@ export interface AppDataActions {
   adminAddPointsBulk: (input: AdminAddPointsBulkInput) => Promise<AdminAddPointsBulkResult>
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
+  updateTeacherClassrooms: (input: UpdateTeacherClassroomsInput) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
 }

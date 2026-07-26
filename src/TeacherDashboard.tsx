@@ -442,6 +442,7 @@ export function TeacherDashboard({
               onChange={changeDeductionSelection}
               disabled={deductionBusy}
               actionLabel="ตัดคะแนน"
+              emptyDetail="บัญชีครูยังไม่ได้รับมอบหมายห้อง กรุณาให้ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน"
             />
             <form className="panel action-form" onSubmit={recordDeductions}>
               <div className="section-heading"><div><p className="eyebrow">บันทึกตามสิทธิ์ห้องที่รับผิดชอบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
@@ -503,6 +504,7 @@ export function TeacherDashboard({
             onChange={changeAdditionSelection}
             disabled={additionBusy}
             actionLabel="เพิ่มคะแนน"
+            emptyDetail="บัญชีครูยังไม่ได้รับมอบหมายห้อง กรุณาให้ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน"
           />
           <form className="panel stack-form" onSubmit={submitAdditionRequest}>
             <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>

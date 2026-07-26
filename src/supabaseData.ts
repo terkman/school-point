@@ -1003,6 +1003,11 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_starts_on: input.startsOn,
       p_ends_on: input.endsOn,
     }),
+    updateTeacherClassrooms: (input) => mutate<void>('admin_set_teacher_classrooms', {
+      p_term_id: input.termId,
+      p_teacher_id: input.teacherId,
+      p_classroom_ids: [...new Set(input.classroomIds)],
+    }),
     activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
   }
 }

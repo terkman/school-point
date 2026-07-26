@@ -13,6 +13,7 @@ interface StudentTargetSelectorProps {
   disabled: boolean
   actionLabel: 'ตัดคะแนน' | 'หักคะแนน' | 'เพิ่มคะแนน'
   stepStart?: number
+  emptyDetail?: string
 }
 
 export type ScoreAction = 'addition' | 'deduction'
@@ -51,6 +52,7 @@ export function StudentTargetSelector({
   disabled,
   actionLabel,
   stepStart = 1,
+  emptyDetail,
 }: StudentTargetSelectorProps) {
   const [query, setQuery] = useState('')
   const classrooms = useMemo(() => buildClassroomGroups(students), [students])
@@ -124,13 +126,17 @@ export function StudentTargetSelector({
         <label>
           <span><b>{stepStart}</b> เลือกชั้น</span>
           <select disabled={disabled || !grades.length} value={value.gradeLevel} onChange={(event) => selectGrade(event.target.value)}>
-            {grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.label}</option>)}
+            {grades.length
+              ? grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.label}</option>)
+              : <option value="">ยังไม่มีชั้นในสิทธิ์</option>}
           </select>
         </label>
         <label>
           <span><b>{stepStart + 1}</b> เลือกห้อง</span>
           <select disabled={disabled || !gradeClassrooms.length} value={value.classroomId} onChange={(event) => selectClassroom(event.target.value)}>
-            {gradeClassrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name} • {classroom.students.length} คน</option>)}
+            {gradeClassrooms.length
+              ? gradeClassrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name} • {classroom.students.length} คน</option>)
+              : <option value="">ยังไม่มีห้องในสิทธิ์</option>}
           </select>
         </label>
       </div>
@@ -142,7 +148,12 @@ export function StudentTargetSelector({
         <button type="button" disabled={disabled || !roomStudents.length} className={value.scope === 'classroom' ? 'active' : ''} aria-pressed={value.scope === 'classroom'} onClick={() => selectScope('classroom')}><strong>ทั้งห้อง</strong><span>{roomStudents.length} คน</span></button>
       </div>
 
-      {value.scope === 'classroom' ? (
+      {!grades.length ? (
+        <div className="selection-empty-state" role="status">
+          <strong>ยังเลือกชั้น ห้อง และขอบเขตไม่ได้</strong>
+          <span>{emptyDetail ?? 'ยังไม่มีนักเรียนหรือห้องเรียนที่เปิดใช้งานในภาคเรียนนี้'}</span>
+        </div>
+      ) : value.scope === 'classroom' ? (
         <div className="picker-panel classroom-picker">
           <div className="picker-heading"><strong>{selectedClassroom?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>ระบบจะตรวจรายชื่อทั้งห้องอีกครั้งตอนบันทึก</small></div>
           <div className="classroom-roster">

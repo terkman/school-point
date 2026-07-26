@@ -1,8 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { TermScheduleForm } from './AdminDashboard'
+import { TeacherClassroomAssignmentEditor, TermScheduleForm } from './AdminDashboard'
 import { createDemoState } from './demoData'
+import { buildClassroomGroups } from './studentSelection'
 
 describe('admin academic-term activation', () => {
   it('requires an explicit confirmation before enabling a planned term', () => {
@@ -26,5 +27,26 @@ describe('admin academic-term activation', () => {
     expect(markup).toContain('เปิดใช้งานภาคเรียน')
     expect(markup).toContain('ยืนยันว่าตรวจสอบวันเปิด–ปิด')
     expect(markup).toContain('type="checkbox"')
+  })
+})
+
+describe('admin teacher classroom assignments', () => {
+  it('shows every classroom and the current access count for the selected teacher', () => {
+    const demo = createDemoState()
+    const teacher = demo.teachers[0]
+    const classrooms = buildClassroomGroups(demo.students)
+
+    const markup = renderToStaticMarkup(createElement(TeacherClassroomAssignmentEditor, {
+      teacher,
+      classrooms,
+      busy: false,
+      onSave: async () => undefined,
+      termId: demo.term.id,
+    }))
+
+    expect(markup).toContain(teacher.name)
+    expect(markup).toContain(`${teacher.classroomIds.length} ห้อง`)
+    expect(markup).toContain('เลือกทุกห้อง')
+    for (const classroom of classrooms) expect(markup).toContain(classroom.name)
   })
 })

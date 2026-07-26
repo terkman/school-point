@@ -10,6 +10,7 @@ import type {
   AdminAddPointsBulkResult,
   AppDataActions,
   RecordDeductionsResult,
+  UpdateTeacherClassroomsInput,
   UpdateTermScheduleInput,
 } from './dataActions'
 import { EvidenceField, EvidenceSummary } from './EvidenceField'
@@ -28,7 +29,7 @@ import {
   type ScoreRulesDialogTab,
 } from './ScoreRulesDialog'
 import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './StudentTargetSelector'
-import { createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
+import { buildClassroomGroups, createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
 type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
@@ -167,6 +168,102 @@ export function TermScheduleForm({ term, busy, activating, onSave, onActivate }:
   )
 }
 
+type ClassroomGroup = ReturnType<typeof buildClassroomGroups>[number]
+
+interface TeacherClassroomAssignmentEditorProps {
+  teacher: DemoState['teachers'][number]
+  classrooms: ClassroomGroup[]
+  busy: boolean
+  onSave: (input: UpdateTeacherClassroomsInput) => Promise<void>
+  termId: string
+}
+
+export function TeacherClassroomAssignmentEditor({
+  teacher,
+  classrooms,
+  busy,
+  onSave,
+  termId,
+}: TeacherClassroomAssignmentEditorProps) {
+  const [selectedIds, setSelectedIds] = useState(() => new Set(teacher.classroomIds))
+  const [confirmEmpty, setConfirmEmpty] = useState(false)
+  const [error, setError] = useState('')
+  const originalIds = useMemo(() => new Set(teacher.classroomIds), [teacher.classroomIds])
+  const changed = selectedIds.size !== originalIds.size
+    || [...selectedIds].some((classroomId) => !originalIds.has(classroomId))
+  const allSelected = classrooms.length > 0 && classrooms.every((classroom) => selectedIds.has(classroom.id))
+
+  function toggleClassroom(classroomId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(classroomId)) next.delete(classroomId)
+      else next.add(classroomId)
+      return next
+    })
+    setConfirmEmpty(false)
+    setError('')
+  }
+
+  function toggleAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(classrooms.map((classroom) => classroom.id)))
+    setConfirmEmpty(false)
+    setError('')
+  }
+
+  async function saveAssignments() {
+    if (busy || !changed) return
+    if (!selectedIds.size && !confirmEmpty) {
+      setError('กรุณายืนยันก่อนนำสิทธิ์ห้องทั้งหมดออกจากบัญชีครู')
+      return
+    }
+    setError('')
+    try {
+      await onSave({
+        termId,
+        teacherId: teacher.id,
+        classroomIds: [...selectedIds],
+      })
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถบันทึกสิทธิ์ห้องได้')
+    }
+  }
+
+  return (
+    <div className="teacher-assignment-editor">
+      <div className="assignment-summary">
+        <div><strong>{teacher.name}</strong><span>เลือกห้องที่ครูสามารถดูรายชื่อ ตัดคะแนน และส่งคำขอเพิ่มคะแนนได้</span></div>
+        <b>{selectedIds.size} ห้อง</b>
+      </div>
+      <div className="assignment-toolbar">
+        <span>ห้องเรียนในภาคเรียนปัจจุบัน {classrooms.length} ห้อง</span>
+        <button className="text-button" type="button" disabled={busy || !classrooms.length} onClick={toggleAll}>
+          {allSelected ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทุกห้อง'}
+        </button>
+      </div>
+      {classrooms.length ? (
+        <div className="classroom-access-grid">
+          {classrooms.map((classroom) => (
+            <label className={selectedIds.has(classroom.id) ? 'classroom-access-option selected' : 'classroom-access-option'} key={classroom.id}>
+              <input type="checkbox" disabled={busy} checked={selectedIds.has(classroom.id)} onChange={() => toggleClassroom(classroom.id)} />
+              <span><strong>{classroom.name}</strong><small>{classroom.gradeLabel} • {classroom.students.length} คน</small></span>
+            </label>
+          ))}
+        </div>
+      ) : <EmptyState title="ยังไม่มีห้องเรียน" detail="นำเข้ารายชื่อนักเรียนและห้องเรียนก่อนกำหนดสิทธิ์ให้ครู" />}
+      {!selectedIds.size && changed ? (
+        <label className="confirmation-check">
+          <input type="checkbox" disabled={busy} checked={confirmEmpty} onChange={(event) => { setConfirmEmpty(event.target.checked); setError('') }} />
+          <span>ยืนยันให้นำสิทธิ์ห้องทั้งหมดออก ครูคนนี้จะยังเลือกชั้น ห้อง และนักเรียนไม่ได้</span>
+        </label>
+      ) : null}
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <button className="button primary full" type="button" disabled={busy || !changed || (!selectedIds.size && !confirmEmpty)} onClick={() => void saveAssignments()}>
+        {busy ? 'กำลังบันทึกสิทธิ์…' : changed ? `บันทึกสิทธิ์ ${selectedIds.size} ห้อง` : 'สิทธิ์ห้องเป็นปัจจุบันแล้ว'}
+      </button>
+    </div>
+  )
+}
+
 export function AdminDashboard({ account, state, onChange, actions, onResetDemo, onLogout }: AdminDashboardProps) {
   const pending = state.additionRequests.filter((item) => item.status === 'pending')
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
@@ -212,6 +309,9 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionError, setDecisionError] = useState('')
+  const [assignmentTeacherId, setAssignmentTeacherId] = useState(state.teachers[0]?.id ?? '')
+  const assignmentClassrooms = useMemo(() => buildClassroomGroups(state.students), [state.students])
+  const assignmentTeacher = state.teachers.find((teacher) => teacher.id === assignmentTeacherId) ?? state.teachers[0]
   const adminTargets = resolveStudentTargets(state.students, adminSelection)
   const adminPositiveRule = activePositiveRules.find((item) => item.id === adminPositiveRuleId)
   const adminPointValidation = validatePositiveRulePoints(adminPositiveRule, points)
@@ -718,6 +818,34 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
   }
 
+  async function updateTeacherClassrooms(input: UpdateTeacherClassroomsInput) {
+    if (mutationBusy) return
+    setBusyAction('teacher-classrooms')
+    setAnnouncement('')
+    try {
+      if (actions) {
+        await actions.updateTeacherClassrooms(input)
+      } else {
+        onChange({
+          ...state,
+          teachers: state.teachers.map((teacher) => teacher.id === input.teacherId
+            ? { ...teacher, classroomIds: [...new Set(input.classroomIds)] }
+            : teacher),
+        })
+      }
+      const teacherName = state.teachers.find((teacher) => teacher.id === input.teacherId)?.name ?? 'ครูที่เลือก'
+      setAnnouncement(input.classroomIds.length
+        ? `บันทึกสิทธิ์ ${input.classroomIds.length} ห้องให้ ${teacherName} แล้ว`
+        : `นำสิทธิ์ห้องทั้งหมดออกจาก ${teacherName} แล้ว`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกสิทธิ์ห้องได้'
+      setAnnouncement(message)
+      throw error
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
       <div className="page-heading">
@@ -864,6 +992,30 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'manage' ? (
         <div className="manage-grid">
+          <section className="panel teacher-access-panel">
+            <div className="section-heading">
+              <div><p className="eyebrow">สิทธิ์การเข้าถึงของครู</p><h2>มอบหมายห้องที่รับผิดชอบ</h2></div>
+              <span className="counter">{state.teachers.length}</span>
+            </div>
+            <p className="form-help">ครูจะเห็นและจัดการได้เฉพาะนักเรียนในห้องที่เลือกไว้ การเปลี่ยนแปลงจะมีผลเมื่อครูรีเฟรชหรือเข้าสู่ระบบใหม่</p>
+            <label>เลือกครู
+              <select disabled={mutationBusy || !state.teachers.length} value={assignmentTeacher?.id ?? ''} onChange={(event) => setAssignmentTeacherId(event.target.value)}>
+                {state.teachers.length
+                  ? state.teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name} • {teacher.classroomIds.length} ห้อง</option>)
+                  : <option value="">ยังไม่มีข้อมูลครู</option>}
+              </select>
+            </label>
+            {assignmentTeacher ? (
+              <TeacherClassroomAssignmentEditor
+                key={`${assignmentTeacher.id}:${[...assignmentTeacher.classroomIds].sort().join(',')}`}
+                teacher={assignmentTeacher}
+                classrooms={assignmentClassrooms}
+                busy={busyAction === 'teacher-classrooms'}
+                onSave={updateTeacherClassrooms}
+                termId={state.term.id}
+              />
+            ) : <EmptyState title="ยังไม่มีข้อมูลครู" detail="นำเข้าข้อมูลครูก่อนกำหนดห้องที่รับผิดชอบ" />}
+          </section>
           <ScoreActionSelector
             value={adminScoreAction}
             onChange={changeAdminScoreAction}

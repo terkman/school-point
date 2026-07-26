@@ -148,6 +148,25 @@ describe('Supabase private score evidence', () => {
 })
 
 describe('Supabase score mutations', () => {
+  it('replaces a teacher classroom access set with one admin RPC and refreshes once', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { ok: true, updated: true }, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await actions.updateTeacherClassrooms({
+      termId: '9',
+      teacherId: '21',
+      classroomIds: ['7', '8', '7'],
+    })
+
+    expect(rpc).toHaveBeenCalledWith('admin_set_teacher_classrooms', {
+      p_term_id: '9',
+      p_teacher_id: '21',
+      p_classroom_ids: ['7', '8'],
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('records a reviewed group with one retry-safe RPC and refreshes once', async () => {
     const summary = {
       ok: true,
