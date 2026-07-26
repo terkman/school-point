@@ -140,7 +140,23 @@ p { line-height: 1.65; color: var(--muted); }
 .brand-copy { display: flex; flex-direction: column; margin-left: 11px; }
 .brand-copy strong { font-size: 1rem; letter-spacing: .01em; }
 .brand-copy span { font-size: .72rem; color: #bfcbea; }
-.term-chip { margin-left: auto; padding: 7px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 7px; font-size: .78rem; color: #dce6ff; }
+.topbar-actions { display: flex; align-items: center; gap: 9px; margin-left: auto; }
+.term-chip { padding: 7px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 7px; font-size: .78rem; color: #dce6ff; }
+.topbar-logout {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255,255,255,.34);
+  border-radius: 7px;
+  background: rgba(255,255,255,.1);
+  color: white;
+  font-size: .78rem;
+  font-weight: 800;
+}
+.topbar-logout:hover { background: rgba(255,255,255,.2); }
+.topbar-logout:focus-visible { outline: 3px solid rgba(147,182,255,.65); outline-offset: 2px; }
 
 .app-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: calc(100vh - 98px); }
 .sidebar {
@@ -523,6 +539,8 @@ tbody tr:hover td { background: #fbfcfe; }
   .demo-banner { min-height: 34px; font-size: .68rem; }
   .topbar { height: 60px; padding: 0 14px; }
   .brand-copy span, .term-chip { display: none; }
+  .topbar-actions { gap: 0; }
+  .topbar-logout { min-height: 38px; padding-inline: 10px; font-size: .7rem; }
   .app-layout { display: block; min-height: calc(100vh - 94px); }
   .sidebar { display: none; }
   .main-content { padding: 20px 14px 92px; }

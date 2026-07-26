@@ -101,7 +101,13 @@ export function AppShell<T extends string>({
           <strong>School Point</strong>
           <span>ระบบคะแนนความประพฤติ</span>
         </div>
-        <div className="term-chip">{state.term.label}</div>
+        <div className="topbar-actions">
+          <div className="term-chip">{state.term.label}</div>
+          <button className="topbar-logout" type="button" onClick={onLogout}>
+            <Icon name="logout" size={18} />
+            <span>ออกจากระบบ</span>
+          </button>
+        </div>
       </header>
       <div className="app-layout">
         <aside className="sidebar" aria-label="เมนูหลัก">
