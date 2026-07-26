@@ -6,9 +6,11 @@ import {
   type Account,
   type DemoState,
 } from './domain'
-import type { AppDataActions, UpdateTermScheduleInput } from './dataActions'
+import type { AdminAddPointsBulkResult, AppDataActions, UpdateTermScheduleInput } from './dataActions'
 import { validateTermSchedule } from './termSchedule'
 import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
+import { StudentTargetSelector } from './StudentTargetSelector'
+import { createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
 type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
@@ -114,7 +116,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const openAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
   const [tab, setTab] = useState<AdminTab>('overview')
-  const [studentId, setStudentId] = useState(state.students[0]?.id ?? '')
+  const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students))
   const activePositiveRules = state.positiveRules.filter((rule) => rule.active)
   const initialPositiveRule = activePositiveRules[0]
   const [adminPositiveRuleId, setAdminPositiveRuleId] = useState(initialPositiveRule?.id ?? '')
@@ -123,15 +125,18 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [reason, setReason] = useState('')
   const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
   const [adminRequestId, setAdminRequestId] = useState(() => newRequestId())
+  const [adminAdditionResult, setAdminAdditionResult] = useState<AdminAddPointsBulkResult | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionError, setDecisionError] = useState('')
-  const adminStudent = state.students.find((item) => item.id === studentId)
+  const adminTargets = resolveStudentTargets(state.students, adminSelection)
   const adminPositiveRule = activePositiveRules.find((item) => item.id === adminPositiveRuleId)
   const adminPointValidation = validatePositiveRulePoints(adminPositiveRule, points)
-  const adminAdditionPreview = adminStudent ? applyScoreDelta(adminStudent.score, points) : null
+  const adminAdditionBeforeTotal = adminTargets.reduce((sum, student) => sum + student.score, 0)
+  const adminAdditionAfterTotal = adminTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, points).after, 0)
+  const adminAdditionAppliedTotal = adminAdditionAfterTotal - adminAdditionBeforeTotal
   const mutationBusy = Boolean(busyAction)
   const adminAdditionBusy = mutationBusy
   const selectedRequest = (state.additionRequests.find((item) => item.id === selectedRequestId)
@@ -276,28 +281,43 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   }
 
   function invalidateAdminRequest() {
+    setAdminAdditionResult(null)
     setAdminRequestId(newRequestId())
+  }
+
+  function changeAdminSelection(next: typeof adminSelection) {
+    setAdminSelection(next)
+    invalidateAdminRequest()
   }
 
   async function addPointsDirectly(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (mutationBusy) return
-    const student = adminStudent
     const activityIso = localDateTimeToIso(activityOccurredAt)
-    if (!student || !adminPositiveRule || !adminPointValidation.valid || !activityIso || reason.trim().length < 5 || adminEvidenceNote.trim().length < 5) {
+    if (!adminPositiveRule || !adminPointValidation.valid || !activityIso || reason.trim().length < 5 || adminEvidenceNote.trim().length < 5) {
       setAnnouncement(adminPointValidation.message ?? 'กรุณากรอกเกณฑ์ วันทำกิจกรรม เหตุผล และหลักฐานให้ครบถ้วน')
       return
     }
-    if (student.score >= 100) {
-      setAnnouncement('นักเรียนมีคะแนนเต็ม 100 แล้ว จึงไม่สามารถเพิ่มคะแนนได้')
+    if (adminSelection.scope === 'selected' && adminTargets.length < 2) {
+      setAnnouncement('โหมดเฉพาะกลุ่มต้องเลือกนักเรียนอย่างน้อย 2 คน')
+      return
+    }
+    if (!adminTargets.length) {
+      setAnnouncement('กรุณาเลือกนักเรียนหรือห้องเรียนที่ต้องการเพิ่มคะแนน')
+      return
+    }
+    if (adminTargets.every((student) => student.score >= 100)) {
+      setAnnouncement('นักเรียนที่เลือกทุกคนมีคะแนนเต็ม 100 แล้ว จึงไม่มีคะแนนให้เพิ่ม')
       return
     }
     if (actions) {
       setBusyAction('admin-add')
       try {
-        const result = await actions.adminAddPoints({
+        const result = await actions.adminAddPointsBulk({
           clientRequestId: adminRequestId,
-          studentId: student.id,
+          scope: adminSelection.scope,
+          studentIds: adminTargets.map((student) => student.id),
+          classroomId: adminSelection.classroomId,
           positiveRuleId: adminPositiveRule.id,
           points,
           activityOccurredAt: activityIso,
@@ -308,23 +328,31 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         setReason('')
         setAdminEvidenceNote('')
         setAdminRequestId(newRequestId())
-        setAnnouncement(`เพิ่มคะแนนให้ ${student.name} จริง ${result.appliedPoints} คะแนน จาก ${result.balanceBefore} เป็น ${result.balanceAfter} และบันทึกรายละเอียดแล้ว`)
+        setAdminAdditionResult(result)
+        setAnnouncement(`เพิ่มคะแนนครบ ${result.targetCount} คน รวมเพิ่มจริง ${result.totalAppliedPoints} คะแนน และบันทึกรายละเอียดแล้ว`)
       } catch (error) {
-        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเพิ่มคะแนนได้')
+        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเพิ่มคะแนนทั้งชุดได้ ระบบไม่ได้บันทึกเพียงบางคน')
       } finally {
         setBusyAction('')
       }
       return
     }
-    const change = applyScoreDelta(student.score, points)
+    const resultRows = adminTargets.map((student) => {
+      const change = applyScoreDelta(student.score, points)
+      return { student, change, ledgerId: createId('tx') }
+    })
+    const resultByStudent = new Map(resultRows.map((row) => [row.student.id, row.change]))
     onChange({
       ...state,
-      students: state.students.map((item) => item.id === student.id ? { ...item, score: change.after } : item),
-      transactions: [{
-        id: createId('tx'),
+      students: state.students.map((student) => {
+        const change = resultByStudent.get(student.id)
+        return change ? { ...student, score: change.after } : student
+      }),
+      transactions: [...resultRows.map(({ student, change, ledgerId }) => ({
+        id: ledgerId,
         studentId: student.id,
         termId: state.term.id,
-        kind: 'addition',
+        kind: 'addition' as const,
         requestedDelta: change.requestedDelta,
         appliedDelta: change.appliedDelta,
         scoreBefore: change.before,
@@ -337,13 +365,34 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         activityOccurredAt: activityIso,
         evidenceNote: adminEvidenceNote.trim(),
         internalReason: reason.trim(),
-        additionSource: 'admin_direct',
-      }, ...state.transactions],
+        additionSource: 'admin_direct' as const,
+      })), ...state.transactions],
     })
+    const localResult: AdminAddPointsBulkResult = {
+      ok: true,
+      replayed: false,
+      batchId: createId('admin-addition-batch'),
+      scope: adminSelection.scope,
+      classroomId: adminSelection.classroomId,
+      targetCount: resultRows.length,
+      requestedPointsEach: points,
+      totalAppliedPoints: resultRows.reduce((sum, row) => sum + row.change.appliedDelta, 0),
+      results: resultRows.map(({ student, change, ledgerId }) => ({
+        ok: true,
+        replayed: false,
+        ledgerId,
+        studentId: student.id,
+        requestedPoints: points,
+        appliedPoints: change.appliedDelta,
+        balanceBefore: change.before,
+        balanceAfter: change.after,
+      })),
+    }
     setReason('')
     setAdminEvidenceNote('')
     setAdminRequestId(newRequestId())
-    setAnnouncement(`เพิ่มคะแนน ${student.name} จาก ${change.before} เป็น ${change.after} เรียบร้อยแล้ว`)
+    setAdminAdditionResult(localResult)
+    setAnnouncement(`เพิ่มคะแนนครบ ${localResult.targetCount} คน รวมเพิ่มจริง ${localResult.totalAppliedPoints} คะแนนเรียบร้อยแล้ว`)
   }
 
   async function resetTermScores() {
@@ -547,8 +596,18 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'manage' ? (
         <div className="manage-grid">
+          <StudentTargetSelector
+            students={state.students}
+            value={adminSelection}
+            onChange={changeAdminSelection}
+            disabled={adminAdditionBusy}
+            actionLabel="เพิ่มคะแนน"
+          />
           <form className="panel stack-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">สิทธิ์ผู้ดูแลระบบ</p><h2>เพิ่มคะแนนโดยตรงพร้อมหลักฐาน</h2></div></div>
-            <label>นักเรียน<select disabled={adminAdditionBusy} value={studentId} onChange={(event) => { setStudentId(event.target.value); invalidateAdminRequest() }}>{state.students.map((student) => <option key={student.id} value={student.id}>{student.studentCode} • {student.name} ({student.score}/100)</option>)}</select></label>
+            <div className="selected-student-bar batch-target-bar">
+              <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
+              <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
+            </div>
             <label>เกณฑ์การเพิ่มคะแนน<select disabled={adminAdditionBusy} value={adminPositiveRuleId} onChange={(event) => { const nextId = event.target.value; const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} required><option value="" disabled>เลือกเกณฑ์</option>{activePositiveRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.code} • {rule.title}</option>)}</select></label>
             {adminPositiveRule ? <div className="positive-rule-summary"><div><span className="badge status-approved">{adminPositiveRule.code}</span><strong>{adminPositiveRule.title}</strong></div><p>{adminPositiveRule.description || adminPositiveRule.category}</p><small>{adminPositiveRule.discretionary ? `กำหนดได้ 1–${adminPositiveRule.maxPoints} คะแนน` : `คะแนนตามเกณฑ์ +${adminPositiveRule.defaultPoints ?? 0}`}</small></div> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
             <div className="date-field-grid">
@@ -556,11 +615,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               <label>จำนวนคะแนน<input type="number" disabled={adminAdditionBusy} min="1" max={adminPositiveRule?.maxPoints ?? 100} readOnly={!adminPositiveRule?.discretionary} value={points} onChange={(event) => { setPoints(Number(event.target.value)); invalidateAdminRequest() }} /></label>
             </div>
             {!adminPointValidation.valid && adminPointValidation.message ? <p className="form-error">{adminPointValidation.message}</p> : null}
-            {adminAdditionPreview ? <div className="addition-preview"><span>คะแนนหลังบันทึก (สูงสุด 100)</span><strong>{adminAdditionPreview.before} <i>→</i> {adminAdditionPreview.after}</strong><small>ระบบจะเพิ่มจริง {adminAdditionPreview.appliedDelta} คะแนน</small></div> : null}
+            {adminTargets.length ? <div className="addition-preview"><span>คะแนนรวมหลังบันทึก (รายคนสูงสุด 100)</span><strong>{adminAdditionBeforeTotal} <i>→</i> {adminAdditionAfterTotal}</strong><small>ระบบจะเพิ่มจริงรวม {adminAdditionAppliedTotal} คะแนน</small></div> : null}
             <label>เหตุผลภายใน<textarea disabled={adminAdditionBusy} value={reason} onChange={(event) => { setReason(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="อธิบายกิจกรรมหรือพฤติกรรมที่ตรงกับเกณฑ์" /></label>
             <label>หลักฐานประกอบ<textarea disabled={adminAdditionBusy} value={adminEvidenceNote} onChange={(event) => { setAdminEvidenceNote(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="ระบุเอกสาร ภาพถ่าย หรือผู้รับรองที่ตรวจสอบได้" /></label>
             <p className="scope-note"><Icon name="shield" size={18} /> นักเรียนเห็นเฉพาะชื่อเกณฑ์และคะแนน ไม่เห็นเหตุผลภายในหรือหลักฐาน</p>
-            <button className="button primary" type="submit" disabled={adminAdditionBusy || !adminPositiveRule || adminStudent?.score === 100}>{adminAdditionBusy ? 'กำลังบันทึก…' : 'เพิ่มคะแนนและบันทึกรายละเอียด'}</button>
+            <button className="button primary" type="submit" disabled={adminAdditionBusy || !adminPositiveRule || !adminTargets.length}>{adminAdditionBusy ? 'กำลังบันทึกทั้งชุด…' : `เพิ่มคะแนน ${adminTargets.length} คนและบันทึกรายละเอียด`}</button>
+            {adminAdditionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminAdditionResult.targetCount} คน</strong><span>เพิ่มจริงรวม {adminAdditionResult.totalAppliedPoints} คะแนน</span></div> : null}
           </form>
           <TermScheduleForm
             key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}`}

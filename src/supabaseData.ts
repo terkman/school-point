@@ -1,5 +1,11 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
-import type { AdminAddPointsResult, AppDataActions, RecordDeductionsResult } from './dataActions'
+import type {
+  AdminAddPointsBulkResult,
+  AdminAddPointsResult,
+  AppDataActions,
+  RecordDeductionsResult,
+  RequestPointAdditionsResult,
+} from './dataActions'
 import type {
   Account,
   Appeal,
@@ -84,6 +90,8 @@ interface EnrollmentRow {
 interface ClassroomRow {
   id: number | string
   display_name: string
+  grade_level: string
+  room_number: string
 }
 
 interface AssignmentRow {
@@ -323,6 +331,62 @@ function normalizeAdminAddPointsResult(value: unknown): AdminAddPointsResult {
   return result
 }
 
+function normalizeRequestPointAdditionsResult(value: unknown): RequestPointAdditionsResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปคำขอเพิ่มคะแนนกลับมา')
+  const row = value as Record<string, unknown>
+  if (!['single', 'selected', 'classroom'].includes(String(row.scope)) || !Array.isArray(row.requests)) {
+    throw new Error('รูปแบบผลสรุปคำขอเพิ่มคะแนนไม่ถูกต้อง')
+  }
+  const result: RequestPointAdditionsResult = {
+    ok: row.ok === true,
+    replayed: row.replayed === true,
+    batchId: String(row.batchId ?? ''),
+    scope: String(row.scope) as RequestPointAdditionsResult['scope'],
+    classroomId: String(row.classroomId ?? ''),
+    targetCount: Number(row.targetCount),
+    requestedPointsEach: Number(row.requestedPointsEach),
+    requests: row.requests.map((request) => {
+      const item = request as Record<string, unknown>
+      return {
+        studentId: String(item.studentId ?? ''),
+        requestId: String(item.requestId ?? ''),
+        status: 'pending' as const,
+      }
+    }),
+  }
+  if (!result.ok || !result.batchId || !result.classroomId || !Number.isFinite(result.targetCount)
+    || result.requests.length !== result.targetCount
+    || result.requests.some((item) => !item.studentId || !item.requestId)) {
+    throw new Error('รูปแบบผลสรุปคำขอเพิ่มคะแนนไม่ถูกต้อง')
+  }
+  return result
+}
+
+function normalizeAdminAddPointsBulkResult(value: unknown): AdminAddPointsBulkResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปการเพิ่มคะแนนแบบกลุ่มกลับมา')
+  const row = value as Record<string, unknown>
+  if (!['single', 'selected', 'classroom'].includes(String(row.scope)) || !Array.isArray(row.results)) {
+    throw new Error('รูปแบบผลสรุปการเพิ่มคะแนนแบบกลุ่มไม่ถูกต้อง')
+  }
+  const results = row.results.map((item) => normalizeAdminAddPointsResult({ ...(item as Record<string, unknown>), ok: true }))
+  const result: AdminAddPointsBulkResult = {
+    ok: row.ok === true,
+    replayed: row.replayed === true,
+    batchId: String(row.batchId ?? ''),
+    scope: String(row.scope) as AdminAddPointsBulkResult['scope'],
+    classroomId: String(row.classroomId ?? ''),
+    targetCount: Number(row.targetCount),
+    requestedPointsEach: Number(row.requestedPointsEach),
+    totalAppliedPoints: Number(row.totalAppliedPoints),
+    results,
+  }
+  if (!result.ok || !result.batchId || !result.classroomId || !Number.isFinite(result.targetCount)
+    || !Number.isFinite(result.totalAppliedPoints) || results.length !== result.targetCount) {
+    throw new Error('รูปแบบผลสรุปการเพิ่มคะแนนแบบกลุ่มไม่ถูกต้อง')
+  }
+  return result
+}
+
 export function getSessionUsername(user: User): string {
   const metadataUsername = user.user_metadata?.username
   if (typeof metadataUsername === 'string' && metadataUsername.trim()) return metadataUsername.trim().toLowerCase()
@@ -429,7 +493,7 @@ async function loadStudentState(
   const [studentResult, enrollmentResult, classroomResult, scoreResult, history] = await Promise.all([
     client.from('students').select('id,user_id,student_code,title,given_name,family_name,status').eq('user_id', user.id).maybeSingle(),
     client.from('enrollments').select('classroom_id,student_id').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
-    client.from('classrooms').select('id,display_name').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
+    client.from('classrooms').select('id,display_name,grade_level,room_number').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
     client.from('student_current_scores').select('term_id,balance').eq('term_id', term.id).maybeSingle(),
     loadMyStudentHistory(client),
   ])
@@ -479,6 +543,8 @@ async function loadStudentState(
     name: fullName(studentRow),
     classroomId: asId(enrollment.classroom_id),
     classroomName: classroom.display_name,
+    gradeLevel: classroom.grade_level,
+    roomNumber: classroom.room_number,
     score: score?.balance ?? 100,
     status: studentRow.status === 'graduated' ? 'graduated' : 'active',
   }
@@ -552,7 +618,7 @@ async function loadStaffState(
       .range(from, to)),
     fetchAllPages<ClassroomRow>('โหลดห้องเรียน', (from, to) => client
       .from('classrooms')
-      .select('id,display_name')
+      .select('id,display_name,grade_level,room_number')
       .eq('term_id', term.id)
       .eq('is_active', true)
       .order('id')
@@ -635,6 +701,8 @@ async function loadStaffState(
       name: fullName(row),
       classroomId,
       classroomName: classroomById.get(classroomId)?.display_name ?? 'ไม่ระบุห้อง',
+      gradeLevel: classroomById.get(classroomId)?.grade_level,
+      roomNumber: classroomById.get(classroomId)?.room_number,
       score: scoreByStudent.get(asId(row.id))?.balance ?? 100,
       status: row.status === 'graduated' ? 'graduated' : 'active',
     }
@@ -808,6 +876,19 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_reason: input.reason.trim(),
       p_evidence_note: input.evidenceNote.trim(),
     }),
+    requestPointAdditions: async (input) => normalizeRequestPointAdditionsResult(
+      await mutate<unknown>('request_point_additions_bulk', {
+        p_client_request_id: input.clientRequestId,
+        p_scope: input.scope,
+        p_student_ids: input.studentIds,
+        p_classroom_id: input.classroomId,
+        p_positive_rule_id: input.positiveRuleId,
+        p_points: input.points,
+        p_activity_occurred_at: input.activityOccurredAt,
+        p_reason: input.reason.trim(),
+        p_evidence_note: input.evidenceNote.trim(),
+      }),
+    ),
     submitAppeal: (input) => mutate<void>('submit_appeal', {
       p_incident_id: input.incidentId,
       p_reason: input.reason,
@@ -826,6 +907,20 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       await mutate<unknown>('admin_add_points_detailed', {
         p_client_request_id: input.clientRequestId,
         p_student_id: input.studentId,
+        p_positive_rule_id: input.positiveRuleId,
+        p_points: input.points,
+        p_activity_occurred_at: input.activityOccurredAt,
+        p_reason: input.reason.trim(),
+        p_evidence_note: input.evidenceNote.trim(),
+        p_term_id: input.termId,
+      }),
+    ),
+    adminAddPointsBulk: async (input) => normalizeAdminAddPointsBulkResult(
+      await mutate<unknown>('admin_add_points_bulk', {
+        p_client_request_id: input.clientRequestId,
+        p_scope: input.scope,
+        p_student_ids: input.studentIds,
+        p_classroom_id: input.classroomId,
         p_positive_rule_id: input.positiveRuleId,
         p_points: input.points,
         p_activity_occurred_at: input.activityOccurredAt,

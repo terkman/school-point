@@ -185,6 +185,61 @@ describe('Supabase score mutations', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('creates one atomic teacher request batch for a selected classroom group', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        ok: true,
+        replayed: false,
+        batchId: 44,
+        scope: 'selected',
+        classroomId: 8,
+        targetCount: 2,
+        requestedPointsEach: 5,
+        requests: [
+          { studentId: 12, requestId: 71, status: 'pending' },
+          { studentId: 13, requestId: 72, status: 'pending' },
+        ],
+      },
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    const result = await actions.requestPointAdditions({
+      clientRequestId: '98d2826b-861c-4273-90fd-c7a357cb87ea',
+      scope: 'selected',
+      studentIds: ['12', '13'],
+      classroomId: '8',
+      positiveRuleId: '17',
+      points: 5,
+      activityOccurredAt: '2026-07-21T03:30:00.000Z',
+      reason: '  ช่วยจัดกิจกรรมร่วมกันจนเสร็จ  ',
+      evidenceNote: '  ครูประจำกิจกรรมตรวจรายชื่อแล้ว  ',
+    })
+
+    expect(result).toMatchObject({
+      batchId: '44',
+      classroomId: '8',
+      targetCount: 2,
+      requests: [
+        expect.objectContaining({ studentId: '12', requestId: '71' }),
+        expect.objectContaining({ studentId: '13', requestId: '72' }),
+      ],
+    })
+    expect(rpc).toHaveBeenCalledWith('request_point_additions_bulk', {
+      p_client_request_id: '98d2826b-861c-4273-90fd-c7a357cb87ea',
+      p_scope: 'selected',
+      p_student_ids: ['12', '13'],
+      p_classroom_id: '8',
+      p_positive_rule_id: '17',
+      p_points: 5,
+      p_activity_occurred_at: '2026-07-21T03:30:00.000Z',
+      p_reason: 'ช่วยจัดกิจกรรมร่วมกันจนเสร็จ',
+      p_evidence_note: 'ครูประจำกิจกรรมตรวจรายชื่อแล้ว',
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('records a detailed retry-safe direct admin addition', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {
@@ -222,6 +277,64 @@ describe('Supabase score mutations', () => {
       p_activity_occurred_at: '2026-07-21T04:00:00.000Z',
       p_reason: 'ช่วยเตรียมสถานที่จัดกิจกรรม',
       p_evidence_note: 'มีภาพถ่ายและครูงานกิจกรรมรับรอง',
+      p_term_id: '9',
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('adds points to a full classroom with one atomic administrator RPC', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        ok: true,
+        replayed: false,
+        batchId: 55,
+        scope: 'classroom',
+        classroomId: 8,
+        targetCount: 2,
+        requestedPointsEach: 10,
+        totalAppliedPoints: 14,
+        results: [
+          { ledgerId: 301, studentId: 12, requestedPoints: 10, appliedPoints: 4, balanceBefore: 96, balanceAfter: 100 },
+          { ledgerId: 302, studentId: 13, requestedPoints: 10, appliedPoints: 10, balanceBefore: 80, balanceAfter: 90 },
+        ],
+      },
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    const result = await actions.adminAddPointsBulk({
+      clientRequestId: '11cf704e-f534-4da7-85b5-32356afdd230',
+      scope: 'classroom',
+      studentIds: ['12', '13'],
+      classroomId: '8',
+      positiveRuleId: '7',
+      points: 10,
+      activityOccurredAt: '2026-07-21T04:00:00.000Z',
+      reason: '  ร่วมกิจกรรมจิตอาสาทั้งห้อง  ',
+      evidenceNote: '  ครูที่ปรึกษาตรวจรายชื่อแล้ว  ',
+      termId: '9',
+    })
+
+    expect(result).toMatchObject({
+      batchId: '55',
+      targetCount: 2,
+      totalAppliedPoints: 14,
+      results: [
+        expect.objectContaining({ ledgerId: '301', studentId: '12', appliedPoints: 4 }),
+        expect.objectContaining({ ledgerId: '302', studentId: '13', appliedPoints: 10 }),
+      ],
+    })
+    expect(rpc).toHaveBeenCalledWith('admin_add_points_bulk', {
+      p_client_request_id: '11cf704e-f534-4da7-85b5-32356afdd230',
+      p_scope: 'classroom',
+      p_student_ids: ['12', '13'],
+      p_classroom_id: '8',
+      p_positive_rule_id: '7',
+      p_points: 10,
+      p_activity_occurred_at: '2026-07-21T04:00:00.000Z',
+      p_reason: 'ร่วมกิจกรรมจิตอาสาทั้งห้อง',
+      p_evidence_note: 'ครูที่ปรึกษาตรวจรายชื่อแล้ว',
       p_term_id: '9',
     })
     expect(refresh).toHaveBeenCalledTimes(1)

@@ -18,6 +18,8 @@ export interface Student {
   name: string
   classroomId: string
   classroomName: string
+  gradeLevel?: string
+  roomNumber?: string
   score: number
   status: 'active' | 'graduated'
 }
