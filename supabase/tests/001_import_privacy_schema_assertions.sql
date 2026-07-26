@@ -46,6 +46,69 @@ begin
     raise exception 'public.positive_behavior_rules is missing';
   end if;
 
+  if not exists (
+    select 1
+    from storage.buckets bucket
+    where bucket.id = 'score-evidence'
+      and bucket.public = false
+      and bucket.file_size_limit = 10485760
+      and coalesce(bucket.allowed_mime_types, array[]::text[]) @> array[
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/heic',
+        'image/heif',
+        'application/pdf'
+      ]::text[]
+  ) then
+    raise exception 'private score-evidence bucket is missing or too permissive';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies policy
+    where policy.schemaname = 'storage'
+      and policy.tablename = 'objects'
+      and policy.policyname = 'score_evidence_upload'
+      and lower(policy.cmd) = 'insert'
+      and 'authenticated' = any(policy.roles)
+      and position('private.current_role' in lower(coalesce(policy.with_check, ''))) > 0
+      and position('storage.foldername' in lower(coalesce(policy.with_check, ''))) > 0
+      and position('auth.uid()' in lower(coalesce(policy.with_check, ''))) > 0
+  ) then
+    raise exception 'score evidence upload policy must restrict staff to their own folder';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies policy
+    where policy.schemaname = 'storage'
+      and policy.tablename = 'objects'
+      and policy.policyname = 'score_evidence_read'
+      and lower(policy.cmd) = 'select'
+      and 'authenticated' = any(policy.roles)
+      and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+      and position('owner_id' in lower(coalesce(policy.qual, ''))) > 0
+      and position('private.is_admin' in lower(coalesce(policy.qual, ''))) > 0
+  ) then
+    raise exception 'score evidence read policy must restrict access to the owner or an admin';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies policy
+    where policy.schemaname = 'storage'
+      and policy.tablename = 'objects'
+      and policy.policyname = 'score_evidence_delete'
+      and lower(policy.cmd) = 'delete'
+      and 'authenticated' = any(policy.roles)
+      and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+      and position('owner_id' in lower(coalesce(policy.qual, ''))) > 0
+      and position('private.is_admin' in lower(coalesce(policy.qual, ''))) > 0
+  ) then
+    raise exception 'score evidence delete policy must restrict access to the owner or an admin';
+  end if;
+
   if to_regclass('private.deduction_batches') is null then
     raise exception 'private.deduction_batches is missing';
   end if;

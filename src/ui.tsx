@@ -15,6 +15,9 @@ export type IconName =
   | 'check'
   | 'plus'
   | 'book'
+  | 'eye'
+  | 'eyeOff'
+  | 'upload'
 
 const paths: Record<IconName, ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5v-8Z M9 21v-6h6v6" />,
@@ -29,6 +32,9 @@ const paths: Record<IconName, ReactNode> = {
   check: <path d="m5 12 4 4L19 6" />,
   plus: <path d="M12 5v14M5 12h14" />,
   book: <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5V5a2 2 0 0 1 2-2h14v18H6.5A2.5 2.5 0 0 1 4 18.5Z" />,
+  eye: <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm10 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />,
+  eyeOff: <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.3 17.3 0 0 1-2.1 3.1M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 4.1-.9" />,
+  upload: <path d="M12 16V4M7 9l5-5 5 5M5 15v5h14v-5" />,
 }
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {

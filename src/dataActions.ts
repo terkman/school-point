@@ -1,3 +1,5 @@
+import type { EvidenceAttachment } from './evidence'
+
 export type DeductionScope = 'single' | 'selected' | 'classroom'
 
 export interface RecordDeductionsInput {
@@ -148,6 +150,8 @@ export interface UpdateTermScheduleInput {
 }
 
 export interface AppDataActions {
+  uploadEvidenceFiles: (files: File[]) => Promise<EvidenceAttachment[]>
+  createEvidenceUrl: (attachment: EvidenceAttachment) => Promise<string>
   recordDeductions: (input: RecordDeductionsInput) => Promise<RecordDeductionsResult>
   requestPointAddition: (input: RequestPointAdditionInput) => Promise<void>
   requestPointAdditions: (input: RequestPointAdditionsInput) => Promise<RequestPointAdditionsResult>

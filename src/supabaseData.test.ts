@@ -103,6 +103,50 @@ describe('Supabase redacted student history', () => {
   })
 })
 
+describe('Supabase private score evidence', () => {
+  it('uploads evidence under the signed-in user folder and returns a short-lived URL', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'stored' }, error: null })
+    const remove = vi.fn().mockResolvedValue({ data: [], error: null })
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: 'https://example.test/private-link' },
+      error: null,
+    })
+    const from = vi.fn().mockReturnValue({ upload, remove, createSignedUrl })
+    const client = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({
+          data: { session: { user: { id: '9ba2f967-4192-45fc-aa31-30bf91862aef' } } },
+          error: null,
+        }),
+      },
+      storage: { from },
+      rpc: vi.fn(),
+    }
+    const actions = createSupabaseActions(client as unknown as SupabaseClient, vi.fn())
+    const file = {
+      name: 'หลักฐาน.pdf',
+      type: 'application/pdf',
+      size: 2048,
+    } as File
+
+    const [attachment] = await actions.uploadEvidenceFiles([file])
+    const url = await actions.createEvidenceUrl(attachment)
+
+    expect(from).toHaveBeenCalledWith('score-evidence')
+    expect(upload).toHaveBeenCalledWith(
+      expect.stringMatching(/^9ba2f967-4192-45fc-aa31-30bf91862aef\/\d{4}-\d{2}-\d{2}\/[0-9a-f-]+\.pdf$/),
+      file,
+      { cacheControl: '3600', contentType: 'application/pdf', upsert: false },
+    )
+    expect(createSignedUrl).toHaveBeenCalledWith(
+      attachment.path,
+      300,
+      { download: 'หลักฐาน.pdf' },
+    )
+    expect(url).toBe('https://example.test/private-link')
+  })
+})
+
 describe('Supabase score mutations', () => {
   it('records a reviewed group with one retry-safe RPC and refreshes once', async () => {
     const summary = {

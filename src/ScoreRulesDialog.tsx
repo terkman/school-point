@@ -19,16 +19,16 @@ export function DeductionRuleSelect({
 }: DeductionRuleSelectProps) {
   return (
     <>
-      <label>เกณฑ์การตัดคะแนน
+      <label>เหตุผลในการตัดคะแนน
         <select
           disabled={disabled}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           required
         >
-          <option value="" disabled>เลือกเกณฑ์</option>
+          <option value="" disabled>เลือกเหตุผล</option>
           {rules.map((rule) => (
-            <option key={rule.id} value={rule.id}>−{rule.points} • {rule.title}</option>
+            <option key={rule.id} value={rule.id}>{rule.title}</option>
           ))}
         </select>
       </label>
@@ -36,6 +36,51 @@ export function DeductionRuleSelect({
         ? <p className="form-error">ยังไม่มีเกณฑ์การตัดคะแนนที่เปิดใช้งาน</p>
         : null}
     </>
+  )
+}
+
+interface PositiveRuleSelectProps {
+  rules: PositiveBehaviorRule[]
+  value: string
+  disabled: boolean
+  onChange: (ruleId: string) => void
+}
+
+export function PositiveRuleSelect({
+  rules,
+  value,
+  disabled,
+  onChange,
+}: PositiveRuleSelectProps) {
+  return (
+    <>
+      <label>เหตุผลในการเพิ่มคะแนน
+        <select
+          disabled={disabled}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required
+        >
+          <option value="" disabled>เลือกเหตุผล</option>
+          {rules.map((rule) => (
+            <option key={rule.id} value={rule.id}>{rule.title}</option>
+          ))}
+        </select>
+      </label>
+      {rules.length === 0
+        ? <p className="form-error">ยังไม่มีเหตุผลในการเพิ่มคะแนนที่เปิดใช้งาน</p>
+        : null}
+    </>
+  )
+}
+
+export function PositiveRuleSummary({ rule }: { rule: PositiveBehaviorRule }) {
+  return (
+    <div className="positive-rule-summary">
+      <div><strong>{rule.title}</strong></div>
+      <p>{rule.description || rule.category}</p>
+      <small>{rule.discretionary ? `กำหนดได้ 1–${rule.maxPoints} คะแนน` : `คะแนนตามเกณฑ์ +${rule.defaultPoints ?? 0}`}</small>
+    </div>
   )
 }
 
@@ -186,10 +231,7 @@ export function ScoreRulesDialog({
           )) : filteredPositiveRules.map((rule) => (
             <article className="score-rule-dialog-row addition" key={rule.id}>
               <div className="score-rule-dialog-copy">
-                <div className="score-rule-dialog-title">
-                  <span className="badge status-approved">{rule.code}</span>
-                  <strong>{rule.title}</strong>
-                </div>
+                <div className="score-rule-dialog-title"><strong>{rule.title}</strong></div>
                 <small>{rule.description || rule.category}</small>
                 {!rule.active ? <span className="badge">ปิดใช้งาน</span> : null}
               </div>

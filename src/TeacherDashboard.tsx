@@ -4,9 +4,7 @@ import {
   createId,
   formatThaiDate,
   type Account,
-  type BehaviorRule,
   type DemoState,
-  type PositiveBehaviorRule,
 } from './domain'
 import type {
   AppDataActions,
@@ -18,6 +16,19 @@ import {
   toLocalDateTimeInputValue,
   validatePositiveRulePoints,
 } from './teacherWorkflows'
+import { EvidenceField, EvidenceSummary } from './EvidenceField'
+import {
+  encodeEvidenceBundle,
+  hasEvidence,
+  type EvidenceAttachment,
+} from './evidence'
+import {
+  DeductionRuleSelect,
+  PositiveRuleSelect,
+  PositiveRuleSummary,
+  ScoreRulesDialog,
+  type ScoreRulesDialogTab,
+} from './ScoreRulesDialog'
 import { ScoreActionSelector, StudentTargetSelector } from './StudentTargetSelector'
 import {
   buildClassroomGroups,
@@ -41,25 +52,6 @@ function newRequestId(): string {
   return globalThis.crypto.randomUUID()
 }
 
-function RuleOption({ rule, selected, onSelect, disabled }: { rule: BehaviorRule; selected: boolean; onSelect: () => void; disabled: boolean }) {
-  return (
-    <button type="button" disabled={disabled} className={selected ? 'rule-option selected' : 'rule-option'} onClick={onSelect} aria-pressed={selected}>
-      <span><strong>{rule.title}</strong><small>{rule.category}</small></span>
-      <span className="rule-points">−{rule.points}</span>
-    </button>
-  )
-}
-
-function PositiveRuleSummary({ rule }: { rule: PositiveBehaviorRule }) {
-  return (
-    <div className="positive-rule-summary">
-      <div><span className="badge status-approved">{rule.code}</span><strong>{rule.title}</strong></div>
-      <p>{rule.description || rule.category}</p>
-      <small>{rule.discretionary ? `กำหนดได้ 1–${rule.maxPoints} คะแนน` : `คะแนนตามเกณฑ์ +${rule.defaultPoints ?? 0}`}</small>
-    </div>
-  )
-}
-
 export function TeacherDashboard({ account, state, onChange, actions, onLogout }: TeacherDashboardProps) {
   const [tab, setTab] = useState<TeacherTab>('overview')
   const teacher = state.teachers.find((item) => item.id === account.teacherId)
@@ -68,9 +60,23 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
     [state.students, teacher?.classroomIds],
   )
   const classrooms = useMemo(() => buildClassroomGroups(assignedStudents), [assignedStudents])
+  const activeDeductionRules = useMemo(
+    () => state.rules
+      .filter((rule) => rule.active)
+      .sort((left, right) => left.points - right.points
+        || left.category.localeCompare(right.category, 'th')
+        || left.title.localeCompare(right.title, 'th')),
+    [state.rules],
+  )
+  const activePositiveRules = useMemo(
+    () => state.positiveRules
+      .filter((rule) => rule.active)
+      .sort((left, right) => left.title.localeCompare(right.title, 'th')),
+    [state.positiveRules],
+  )
 
   const [deductionSelection, setDeductionSelection] = useState(() => createInitialStudentSelection(assignedStudents))
-  const [ruleId, setRuleId] = useState(state.rules.find((rule) => rule.active)?.id ?? '')
+  const [ruleId, setRuleId] = useState(activeDeductionRules[0]?.id ?? '')
   const [occurredAt, setOccurredAt] = useState(() => toLocalDateTimeInputValue())
   const [internalNote, setInternalNote] = useState('')
   const [reviewingDeduction, setReviewingDeduction] = useState(false)
@@ -78,7 +84,6 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
   const [deductionRequestId, setDeductionRequestId] = useState(() => newRequestId())
   const [deductionResult, setDeductionResult] = useState<RecordDeductionsResult | null>(null)
 
-  const activePositiveRules = state.positiveRules.filter((rule) => rule.active)
   const [additionSelection, setAdditionSelection] = useState(() => createInitialStudentSelection(assignedStudents))
   const [positiveRuleId, setPositiveRuleId] = useState(activePositiveRules[0]?.id ?? '')
   const initialPositiveRule = activePositiveRules[0]
@@ -86,12 +91,15 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
   const [activityOccurredAt, setActivityOccurredAt] = useState(() => toLocalDateTimeInputValue())
   const [requestReason, setRequestReason] = useState('')
   const [evidenceNote, setEvidenceNote] = useState('')
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
+  const [uploadedEvidence, setUploadedEvidence] = useState<EvidenceAttachment[]>([])
   const [additionRequestId, setAdditionRequestId] = useState(() => newRequestId())
   const [additionResult, setAdditionResult] = useState<RequestPointAdditionsResult | null>(null)
 
   const [announcement, setAnnouncement] = useState('')
   const [busy, setBusy] = useState(false)
-  const selectedRule = state.rules.find((item) => item.id === ruleId)
+  const [rulesDialogTab, setRulesDialogTab] = useState<ScoreRulesDialogTab | null>(null)
+  const selectedRule = activeDeductionRules.find((item) => item.id === ruleId)
   const selectedPositiveRule = activePositiveRules.find((item) => item.id === positiveRuleId)
   const additionTargets = resolveStudentTargets(assignedStudents, additionSelection)
   const additionBeforeTotal = additionTargets.reduce((sum, student) => sum + student.score, 0)
@@ -141,8 +149,8 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
   async function recordDeductions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const eventIso = localDateTimeToIso(occurredAt)
-    if (!selectedRule || !eventIso || internalNote.trim().length < 5) {
-      setAnnouncement('กรุณาเลือกเกณฑ์ วันเวลา และระบุรายละเอียดเหตุการณ์อย่างน้อย 5 ตัวอักษร')
+    if (!selectedRule || !eventIso) {
+      setAnnouncement('กรุณาเลือกเหตุผลในการตัดคะแนนและวันเวลาเกิดเหตุ')
       return
     }
     if (deductionSelection.scope === 'selected' && deductionTargets.length < 2) {
@@ -178,7 +186,7 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
           classroomId: deductionSelection.classroomId,
           ruleId: selectedRule.id,
           occurredAt: eventIso,
-          internalNote: internalNote.trim(),
+          internalNote: internalNote.trim() || selectedRule.title,
           confirmSeriousBulk: isSeriousBulk && confirmSeriousBulk,
         })
       } else {
@@ -204,7 +212,7 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
           scoreBefore: row.balanceBefore,
           scoreAfter: row.balanceAfter,
           ruleId: selectedRule.id,
-          reason: internalNote.trim(),
+          reason: internalNote.trim() || selectedRule.title,
           occurredAt: occurredAtIso,
           actorId: account.id,
           incidentId: row.incidentId,
@@ -219,7 +227,7 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
             guardianContactRequired: selectedRule.guardianContactRequired,
             guardianContactStatus: selectedRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
             createdAt: occurredAtIso,
-            internalNote: `ติดตามเหตุการณ์: ${internalNote.trim()}`,
+            internalNote: `ติดตามเหตุการณ์: ${internalNote.trim() || selectedRule.title}`,
           }))
           : []
         const resultByStudent = new Map(resultRows.map((row) => [row.studentId, row]))
@@ -263,8 +271,12 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
   async function submitAdditionRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const activityIso = localDateTimeToIso(activityOccurredAt)
-    if (!selectedPositiveRule || !pointValidation.valid || !activityIso || requestReason.trim().length < 5 || evidenceNote.trim().length < 5) {
-      setAnnouncement(pointValidation.message ?? 'กรุณากรอกเกณฑ์ วันทำกิจกรรม เหตุผล และหลักฐานให้ครบถ้วน')
+    if (!selectedPositiveRule || !pointValidation.valid || !activityIso) {
+      setAnnouncement(pointValidation.message ?? 'กรุณาเลือกเหตุผลในการเพิ่มคะแนนและวันทำกิจกรรม')
+      return
+    }
+    if (!hasEvidence(evidenceNote, uploadedEvidence.length ? uploadedEvidence : evidenceFiles)) {
+      setAnnouncement('กรุณาพิมพ์คำอธิบายหลักฐานอย่างน้อย 5 ตัวอักษร หรือแนบไฟล์อย่างน้อย 1 ไฟล์')
       return
     }
     if (additionSelection.scope === 'selected' && additionTargets.length < 2) {
@@ -281,6 +293,21 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
     }
     setBusy(true)
     try {
+      const attachments = uploadedEvidence.length
+        ? uploadedEvidence
+        : evidenceFiles.length
+          ? actions
+            ? await actions.uploadEvidenceFiles(evidenceFiles)
+            : evidenceFiles.map((file) => ({
+              path: `demo/${newRequestId()}/${file.name}`,
+              name: file.name,
+              size: file.size,
+              contentType: file.type,
+            }))
+          : []
+      if (actions && attachments.length) setUploadedEvidence(attachments)
+      const normalizedReason = requestReason.trim() || selectedPositiveRule.title
+      const encodedEvidence = encodeEvidenceBundle(evidenceNote, attachments)
       let result: RequestPointAdditionsResult
       if (actions) {
         result = await actions.requestPointAdditions({
@@ -291,8 +318,8 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
           positiveRuleId: selectedPositiveRule.id,
           points: requestPoints,
           activityOccurredAt: activityIso,
-          reason: requestReason.trim(),
-          evidenceNote: evidenceNote.trim(),
+          reason: normalizedReason,
+          evidenceNote: encodedEvidence,
         })
       } else {
         const requestRows = additionTargets.map((student) => ({
@@ -309,8 +336,8 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
             positiveRuleCode: selectedPositiveRule.code,
             positiveRuleTitle: selectedPositiveRule.title,
             requestedPoints: requestPoints,
-            reason: requestReason.trim(),
-            evidenceNote: evidenceNote.trim(),
+            reason: normalizedReason,
+            evidenceNote: encodedEvidence,
             activityOccurredAt: activityIso,
             status: 'pending' as const,
             createdAt: new Date().toISOString(),
@@ -334,6 +361,8 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
       setAdditionResult(result)
       setRequestReason('')
       setEvidenceNote('')
+      setEvidenceFiles([])
+      setUploadedEvidence([])
       setAdditionRequestId(newRequestId())
       setAnnouncement(`ส่งคำขอครบ ${result.targetCount} คนแล้ว คะแนนยังไม่เปลี่ยนจนกว่าแอดมินจะอนุมัติรายคน`)
     } catch (error) {
@@ -381,17 +410,23 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
               stepStart={2}
             />
             <form className="panel action-form" onSubmit={recordDeductions}>
+              <div className="section-heading"><div><p className="eyebrow">บันทึกตามสิทธิ์ห้องที่รับผิดชอบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
               <div className="selected-student-bar batch-target-bar">
                 <div><span className="student-avatar large">{deductionTargets.length}</span><div><strong>{deductionSelection.scope === 'single' ? deductionTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : deductionSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : classrooms.find((item) => item.id === deductionSelection.classroomId)?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>{deductionSelection.scope === 'single' ? `${deductionTargets[0]?.studentCode ?? ''} • ${deductionTargets[0]?.classroomName ?? ''}` : 'ทุกคนจะใช้เกณฑ์และรายละเอียดเดียวกัน'}</small></div></div>
                 <div><span>จำนวนเป้าหมาย</span><b>{deductionTargets.length} คน</b></div>
               </div>
-              <fieldset disabled={busy}><legend>เลือกระเบียบ / ประเภทการกระทำ</legend><div className="rule-grid">{state.rules.filter((rule) => rule.active).map((rule) => <RuleOption key={rule.id} rule={rule} selected={rule.id === ruleId} onSelect={() => { setRuleId(rule.id); invalidateDeductionRequest() }} disabled={busy} />)}</div></fieldset>
+              <DeductionRuleSelect
+                rules={activeDeductionRules}
+                value={ruleId}
+                disabled={busy}
+                onChange={(nextRuleId) => { setRuleId(nextRuleId); invalidateDeductionRequest() }}
+              />
               {selectedRule ? <div className="rule-summary"><div><StatusBadge severity={selectedRule.severity} /> <span>{selectedRule.category} • คนละ {selectedRule.points} คะแนน</span></div><strong>{deductionTargets.length ? deductionTargets.reduce((sum, student) => sum + student.score, 0) : 0} <span>→</span> {deductionTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, -selectedRule.points).after, 0)}</strong></div> : null}
               <div className="date-field-grid">
                 <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={busy} max={toLocalDateTimeInputValue()} value={occurredAt} onChange={(event) => { setOccurredAt(event.target.value); invalidateDeductionRequest() }} required /></label>
                 <div className="field-help"><strong>คะแนนรวมก่อน → หลัง</strong><span>ตัวเลขด้านบนคำนวณโดยไม่ให้คะแนนต่ำกว่า 0</span></div>
               </div>
-              <label>รายละเอียดเหตุการณ์ (เฉพาะบุคลากร)<textarea disabled={busy} value={internalNote} onChange={(event) => { setInternalNote(event.target.value); invalidateDeductionRequest() }} placeholder="ระบุข้อเท็จจริง สถานที่ และบริบทที่จำเป็น" minLength={5} required /></label>
+              <label>รายละเอียดเหตุการณ์เพิ่มเติม (ไม่บังคับ)<textarea disabled={busy} value={internalNote} maxLength={2000} onChange={(event) => { setInternalNote(event.target.value); invalidateDeductionRequest() }} placeholder="หากมี สามารถระบุข้อเท็จจริง สถานที่ หรือบริบทเพิ่มเติมได้" /></label>
               {selectedRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนโดยอัตโนมัติ</span></div> : null}
 
               {reviewingDeduction ? (
@@ -403,7 +438,7 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
                       return <div className="review-student" key={student.id}><span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change?.before} → {change?.after}</b></div>
                     })}
                   </div>
-                  <dl className="review-facts"><div><dt>เกณฑ์</dt><dd>{selectedRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(occurredAt) ?? occurredAt)}</dd></div><div><dt>รายละเอียด</dt><dd>{internalNote.trim()}</dd></div></dl>
+                  <dl className="review-facts"><div><dt>เหตุผล</dt><dd>{selectedRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(occurredAt) ?? occurredAt)}</dd></div><div><dt>รายละเอียดเพิ่มเติม</dt><dd>{internalNote.trim() || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</dd></div></dl>
                   {isSeriousBulk ? <label className="confirmation-check"><input type="checkbox" disabled={busy} checked={confirmSeriousBulk} onChange={(event) => setConfirmSeriousBulk(event.target.checked)} /><span>ยืนยันว่าตรวจสอบรายชื่อกรณีร้ายแรงทั้ง {deductionTargets.length} คนแล้ว และรับทราบว่าจะสร้างงานแจ้งผู้ปกครองรายคน</span></label> : null}
                 </section>
               ) : null}
@@ -441,12 +476,12 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
             stepStart={2}
           />
           <form className="panel stack-form" onSubmit={submitAdditionRequest}>
-            <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน</h2></div></div>
+            <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div><span className="student-avatar large">{additionTargets.length}</span><div><strong>{additionSelection.scope === 'single' ? additionTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : additionSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : classrooms.find((item) => item.id === additionSelection.classroomId)?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>ระบบจะสร้างคำขอแยกให้นักเรียนทุกคน เพื่อให้แอดมินตรวจสอบรายคน</small></div></div>
               <div><span>จำนวนคำขอ</span><b>{additionTargets.length} รายการ</b></div>
             </div>
-            <label>เกณฑ์การเพิ่มคะแนน<select disabled={busy} value={positiveRuleId} onChange={(event) => { const nextId = event.target.value; const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setPositiveRuleId(nextId); setRequestPoints(nextRule?.defaultPoints ?? 1); invalidateAdditionRequest() }} required><option value="" disabled>เลือกเกณฑ์</option>{activePositiveRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.code} • {rule.title}</option>)}</select></label>
+            <PositiveRuleSelect rules={activePositiveRules} value={positiveRuleId} disabled={busy} onChange={(nextId) => { const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setPositiveRuleId(nextId); setRequestPoints(nextRule?.defaultPoints ?? 1); invalidateAdditionRequest() }} />
             {selectedPositiveRule ? <PositiveRuleSummary rule={selectedPositiveRule} /> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
             <div className="date-field-grid">
               <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={busy} max={toLocalDateTimeInputValue()} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdditionRequest() }} required /></label>
@@ -454,15 +489,21 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
             </div>
             {!pointValidation.valid && pointValidation.message ? <p className="form-error">{pointValidation.message}</p> : null}
             {additionTargets.length ? <div className="addition-preview"><span>คะแนนรวม หากแอดมินอนุมัติครบ</span><strong>{additionBeforeTotal} <i>→</i> {additionAfterTotal}</strong><small>เพิ่มจริงรวมสูงสุด {additionAppliedTotal} คะแนน โดยแต่ละคนไม่เกิน 100</small></div> : null}
-            <label>เหตุผล / งานที่นักเรียนทำ<textarea disabled={busy} value={requestReason} onChange={(event) => { setRequestReason(event.target.value); invalidateAdditionRequest() }} required minLength={5} placeholder="อธิบายงานหรือพฤติกรรมเชิงบวกที่ตรงกับเกณฑ์" /></label>
-            <label>หลักฐานประกอบ<textarea disabled={busy} value={evidenceNote} onChange={(event) => { setEvidenceNote(event.target.value); invalidateAdditionRequest() }} required minLength={5} placeholder="ระบุชื่อเอกสาร ภาพถ่าย ผู้รับรอง หรือแหล่งตรวจสอบหลักฐาน" /></label>
-            <p className="scope-note"><Icon name="shield" size={18} /> เหตุผลและหลักฐานจะแสดงเฉพาะครูและแอดมิน นักเรียนจะไม่เห็นข้อมูลภายในส่วนนี้</p>
+            <label>รายละเอียดเพิ่มเติม (ไม่บังคับ)<textarea disabled={busy} value={requestReason} maxLength={2000} onChange={(event) => { setRequestReason(event.target.value); invalidateAdditionRequest() }} placeholder="หากมี สามารถอธิบายงานหรือพฤติกรรมเพิ่มเติมได้" /></label>
+            <EvidenceField
+              note={evidenceNote}
+              files={evidenceFiles}
+              disabled={busy}
+              onNoteChange={(note) => { setEvidenceNote(note); invalidateAdditionRequest() }}
+              onFilesChange={(files) => { setEvidenceFiles(files); setUploadedEvidence([]); invalidateAdditionRequest() }}
+            />
+            <p className="scope-note"><Icon name="shield" size={18} /> รายละเอียดและไฟล์หลักฐานจะแสดงเฉพาะครูกับแอดมิน นักเรียนจะไม่เห็นข้อมูลภายในส่วนนี้</p>
             <button className="button primary" type="submit" disabled={busy || !selectedPositiveRule || !additionTargets.length}>{busy ? 'กำลังส่งทั้งชุด…' : `ส่งคำขอ ${additionTargets.length} คนให้แอดมินตรวจสอบ`}</button>
             {additionResult ? <div className="batch-result compact-result"><strong>ส่งคำขอสำเร็จ {additionResult.targetCount} คน</strong><span>แอดมินจะอนุมัติหรือปฏิเสธแยกเป็นรายคน</span></div> : null}
           </form>
           </div>
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ประวัติคำขอ</p><h2>สถานะการอนุมัติ</h2></div><span className="counter">{teacherRequests.length}</span></div>
-            {teacherRequests.length ? <div className="record-list">{teacherRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); return <article className="record-row detailed-record" key={request.id}><div><strong>{student?.name} • +{request.requestedPoints}</strong><span>{request.positiveRuleTitle ?? 'ไม่ระบุเกณฑ์'}</span><span>{request.reason}</span>{request.evidenceNote ? <small>หลักฐาน: {request.evidenceNote}</small> : null}<small>ทำกิจกรรม {formatThaiDate(request.activityOccurredAt ?? request.createdAt)} • ส่ง {formatThaiDate(request.createdAt)}</small>{request.decisionNote ? <small>หมายเหตุแอดมิน: {request.decisionNote}</small> : null}</div><span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span></article> })}</div> : <EmptyState title="ยังไม่มีคำขอ" detail="คำขอเพิ่มคะแนนที่ส่งแล้วจะแสดงพร้อมรายละเอียดที่นี่" />}
+            {teacherRequests.length ? <div className="record-list">{teacherRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); const detail = request.reason.trim() !== request.positiveRuleTitle?.trim() ? request.reason.trim() : ''; return <article className="record-row detailed-record" key={request.id}><div><strong>{student?.name} • +{request.requestedPoints}</strong><span>{request.positiveRuleTitle ?? 'ไม่ระบุเหตุผล'}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={request.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(request.activityOccurredAt ?? request.createdAt)} • ส่ง {formatThaiDate(request.createdAt)}</small>{request.decisionNote ? <small>หมายเหตุแอดมิน: {request.decisionNote}</small> : null}</div><span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span></article> })}</div> : <EmptyState title="ยังไม่มีคำขอ" detail="คำขอเพิ่มคะแนนที่ส่งแล้วจะแสดงพร้อมรายละเอียดที่นี่" />}
           </section>
         </>
       ) : null}
@@ -472,6 +513,7 @@ export function TeacherDashboard({ account, state, onChange, actions, onLogout }
           {assignedCases.length ? <div className="record-list">{assignedCases.map((item) => { const student = state.students.find((entry) => entry.id === item.studentId); return <article className="case-row" key={item.id}><div className="case-marker"><Icon name="alert" /></div><div><strong>{student?.name}</strong><span>{item.internalNote}</span><small>เปิดเคสเมื่อ {formatThaiDate(item.createdAt)}</small></div><div><StatusBadge severity={item.severity} /><span className="badge status-pending">{item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span></div></article> })}</div> : <EmptyState title="ไม่มีกรณีร้ายแรงค้างอยู่" detail="เหตุการณ์ระดับร้ายแรงจะเปิดเป็นเคสติดตามอัตโนมัติ" />}
         </section>
       ) : null}
+      {rulesDialogTab ? <ScoreRulesDialog initialTab={rulesDialogTab} deductionRules={state.rules} positiveRules={state.positiveRules} onClose={() => setRulesDialogTab(null)} /> : null}
     </AppShell>
   )
 }

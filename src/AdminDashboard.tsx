@@ -12,9 +12,21 @@ import type {
   RecordDeductionsResult,
   UpdateTermScheduleInput,
 } from './dataActions'
+import { EvidenceField, EvidenceSummary } from './EvidenceField'
+import {
+  encodeEvidenceBundle,
+  hasEvidence,
+  type EvidenceAttachment,
+} from './evidence'
 import { validateTermSchedule } from './termSchedule'
 import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
-import { DeductionRuleSelect, ScoreRulesDialog, type ScoreRulesDialogTab } from './ScoreRulesDialog'
+import {
+  DeductionRuleSelect,
+  PositiveRuleSelect,
+  PositiveRuleSummary,
+  ScoreRulesDialog,
+  type ScoreRulesDialogTab,
+} from './ScoreRulesDialog'
 import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './StudentTargetSelector'
 import { createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
@@ -164,7 +176,9 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('addition')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students))
   const activePositiveRules = useMemo(
-    () => state.positiveRules.filter((rule) => rule.active),
+    () => state.positiveRules
+      .filter((rule) => rule.active)
+      .sort((left, right) => left.title.localeCompare(right.title, 'th')),
     [state.positiveRules],
   )
   const activeDeductionRules = useMemo(
@@ -181,6 +195,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [activityOccurredAt, setActivityOccurredAt] = useState(() => toLocalDateTimeInputValue())
   const [reason, setReason] = useState('')
   const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
+  const [adminEvidenceFiles, setAdminEvidenceFiles] = useState<File[]>([])
+  const [adminUploadedEvidence, setAdminUploadedEvidence] = useState<EvidenceAttachment[]>([])
   const [adminRequestId, setAdminRequestId] = useState(() => newRequestId())
   const [adminAdditionResult, setAdminAdditionResult] = useState<AdminAddPointsBulkResult | null>(null)
   const [adminDeductionRuleId, setAdminDeductionRuleId] = useState(activeDeductionRules[0]?.id ?? '')
@@ -376,8 +392,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     event.preventDefault()
     if (mutationBusy) return
     const activityIso = localDateTimeToIso(activityOccurredAt)
-    if (!adminPositiveRule || !adminPointValidation.valid || !activityIso || reason.trim().length < 5 || adminEvidenceNote.trim().length < 5) {
-      setAnnouncement(adminPointValidation.message ?? 'กรุณากรอกเกณฑ์ วันทำกิจกรรม เหตุผล และหลักฐานให้ครบถ้วน')
+    if (!adminPositiveRule || !adminPointValidation.valid || !activityIso) {
+      setAnnouncement(adminPointValidation.message ?? 'กรุณาเลือกเหตุผลในการเพิ่มคะแนนและวันทำกิจกรรม')
+      return
+    }
+    if (!hasEvidence(adminEvidenceNote, adminUploadedEvidence.length ? adminUploadedEvidence : adminEvidenceFiles)) {
+      setAnnouncement('กรุณาพิมพ์คำอธิบายหลักฐานอย่างน้อย 5 ตัวอักษร หรือแนบไฟล์อย่างน้อย 1 ไฟล์')
       return
     }
     if (adminSelection.scope === 'selected' && adminTargets.length < 2) {
@@ -392,8 +412,30 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       setAnnouncement('นักเรียนที่เลือกทุกคนมีคะแนนเต็ม 100 แล้ว จึงไม่มีคะแนนให้เพิ่ม')
       return
     }
+    if (actions) setBusyAction('admin-add')
+    let attachments: EvidenceAttachment[]
+    try {
+      attachments = adminUploadedEvidence.length
+        ? adminUploadedEvidence
+        : adminEvidenceFiles.length
+          ? actions
+            ? await actions.uploadEvidenceFiles(adminEvidenceFiles)
+            : adminEvidenceFiles.map((file) => ({
+              path: `demo/${newRequestId()}/${file.name}`,
+              name: file.name,
+              size: file.size,
+              contentType: file.type,
+            }))
+          : []
+    } catch (error) {
+      setBusyAction('')
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถอัปโหลดไฟล์หลักฐานได้')
+      return
+    }
+    if (actions && attachments.length) setAdminUploadedEvidence(attachments)
+    const normalizedReason = reason.trim() || adminPositiveRule.title
+    const encodedEvidence = encodeEvidenceBundle(adminEvidenceNote, attachments)
     if (actions) {
-      setBusyAction('admin-add')
       try {
         const result = await actions.adminAddPointsBulk({
           clientRequestId: adminRequestId,
@@ -403,12 +445,14 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           positiveRuleId: adminPositiveRule.id,
           points,
           activityOccurredAt: activityIso,
-          reason: reason.trim(),
-          evidenceNote: adminEvidenceNote.trim(),
+          reason: normalizedReason,
+          evidenceNote: encodedEvidence,
           termId: state.term.id,
         })
         setReason('')
         setAdminEvidenceNote('')
+        setAdminEvidenceFiles([])
+        setAdminUploadedEvidence([])
         setAdminRequestId(newRequestId())
         setAdminAdditionResult(result)
         setAnnouncement(`เพิ่มคะแนนครบ ${result.targetCount} คน รวมเพิ่มจริง ${result.totalAppliedPoints} คะแนน และบันทึกรายละเอียดแล้ว`)
@@ -445,8 +489,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         positiveRuleId: adminPositiveRule.id,
         positiveRuleTitle: adminPositiveRule.title,
         activityOccurredAt: activityIso,
-        evidenceNote: adminEvidenceNote.trim(),
-        internalReason: reason.trim(),
+        evidenceNote: encodedEvidence,
+        internalReason: normalizedReason,
         additionSource: 'admin_direct' as const,
       })), ...state.transactions],
     })
@@ -472,6 +516,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
     setReason('')
     setAdminEvidenceNote('')
+    setAdminEvidenceFiles([])
+    setAdminUploadedEvidence([])
     setAdminRequestId(newRequestId())
     setAdminAdditionResult(localResult)
     setAnnouncement(`เพิ่มคะแนนครบ ${localResult.targetCount} คน รวมเพิ่มจริง ${localResult.totalAppliedPoints} คะแนนเรียบร้อยแล้ว`)
@@ -481,8 +527,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     event.preventDefault()
     if (mutationBusy) return
     const eventIso = localDateTimeToIso(adminDeductionOccurredAt)
-    if (!adminDeductionRule || !eventIso || adminDeductionNote.trim().length < 5) {
-      setAnnouncement('กรุณาเลือกเกณฑ์ วันเวลา และระบุรายละเอียดเหตุการณ์อย่างน้อย 5 ตัวอักษร')
+    if (!adminDeductionRule || !eventIso) {
+      setAnnouncement('กรุณาเลือกเหตุผลในการตัดคะแนนและวันเวลาเกิดเหตุ')
       return
     }
     if (adminSelection.scope === 'selected' && adminTargets.length < 2) {
@@ -514,7 +560,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           classroomId: adminSelection.classroomId,
           ruleId: adminDeductionRule.id,
           occurredAt: eventIso,
-          internalNote: adminDeductionNote.trim(),
+          internalNote: adminDeductionNote.trim() || adminDeductionRule.title,
           confirmSeriousBulk: adminSeriousBulk && adminConfirmSeriousBulk,
         })
       } else {
@@ -540,7 +586,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           scoreBefore: row.balanceBefore,
           scoreAfter: row.balanceAfter,
           ruleId: adminDeductionRule.id,
-          reason: adminDeductionNote.trim(),
+          reason: adminDeductionNote.trim() || adminDeductionRule.title,
           occurredAt: eventIso,
           actorId: account.id,
           incidentId: row.incidentId,
@@ -555,7 +601,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             guardianContactRequired: adminDeductionRule.guardianContactRequired,
             guardianContactStatus: adminDeductionRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
             createdAt: eventIso,
-            internalNote: `ติดตามเหตุการณ์: ${adminDeductionNote.trim()}`,
+            internalNote: `ติดตามเหตุการณ์: ${adminDeductionNote.trim() || adminDeductionRule.title}`,
           }))
           : []
         onChange({
@@ -710,11 +756,14 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                   <tbody>{state.additionRequests.map((request) => {
                     const student = state.students.find((item) => item.id === request.studentId)
                     const details = request as DetailedAdditionRequest
+                    const requestDetail = request.reason.trim() !== details.positiveRuleTitle?.trim()
+                      ? request.reason.trim()
+                      : ''
                     return (
                       <tr key={request.id}>
                         <td>{formatThaiDate(request.createdAt)}</td>
                         <td><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><small>{student?.studentCode} • ปัจจุบัน {student?.score ?? '—'}</small></td>
-                        <td>{details.positiveRuleTitle ?? request.reason}<small>{details.positiveRuleTitle ? request.reason : 'ไม่ได้ระบุเกณฑ์กิจกรรม'}</small></td>
+                        <td>{details.positiveRuleTitle ?? request.reason}<small>{requestDetail || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</small></td>
                         <td><span className="delta positive">+{request.requestedPoints}</span></td>
                         <td>
                           <div className="inline-actions">
@@ -754,13 +803,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                   <span>ทำกิจกรรมเมื่อ {formatThaiDate(selectedRequest.activityOccurredAt || selectedRequest.createdAt)}</span>
                 </div>
                 <div className="selected-record">
-                  <strong>เหตุผลที่ขอเพิ่มคะแนน</strong>
-                  <span>{selectedRequest.reason || 'ไม่ได้ระบุเหตุผล'}</span>
+                  <strong>รายละเอียดเพิ่มเติม</strong>
+                  <span>{selectedRequest.reason.trim() !== selectedRequest.positiveRuleTitle?.trim() ? selectedRequest.reason : 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</span>
                 </div>
               </div>
               <div className="selected-record">
                 <strong>รายละเอียดและหลักฐานจากคุณครู</strong>
-                <span>{selectedRequest.evidenceNote?.trim() || 'ไม่ได้แนบรายละเอียดหลักฐาน'}</span>
+                <EvidenceSummary value={selectedRequest.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} />
               </div>
               <div className="rule-summary" aria-label={`คะแนนปัจจุบัน ${selectedRequestScore} คะแนน หากอนุมัติจะเป็น ${selectedRequestScoreAfter} คะแนน`}>
                 <div><Icon name="score" />คะแนนปัจจุบัน → หลังอนุมัติ (สูงสุด 100)</div>
@@ -834,17 +883,23 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminSelection.scope === 'single' ? adminTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : adminSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : adminTargets[0]?.classroomName ?? 'ยังไม่เลือกห้อง'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
             </div>
-            <label>เกณฑ์การเพิ่มคะแนน<select disabled={adminAdditionBusy} value={adminPositiveRuleId} onChange={(event) => { const nextId = event.target.value; const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} required><option value="" disabled>เลือกเกณฑ์</option>{activePositiveRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.code} • {rule.title}</option>)}</select></label>
-            {adminPositiveRule ? <div className="positive-rule-summary"><div><span className="badge status-approved">{adminPositiveRule.code}</span><strong>{adminPositiveRule.title}</strong></div><p>{adminPositiveRule.description || adminPositiveRule.category}</p><small>{adminPositiveRule.discretionary ? `กำหนดได้ 1–${adminPositiveRule.maxPoints} คะแนน` : `คะแนนตามเกณฑ์ +${adminPositiveRule.defaultPoints ?? 0}`}</small></div> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
+            <PositiveRuleSelect rules={activePositiveRules} value={adminPositiveRuleId} disabled={adminAdditionBusy} onChange={(nextId) => { const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} />
+            {adminPositiveRule ? <PositiveRuleSummary rule={adminPositiveRule} /> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
             <div className="date-field-grid">
               <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={adminAdditionBusy} max={toLocalDateTimeInputValue()} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdminRequest() }} required /></label>
               <label>จำนวนคะแนน<input type="number" disabled={adminAdditionBusy} min="1" max={adminPositiveRule?.maxPoints ?? 100} readOnly={!adminPositiveRule?.discretionary} value={points} onChange={(event) => { setPoints(Number(event.target.value)); invalidateAdminRequest() }} /></label>
             </div>
             {!adminPointValidation.valid && adminPointValidation.message ? <p className="form-error">{adminPointValidation.message}</p> : null}
             {adminTargets.length ? <div className="addition-preview"><span>คะแนนรวมหลังบันทึก (รายคนสูงสุด 100)</span><strong>{adminAdditionBeforeTotal} <i>→</i> {adminAdditionAfterTotal}</strong><small>ระบบจะเพิ่มจริงรวม {adminAdditionAppliedTotal} คะแนน</small></div> : null}
-            <label>เหตุผลภายใน<textarea disabled={adminAdditionBusy} value={reason} onChange={(event) => { setReason(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="อธิบายกิจกรรมหรือพฤติกรรมที่ตรงกับเกณฑ์" /></label>
-            <label>หลักฐานประกอบ<textarea disabled={adminAdditionBusy} value={adminEvidenceNote} onChange={(event) => { setAdminEvidenceNote(event.target.value); invalidateAdminRequest() }} required minLength={5} placeholder="ระบุเอกสาร ภาพถ่าย หรือผู้รับรองที่ตรวจสอบได้" /></label>
-            <p className="scope-note"><Icon name="shield" size={18} /> นักเรียนเห็นเฉพาะชื่อเกณฑ์และคะแนน ไม่เห็นเหตุผลภายในหรือหลักฐาน</p>
+            <label>รายละเอียดเพิ่มเติม (ไม่บังคับ)<textarea disabled={adminAdditionBusy} value={reason} maxLength={2000} onChange={(event) => { setReason(event.target.value); invalidateAdminRequest() }} placeholder="หากมี สามารถอธิบายกิจกรรมหรือพฤติกรรมเพิ่มเติมได้" /></label>
+            <EvidenceField
+              note={adminEvidenceNote}
+              files={adminEvidenceFiles}
+              disabled={adminAdditionBusy}
+              onNoteChange={(note) => { setAdminEvidenceNote(note); invalidateAdminRequest() }}
+              onFilesChange={(files) => { setAdminEvidenceFiles(files); setAdminUploadedEvidence([]); invalidateAdminRequest() }}
+            />
+            <p className="scope-note"><Icon name="shield" size={18} /> นักเรียนเห็นเฉพาะชื่อเหตุผลและคะแนน ไม่เห็นรายละเอียดภายในหรือไฟล์หลักฐาน</p>
             <button className="button primary" type="submit" disabled={adminAdditionBusy || !adminPositiveRule || !adminTargets.length}>{adminAdditionBusy ? 'กำลังบันทึกทั้งชุด…' : `เพิ่มคะแนน ${adminTargets.length} คนและบันทึกรายละเอียด`}</button>
             {adminAdditionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminAdditionResult.targetCount} คน</strong><span>เพิ่มจริงรวม {adminAdditionResult.totalAppliedPoints} คะแนน</span></div> : null}
           </form>
@@ -863,7 +918,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             />
             {adminDeductionRule ? <div className="rule-summary"><div><StatusBadge severity={adminDeductionRule.severity} /> <span>{adminDeductionRule.category} • คนละ {adminDeductionRule.points} คะแนน</span></div><strong>{adminDeductionBeforeTotal} <span>→</span> {adminDeductionAfterTotal}</strong></div> : null}
             <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={mutationBusy} max={toLocalDateTimeInputValue()} value={adminDeductionOccurredAt} onChange={(event) => { setAdminDeductionOccurredAt(event.target.value); invalidateAdminDeduction() }} required /></label>
-            <label>รายละเอียดเหตุการณ์ (เฉพาะบุคลากร)<textarea disabled={mutationBusy} value={adminDeductionNote} onChange={(event) => { setAdminDeductionNote(event.target.value); invalidateAdminDeduction() }} placeholder="ระบุข้อเท็จจริง สถานที่ และบริบทที่จำเป็น" minLength={5} required /></label>
+            <label>รายละเอียดเหตุการณ์เพิ่มเติม (ไม่บังคับ)<textarea disabled={mutationBusy} value={adminDeductionNote} maxLength={2000} onChange={(event) => { setAdminDeductionNote(event.target.value); invalidateAdminDeduction() }} placeholder="หากมี สามารถระบุข้อเท็จจริง สถานที่ หรือบริบทเพิ่มเติมได้" /></label>
             {adminDeductionRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนโดยอัตโนมัติ</span></div> : null}
             {adminDeductionReview ? (
               <section className="deduction-review" aria-label="ตรวจสอบก่อนยืนยัน">
@@ -874,7 +929,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                     return <div className="review-student" key={student.id}><span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
                   })}
                 </div>
-                <dl className="review-facts"><div><dt>เกณฑ์</dt><dd>{adminDeductionRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(adminDeductionOccurredAt) ?? adminDeductionOccurredAt)}</dd></div><div><dt>รายละเอียด</dt><dd>{adminDeductionNote.trim()}</dd></div></dl>
+                <dl className="review-facts"><div><dt>เหตุผล</dt><dd>{adminDeductionRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(adminDeductionOccurredAt) ?? adminDeductionOccurredAt)}</dd></div><div><dt>รายละเอียดเพิ่มเติม</dt><dd>{adminDeductionNote.trim() || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</dd></div></dl>
                 {adminSeriousBulk ? <label className="confirmation-check"><input type="checkbox" disabled={mutationBusy} checked={adminConfirmSeriousBulk} onChange={(event) => setAdminConfirmSeriousBulk(event.target.checked)} /><span>ยืนยันว่าตรวจสอบรายชื่อกรณีร้ายแรงทั้ง {adminTargets.length} คนแล้ว และรับทราบว่าจะสร้างงานแจ้งผู้ปกครองรายคน</span></label> : null}
               </section>
             ) : null}
@@ -894,7 +949,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             onActivate={activateTerm}
           />
           <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
-            {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{transaction.internalReason ? <span>เหตุผล: {transaction.internalReason}</span> : null}{transaction.evidenceNote ? <small>หลักฐาน: {transaction.evidenceNote}</small> : null}<small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
+            {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); const detail = transaction.internalReason?.trim() !== transaction.positiveRuleTitle?.trim() ? transaction.internalReason?.trim() : ''; return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={transaction.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
           </section>
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || mutationBusy} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
           {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" disabled={mutationBusy} onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}

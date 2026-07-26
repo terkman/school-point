@@ -20,6 +20,11 @@ import type {
   Student,
   Teacher,
 } from './domain'
+import {
+  EVIDENCE_BUCKET,
+  validateEvidenceFiles,
+  type EvidenceAttachment,
+} from './evidence'
 
 interface QueryResult<T> {
   data: T | null
@@ -849,6 +854,22 @@ async function runRpc<T>(client: SupabaseClient, name: string, parameters: Recor
   return data as T
 }
 
+const evidenceExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'application/pdf': 'pdf',
+}
+
+function assertSafeEvidencePath(path: string): void {
+  const parts = path.split('/')
+  if (parts.length !== 3 || parts.some((part) => !part || part === '.' || part === '..')) {
+    throw new Error('ตำแหน่งไฟล์หลักฐานไม่ถูกต้อง')
+  }
+}
+
 export function createSupabaseActions(client: SupabaseClient, refresh: () => Promise<void>): AppDataActions {
   const mutate = async <T>(name: string, parameters: Record<string, unknown>): Promise<T> => {
     const result = await runRpc<T>(client, name, parameters)
@@ -856,6 +877,51 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
     return result
   }
   return {
+    uploadEvidenceFiles: async (files) => {
+      const validationError = validateEvidenceFiles(files)
+      if (validationError) throw new Error(validationError)
+      const { data: sessionData, error: sessionError } = await client.auth.getSession()
+      if (sessionError) throw new Error(`ตรวจสอบสิทธิ์อัปโหลดหลักฐานไม่สำเร็จ: ${sessionError.message}`)
+      const userId = sessionData.session?.user.id
+      if (!userId) throw new Error('กรุณาเข้าสู่ระบบใหม่ก่อนอัปโหลดหลักฐาน')
+
+      const uploadedPaths: string[] = []
+      try {
+        const attachments: EvidenceAttachment[] = []
+        for (const file of files) {
+          const extension = evidenceExtensions[file.type]
+          if (!extension) throw new Error(`ไม่รองรับชนิดไฟล์ ${file.name}`)
+          const path = `${userId}/${new Date().toISOString().slice(0, 10)}/${globalThis.crypto.randomUUID()}.${extension}`
+          const { error } = await client.storage.from(EVIDENCE_BUCKET).upload(path, file, {
+            cacheControl: '3600',
+            contentType: file.type,
+            upsert: false,
+          })
+          if (error) throw new Error(`อัปโหลด ${file.name} ไม่สำเร็จ: ${error.message}`)
+          uploadedPaths.push(path)
+          attachments.push({
+            path,
+            name: file.name,
+            size: file.size,
+            contentType: file.type,
+          })
+        }
+        return attachments
+      } catch (error) {
+        if (uploadedPaths.length) {
+          await client.storage.from(EVIDENCE_BUCKET).remove(uploadedPaths)
+        }
+        throw error
+      }
+    },
+    createEvidenceUrl: async (attachment) => {
+      assertSafeEvidencePath(attachment.path)
+      const { data, error } = await client.storage
+        .from(EVIDENCE_BUCKET)
+        .createSignedUrl(attachment.path, 300, { download: attachment.name })
+      if (error) throw new Error(`ไม่สามารถเปิดไฟล์หลักฐานได้: ${error.message}`)
+      return data.signedUrl
+    },
     recordDeductions: async (input) => normalizeRecordDeductionsResult(
       await mutate<unknown>('record_deductions_bulk', {
         p_client_request_id: input.clientRequestId,

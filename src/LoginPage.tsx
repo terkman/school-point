@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { Account, DemoState, Role } from './domain'
+import { PasswordInput } from './PasswordInput'
 import { DemoBanner, Icon } from './ui'
 
 interface LoginPageProps {
@@ -105,17 +106,28 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
                 required
               />
             </label>
-            <label>
-              {activationMode ? 'รหัสเปิดใช้ครั้งเดียว' : 'รหัสผ่าน'}
-              <input
-                type={activationMode ? 'text' : 'password'}
+            {activationMode ? (
+              <label>
+                รหัสเปิดใช้ครั้งเดียว
+                <input
+                  type="text"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  required
+                />
+              </label>
+            ) : (
+              <PasswordInput
+                label="รหัสผ่าน"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                autoComplete={activationMode ? 'one-time-code' : 'current-password'}
-                inputMode={activationMode ? 'numeric' : undefined}
+                autoComplete="current-password"
                 required
+                disabled={busy}
               />
-            </label>
+            )}
             {error ? <p className="form-error" role="alert">{error}</p> : null}
             <button className="button primary full" type="submit" disabled={busy}>{busy ? 'กำลังตรวจสอบ…' : activationMode ? 'ตรวจรหัสและตั้งรหัสผ่าน' : 'เข้าสู่ระบบ'}</button>
             {!isDemo ? (

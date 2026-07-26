@@ -34,4 +34,16 @@ describe('first-login password activation', () => {
     expect(markup).toContain('ยืนยันและเข้าสู่ระบบ')
     expect(markup).not.toContain('type="password"')
   })
+
+  it('provides show-password controls for both new-password fields', () => {
+    const markup = renderToStaticMarkup(createElement(PasswordActivationPage, {
+      username: '69001',
+      onSetPassword: async () => undefined,
+      onLogout: () => undefined,
+    }))
+
+    expect(markup).toContain('แสดงรหัสผ่านใหม่')
+    expect(markup).toContain('แสดงยืนยันรหัสผ่านใหม่')
+    expect(markup.match(/type="password"/g)).toHaveLength(2)
+  })
 })

@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { createDemoState } from './demoData'
-import { DeductionRuleSelect, ScoreRulesDialog } from './ScoreRulesDialog'
+import { DeductionRuleSelect, PositiveRuleSelect, ScoreRulesDialog } from './ScoreRulesDialog'
 
 describe('admin score rules controls', () => {
   it('renders deduction rules as a dropdown', () => {
@@ -15,10 +15,27 @@ describe('admin score rules controls', () => {
       onChange: () => undefined,
     }))
 
-    expect(markup).toContain('เกณฑ์การตัดคะแนน')
+    expect(markup).toContain('เหตุผลในการตัดคะแนน')
     expect(markup).toContain('<select')
     expect(markup).toContain('<option')
+    expect(markup).toContain(activeRules[0]?.title ?? '')
+    expect(markup).not.toContain(`−${activeRules[0]?.points} •`)
     expect(markup).not.toContain('rule-option')
+  })
+
+  it('shows only the reason title in the addition dropdown', () => {
+    const demo = createDemoState()
+    const activeRules = demo.positiveRules.filter((rule) => rule.active)
+    const markup = renderToStaticMarkup(createElement(PositiveRuleSelect, {
+      rules: activeRules,
+      value: activeRules[0]?.id ?? '',
+      disabled: false,
+      onChange: () => undefined,
+    }))
+
+    expect(markup).toContain('เหตุผลในการเพิ่มคะแนน')
+    expect(markup).toContain(activeRules[0]?.title ?? '')
+    expect(markup).not.toContain(`${activeRules[0]?.code} •`)
   })
 
   it('shows both deduction and addition rule tabs in the popup', () => {

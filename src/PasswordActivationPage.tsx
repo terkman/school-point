@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { PasswordInput } from './PasswordInput'
 import { Icon } from './ui'
 
 export const ONE_TIME_ACTIVATION_COPY = 'ยืนยันด้วยรหัสเปิดใช้ครั้งเดียวแล้ว'
@@ -78,28 +79,24 @@ export function PasswordActivationPage({
         <form className="login-form" onSubmit={submit}>
           {canResume ? null : (
             <>
-              <label>
-                รหัสผ่านใหม่
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="new-password"
-                  minLength={10}
-                  required
-                />
-              </label>
-              <label>
-                ยืนยันรหัสผ่านใหม่
-                <input
-                  type="password"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                  autoComplete="new-password"
-                  minLength={10}
-                  required
-                />
-              </label>
+              <PasswordInput
+                label="รหัสผ่านใหม่"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="new-password"
+                minLength={10}
+                required
+                disabled={busy}
+              />
+              <PasswordInput
+                label="ยืนยันรหัสผ่านใหม่"
+                value={confirmation}
+                onChange={(event) => setConfirmation(event.target.value)}
+                autoComplete="new-password"
+                minLength={10}
+                required
+                disabled={busy}
+              />
               <div className="activation-hint">
                 <Icon name="shield" />
                 <span>อย่างน้อย 10 ตัวอักษร และมีทั้งตัวอักษรภาษาอังกฤษกับตัวเลข</span>
