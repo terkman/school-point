@@ -111,8 +111,21 @@ export interface SeriousCase {
   status: 'open' | 'following_up' | 'resolved'
   guardianContactRequired: boolean
   guardianContactStatus: 'not_required' | 'pending' | 'completed'
+  guardianTaskId?: string
+  guardianContactNote?: string
+  guardianContactCompletedAt?: string
   createdAt: string
   internalNote: string
+  followUpNote?: string
+  managedAt?: string
+}
+
+export interface GuardianContact {
+  id: string
+  name: string
+  relationship: string
+  phoneNumber: string
+  isPrimary: boolean
 }
 
 export interface DemoState {

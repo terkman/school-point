@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { TeacherClassroomAssignmentEditor, TermScheduleForm } from './AdminDashboard'
+import { AdminDashboard, TeacherClassroomAssignmentEditor, TermScheduleForm } from './AdminDashboard'
 import { createDemoState } from './demoData'
 import { buildClassroomGroups } from './studentSelection'
 
@@ -48,5 +48,27 @@ describe('admin teacher classroom assignments', () => {
     expect(markup).toContain(`${teacher.classroomIds.length} ห้อง`)
     expect(markup).toContain('เลือกทุกห้อง')
     for (const classroom of classrooms) expect(markup).toContain(classroom.name)
+  })
+})
+
+describe('admin serious-case workflow', () => {
+  it('renders actionable guardian contact, progress, and close controls', () => {
+    const demo = createDemoState()
+    const account = demo.accounts.find((item) => item.role === 'admin')
+    if (!account) throw new Error('Admin demo account is missing')
+
+    const markup = renderToStaticMarkup(createElement(AdminDashboard, {
+      account,
+      state: demo,
+      initialTab: 'cases',
+      onChange: () => undefined,
+      onLogout: () => undefined,
+    }))
+
+    expect(markup).toContain('คิวกรณีร้ายแรง')
+    expect(markup).toContain('ดูข้อมูลติดต่อผู้ปกครอง')
+    expect(markup).toContain('บันทึกว่าแจ้งผู้ปกครองแล้ว')
+    expect(markup).toContain('บันทึกความคืบหน้า')
+    expect(markup).toContain('แจ้งผู้ปกครองก่อนปิดเคส')
   })
 })

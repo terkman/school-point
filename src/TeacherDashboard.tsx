@@ -264,6 +264,7 @@ export function TeacherDashboard({
             status: 'open' as const,
             guardianContactRequired: selectedRule.guardianContactRequired,
             guardianContactStatus: selectedRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
+            guardianTaskId: selectedRule.guardianContactRequired ? createId('guardian-task') : undefined,
             createdAt: occurredAtIso,
             internalNote: `ติดตามเหตุการณ์: ${internalNote.trim() || selectedRule.title}`,
           }))

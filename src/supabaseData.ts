@@ -11,6 +11,7 @@ import type {
   Appeal,
   BehaviorRule,
   DemoState,
+  GuardianContact,
   PositiveBehaviorRule,
   RequestStatus,
   Role,
@@ -187,13 +188,25 @@ interface CaseRow {
   student_id: number | string
   status: SeriousCase['status']
   internal_note: string | null
+  follow_up_note: string | null
   opened_at: string
+  managed_at: string | null
 }
 
 interface GuardianTaskRow {
   id: number | string
   incident_id: number | string
   status: 'pending' | 'completed' | 'cancelled'
+  note: string | null
+  completed_at: string | null
+}
+
+interface GuardianContactRow {
+  contact_id: number | string
+  contact_name: string
+  relationship: string
+  phone_number: string
+  is_primary: boolean
 }
 
 const SUPABASE_PAGE_SIZE = 1000
@@ -671,14 +684,14 @@ async function loadStaffState(
       .range(from, to)),
     fetchAllPages<CaseRow>('โหลดกรณีติดตาม', (from, to) => client
       .from('follow_up_cases')
-      .select('id,incident_id,student_id,status,internal_note,opened_at')
+      .select('id,incident_id,student_id,status,internal_note,follow_up_note,opened_at,managed_at')
       .in('status', ['open', 'following_up'])
       .order('opened_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
     fetchAllPages<GuardianTaskRow>('โหลดงานติดต่อผู้ปกครอง', (from, to) => client
       .from('guardian_contact_tasks')
-      .select('id,incident_id,status')
+      .select('id,incident_id,status,note,completed_at')
       .order('id')
       .range(from, to)),
   ])
@@ -805,8 +818,13 @@ async function loadStaffState(
       status: row.status,
       guardianContactRequired: Boolean(guardian),
       guardianContactStatus: !guardian ? 'not_required' : guardian.status === 'completed' ? 'completed' : 'pending',
+      guardianTaskId: guardian ? asId(guardian.id) : undefined,
+      guardianContactNote: guardian?.note ?? undefined,
+      guardianContactCompletedAt: guardian?.completed_at ?? undefined,
       createdAt: row.opened_at,
       internalNote: row.internal_note ?? '',
+      followUpNote: row.follow_up_note ?? undefined,
+      managedAt: row.managed_at ?? undefined,
     }
   })
   const currentTeacherId = teacherIdByUserId.get(user.id)
@@ -1007,6 +1025,27 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_term_id: input.termId,
       p_teacher_id: input.teacherId,
       p_classroom_ids: [...new Set(input.classroomIds)],
+    }),
+    getGuardianContacts: async (taskId) => {
+      const rows = await runRpc<GuardianContactRow[]>(client, 'get_guardian_contacts_for_task', {
+        p_task_id: taskId,
+      })
+      return rows.map((row): GuardianContact => ({
+        id: asId(row.contact_id),
+        name: row.contact_name,
+        relationship: row.relationship,
+        phoneNumber: row.phone_number,
+        isPrimary: row.is_primary,
+      }))
+    },
+    completeGuardianContact: (input) => mutate<void>('complete_guardian_contact_task', {
+      p_task_id: input.taskId,
+      p_note: input.note.trim(),
+    }),
+    updateFollowUpCase: (input) => mutate<void>('admin_update_follow_up_case', {
+      p_case_id: input.caseId,
+      p_status: input.status,
+      p_note: input.note.trim(),
     }),
     activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
   }

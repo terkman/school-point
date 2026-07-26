@@ -148,6 +148,60 @@ describe('Supabase private score evidence', () => {
 })
 
 describe('Supabase score mutations', () => {
+  it('loads guardian contacts only for the selected task without refreshing school state', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{
+        contact_id: 31,
+        contact_name: 'ผู้ปกครอง ก',
+        relationship: 'มารดา',
+        phone_number: '0800000000',
+        is_primary: true,
+      }],
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await expect(actions.getGuardianContacts('18')).resolves.toEqual([{
+      id: '31',
+      name: 'ผู้ปกครอง ก',
+      relationship: 'มารดา',
+      phoneNumber: '0800000000',
+      isPrimary: true,
+    }])
+    expect(rpc).toHaveBeenCalledWith('get_guardian_contacts_for_task', { p_task_id: '18' })
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('records guardian contact and case progress through audited RPCs', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 18, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await actions.completeGuardianContact({
+      taskId: '18',
+      note: '  ติดต่อมารดาแล้วและนัดพบครู  ',
+    })
+    await actions.updateFollowUpCase({
+      caseId: '22',
+      status: 'resolved',
+      note: '  ดำเนินมาตรการช่วยเหลือครบแล้ว  ',
+    })
+
+    expect(rpc.mock.calls).toEqual([
+      ['complete_guardian_contact_task', {
+        p_task_id: '18',
+        p_note: 'ติดต่อมารดาแล้วและนัดพบครู',
+      }],
+      ['admin_update_follow_up_case', {
+        p_case_id: '22',
+        p_status: 'resolved',
+        p_note: 'ดำเนินมาตรการช่วยเหลือครบแล้ว',
+      }],
+    ])
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
   it('replaces a teacher classroom access set with one admin RPC and refreshes once', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { ok: true, updated: true }, error: null })
     const refresh = vi.fn().mockResolvedValue(undefined)

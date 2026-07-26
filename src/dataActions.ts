@@ -1,3 +1,4 @@
+import type { GuardianContact } from './domain'
 import type { EvidenceAttachment } from './evidence'
 
 export type DeductionScope = 'single' | 'selected' | 'classroom'
@@ -155,6 +156,17 @@ export interface UpdateTeacherClassroomsInput {
   classroomIds: string[]
 }
 
+export interface UpdateFollowUpCaseInput {
+  caseId: string
+  status: 'following_up' | 'resolved'
+  note: string
+}
+
+export interface CompleteGuardianContactInput {
+  taskId: string
+  note: string
+}
+
 export interface AppDataActions {
   uploadEvidenceFiles: (files: File[]) => Promise<EvidenceAttachment[]>
   createEvidenceUrl: (attachment: EvidenceAttachment) => Promise<string>
@@ -169,5 +181,8 @@ export interface AppDataActions {
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
   updateTeacherClassrooms: (input: UpdateTeacherClassroomsInput) => Promise<void>
+  getGuardianContacts: (taskId: string) => Promise<GuardianContact[]>
+  completeGuardianContact: (input: CompleteGuardianContactInput) => Promise<void>
+  updateFollowUpCase: (input: UpdateFollowUpCaseInput) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
 }

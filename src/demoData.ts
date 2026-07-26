@@ -277,8 +277,10 @@ export function createDemoState(): DemoState {
         status: 'following_up',
         guardianContactRequired: true,
         guardianContactStatus: 'pending',
+        guardianTaskId: 'guardian-task-demo-01',
         createdAt: daysAgo(5, 11),
         internalNote: 'ข้อมูลตัวอย่าง — นัดหมายทีมดูแลช่วยเหลือนักเรียน',
+        followUpNote: 'ครูที่ปรึกษารวบรวมข้อมูลเบื้องต้นแล้ว',
       },
     ],
   }

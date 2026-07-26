@@ -5,6 +5,7 @@ import {
   formatThaiDate,
   type Account,
   type DemoState,
+  type GuardianContact,
 } from './domain'
 import type {
   AdminAddPointsBulkResult,
@@ -32,7 +33,7 @@ import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './
 import { buildClassroomGroups, createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
-type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
+export type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
 
 function newRequestId(): string {
   return globalThis.crypto.randomUUID()
@@ -45,6 +46,7 @@ interface AdminDashboardProps {
   actions?: AppDataActions
   onResetDemo?: () => void
   onLogout: () => void
+  initialTab?: AdminTab
 }
 
 type DetailedAdditionRequest = DemoState['additionRequests'][number] & {
@@ -264,12 +266,12 @@ export function TeacherClassroomAssignmentEditor({
   )
 }
 
-export function AdminDashboard({ account, state, onChange, actions, onResetDemo, onLogout }: AdminDashboardProps) {
+export function AdminDashboard({ account, state, onChange, actions, onResetDemo, onLogout, initialTab = 'overview' }: AdminDashboardProps) {
   const pending = state.additionRequests.filter((item) => item.status === 'pending')
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
   const openAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
-  const [tab, setTab] = useState<AdminTab>('overview')
+  const [tab, setTab] = useState<AdminTab>(initialTab)
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('addition')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students))
   const activePositiveRules = useMemo(
@@ -309,6 +311,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionError, setDecisionError] = useState('')
+  const [selectedCaseId, setSelectedCaseId] = useState(openCases[0]?.id ?? '')
+  const [caseNote, setCaseNote] = useState(openCases[0]?.followUpNote ?? '')
+  const [guardianContactNote, setGuardianContactNote] = useState(openCases[0]?.guardianContactNote ?? '')
+  const [guardianContacts, setGuardianContacts] = useState<GuardianContact[]>([])
+  const [guardianContactsLoading, setGuardianContactsLoading] = useState(false)
+  const [caseActionError, setCaseActionError] = useState('')
   const [assignmentTeacherId, setAssignmentTeacherId] = useState(state.teachers[0]?.id ?? '')
   const assignmentClassrooms = useMemo(() => buildClassroomGroups(state.students), [state.students])
   const assignmentTeacher = state.teachers.find((teacher) => teacher.id === assignmentTeacherId) ?? state.teachers[0]
@@ -331,6 +339,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const selectedRequestTeacher = state.teachers.find((item) => item.id === selectedRequest?.teacherId)
   const selectedRequestScore = selectedRequestStudent?.score ?? 0
   const selectedRequestScoreAfter = Math.min(100, selectedRequestScore + (selectedRequest?.requestedPoints ?? 0))
+  const selectedCase = openCases.find((item) => item.id === selectedCaseId) ?? openCases[0]
+  const selectedCaseStudent = state.students.find((student) => student.id === selectedCase?.studentId)
   const decisionNoteReady = decisionNote.trim().length >= 5
   const navItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'แดชบอร์ด', icon: 'home' },
@@ -700,6 +710,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             status: 'open' as const,
             guardianContactRequired: adminDeductionRule.guardianContactRequired,
             guardianContactStatus: adminDeductionRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
+            guardianTaskId: adminDeductionRule.guardianContactRequired ? createId('guardian-task') : undefined,
             createdAt: eventIso,
             internalNote: `ติดตามเหตุการณ์: ${adminDeductionNote.trim() || adminDeductionRule.title}`,
           }))
@@ -846,6 +857,120 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
   }
 
+  function openCaseDetails(caseId: string) {
+    const nextCase = openCases.find((item) => item.id === caseId)
+    setSelectedCaseId(caseId)
+    setCaseNote(nextCase?.followUpNote ?? '')
+    setGuardianContactNote(nextCase?.guardianContactNote ?? '')
+    setGuardianContacts([])
+    setCaseActionError('')
+  }
+
+  async function loadGuardianContacts() {
+    if (!selectedCase?.guardianTaskId || guardianContactsLoading) return
+    setGuardianContactsLoading(true)
+    setCaseActionError('')
+    try {
+      if (actions) {
+        setGuardianContacts(await actions.getGuardianContacts(selectedCase.guardianTaskId))
+      } else {
+        setGuardianContacts([{
+          id: 'guardian-demo-01',
+          name: 'ผู้ปกครองตัวอย่าง',
+          relationship: 'ผู้ปกครองหลัก',
+          phoneNumber: '08X-XXX-XXXX',
+          isPrimary: true,
+        }])
+      }
+    } catch (error) {
+      setCaseActionError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลติดต่อผู้ปกครองได้')
+    } finally {
+      setGuardianContactsLoading(false)
+    }
+  }
+
+  async function completeGuardianContact() {
+    if (!selectedCase?.guardianTaskId || mutationBusy) return
+    const note = guardianContactNote.trim()
+    if (note.length < 5) {
+      setCaseActionError('กรุณาระบุผลการติดต่อผู้ปกครองอย่างน้อย 5 ตัวอักษร')
+      return
+    }
+    setBusyAction('case-guardian')
+    setCaseActionError('')
+    try {
+      if (actions) {
+        await actions.completeGuardianContact({ taskId: selectedCase.guardianTaskId, note })
+      } else {
+        onChange({
+          ...state,
+          seriousCases: state.seriousCases.map((item) => item.id === selectedCase.id
+            ? {
+              ...item,
+              guardianContactStatus: 'completed',
+              guardianContactNote: note,
+              guardianContactCompletedAt: new Date().toISOString(),
+            }
+            : item),
+        })
+      }
+      setAnnouncement(`บันทึกการแจ้งผู้ปกครองของ ${selectedCaseStudent?.name ?? 'นักเรียน'} แล้ว`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกการแจ้งผู้ปกครองได้'
+      setCaseActionError(message)
+      setAnnouncement(message)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function updateFollowUpCase(status: 'following_up' | 'resolved') {
+    if (!selectedCase || mutationBusy) return
+    const note = caseNote.trim()
+    if (note.length < 5) {
+      setCaseActionError('กรุณาระบุบันทึกการติดตามอย่างน้อย 5 ตัวอักษร')
+      return
+    }
+    if (status === 'resolved' && selectedCase.guardianContactStatus === 'pending') {
+      setCaseActionError('ต้องบันทึกว่าแจ้งผู้ปกครองแล้วก่อนปิดเคส')
+      return
+    }
+    setBusyAction(status === 'resolved' ? 'case-resolve' : 'case-follow')
+    setCaseActionError('')
+    try {
+      if (actions) {
+        await actions.updateFollowUpCase({ caseId: selectedCase.id, status, note })
+      } else {
+        const managedAt = new Date().toISOString()
+        onChange({
+          ...state,
+          seriousCases: state.seriousCases.map((item) => item.id === selectedCase.id
+            ? {
+              ...item,
+              status,
+              followUpNote: note,
+              managedAt,
+            }
+            : item),
+        })
+      }
+      setAnnouncement(status === 'resolved'
+        ? `ปิดเคสของ ${selectedCaseStudent?.name ?? 'นักเรียน'} เรียบร้อยแล้ว`
+        : `บันทึกการติดตามของ ${selectedCaseStudent?.name ?? 'นักเรียน'} แล้ว`)
+      if (status === 'resolved') {
+        setGuardianContacts([])
+        setCaseNote('')
+        setGuardianContactNote('')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกสถานะกรณีติดตามได้'
+      setCaseActionError(message)
+      setAnnouncement(message)
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
       <div className="page-heading">
@@ -985,9 +1110,89 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       ) : null}
 
       {tab === 'cases' ? (
-        <section className="panel"><div className="section-heading"><div><p className="eyebrow">แยกจากงานคะแนนทั่วไป</p><h2>กรณีร้ายแรงและการติดต่อผู้ปกครอง</h2></div><span className="counter danger">{openCases.length}</span></div>
-          {openCases.length ? <div className="record-list">{openCases.map((item) => { const student = state.students.find((entry) => entry.id === item.studentId); return <article className="case-row" key={item.id}><div className="case-marker"><Icon name="alert" /></div><div><strong>{student?.name} • {student?.classroomName}</strong><span>{item.internalNote}</span><small>เปิดเมื่อ {formatThaiDate(item.createdAt)}</small></div><div><StatusBadge severity={item.severity} /><span className="badge status-pending">{item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span></div></article> })}</div> : <EmptyState title="ไม่มีกรณีร้ายแรงค้างอยู่" detail="เหตุการณ์ร้ายแรงจะสร้างเคสและงานติดต่อผู้ปกครองอัตโนมัติ" />}
-        </section>
+        <div className="case-management-grid">
+          <section className="panel">
+            <div className="section-heading"><div><p className="eyebrow">แยกจากงานคะแนนทั่วไป</p><h2>คิวกรณีร้ายแรง</h2></div><span className="counter danger">{openCases.length}</span></div>
+            {openCases.length ? (
+              <div className="case-management-list">
+                {openCases.map((item) => {
+                  const student = state.students.find((entry) => entry.id === item.studentId)
+                  return (
+                    <button type="button" className={selectedCase?.id === item.id ? 'case-management-item selected' : 'case-management-item'} key={item.id} onClick={() => openCaseDetails(item.id)}>
+                      <span className="case-marker"><Icon name="alert" /></span>
+                      <span><strong>{student?.name} • {student?.classroomName}</strong><small>เปิดเมื่อ {formatThaiDate(item.createdAt)}</small></span>
+                      <span className={`badge ${item.status === 'open' ? 'status-pending' : 'status-approved'}`}>{item.status === 'open' ? 'รอเริ่มติดตาม' : 'กำลังติดตาม'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : <EmptyState title="ไม่มีกรณีร้ายแรงค้างอยู่" detail="เหตุการณ์ร้ายแรงจะสร้างเคสและงานติดต่อผู้ปกครองอัตโนมัติ" />}
+          </section>
+
+          {selectedCase ? (
+            <section className="panel case-workflow-panel">
+              <div className="section-heading">
+                <div><p className="eyebrow">ดำเนินการและบันทึกหลักฐาน</p><h2>{selectedCaseStudent?.name ?? 'ไม่พบข้อมูลนักเรียน'}</h2></div>
+                <StatusBadge severity={selectedCase.severity} />
+              </div>
+              <div className="case-facts">
+                <div><span>ห้องเรียน</span><strong>{selectedCaseStudent?.classroomName ?? 'ไม่ระบุ'}</strong></div>
+                <div><span>สถานะเคส</span><strong>{selectedCase.status === 'open' ? 'รอเริ่มติดตาม' : 'กำลังติดตาม'}</strong></div>
+                <div><span>การแจ้งผู้ปกครอง</span><strong>{selectedCase.guardianContactStatus === 'pending' ? 'ยังไม่เสร็จ' : selectedCase.guardianContactStatus === 'completed' ? 'แจ้งแล้ว' : 'ไม่จำเป็น'}</strong></div>
+              </div>
+              <div className="selected-record">
+                <strong>รายละเอียดเหตุการณ์</strong>
+                <span>{selectedCase.internalNote || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</span>
+                {selectedCase.followUpNote ? <span>บันทึกล่าสุด: {selectedCase.followUpNote}</span> : null}
+                {selectedCase.managedAt ? <small>อัปเดตเมื่อ {formatThaiDate(selectedCase.managedAt)}</small> : null}
+              </div>
+
+              {selectedCase.guardianContactRequired ? (
+                <section className="guardian-contact-panel" aria-label="การติดต่อผู้ปกครอง">
+                  <div className="section-heading">
+                    <div><p className="eyebrow">ข้อมูลส่วนบุคคลสำหรับงานนี้เท่านั้น</p><h3>ติดต่อผู้ปกครอง</h3></div>
+                    <span className={`badge ${selectedCase.guardianContactStatus === 'completed' ? 'status-approved' : 'status-pending'}`}>
+                      {selectedCase.guardianContactStatus === 'completed' ? 'แจ้งแล้ว' : 'รอดำเนินการ'}
+                    </span>
+                  </div>
+                  <button className="button secondary" type="button" disabled={guardianContactsLoading || !selectedCase.guardianTaskId} onClick={() => void loadGuardianContacts()}>
+                    {guardianContactsLoading ? 'กำลังโหลดข้อมูล…' : guardianContacts.length ? 'โหลดข้อมูลติดต่ออีกครั้ง' : 'ดูข้อมูลติดต่อผู้ปกครอง'}
+                  </button>
+                  {guardianContacts.length ? (
+                    <div className="guardian-contact-list">
+                      {guardianContacts.map((contact) => (
+                        <div key={contact.id}><span><strong>{contact.name}</strong><small>{contact.relationship}{contact.isPrimary ? ' • ผู้ติดต่อหลัก' : ''}</small></span><a href={`tel:${contact.phoneNumber}`}>{contact.phoneNumber}</a></div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <label>ผลการติดต่อผู้ปกครอง
+                    <textarea disabled={mutationBusy || selectedCase.guardianContactStatus === 'completed'} value={guardianContactNote} maxLength={2000} onChange={(event) => { setGuardianContactNote(event.target.value); setCaseActionError('') }} placeholder="เช่น ติดต่อมารดาแล้ว รับทราบเหตุการณ์และนัดหมายพบครู" />
+                  </label>
+                  {selectedCase.guardianContactStatus === 'pending' ? (
+                    <button className="button approve full" type="button" disabled={mutationBusy} onClick={() => void completeGuardianContact()}>
+                      {busyAction === 'case-guardian' ? 'กำลังบันทึก…' : 'บันทึกว่าแจ้งผู้ปกครองแล้ว'}
+                    </button>
+                  ) : (
+                    <p className="scope-note"><Icon name="shield" size={18} /> บันทึกแล้ว{selectedCase.guardianContactCompletedAt ? `เมื่อ ${formatThaiDate(selectedCase.guardianContactCompletedAt)}` : ''}</p>
+                  )}
+                </section>
+              ) : null}
+
+              <label>บันทึกการติดตาม
+                <textarea disabled={mutationBusy} value={caseNote} maxLength={2000} onChange={(event) => { setCaseNote(event.target.value); setCaseActionError('') }} placeholder="ระบุสิ่งที่ดำเนินการ ผลการพูดคุย หรือมาตรการช่วยเหลือนักเรียน" />
+              </label>
+              {caseActionError ? <p className="form-error" role="alert">{caseActionError}</p> : null}
+              <div className="case-workflow-actions">
+                <button className="button secondary" type="button" disabled={mutationBusy} onClick={() => void updateFollowUpCase('following_up')}>
+                  {busyAction === 'case-follow' ? 'กำลังบันทึก…' : selectedCase.status === 'open' ? 'เริ่มติดตามเคส' : 'บันทึกความคืบหน้า'}
+                </button>
+                <button className="button approve" type="button" disabled={mutationBusy || selectedCase.status !== 'following_up' || selectedCase.guardianContactStatus === 'pending'} onClick={() => void updateFollowUpCase('resolved')}>
+                  {busyAction === 'case-resolve' ? 'กำลังปิดเคส…' : selectedCase.guardianContactStatus === 'pending' ? 'แจ้งผู้ปกครองก่อนปิดเคส' : 'ปิดเคสเรียบร้อย'}
+                </button>
+              </div>
+            </section>
+          ) : null}
+        </div>
       ) : null}
 
       {tab === 'manage' ? (
