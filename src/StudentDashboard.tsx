@@ -17,6 +17,7 @@ import {
   prepareProfileAvatar,
   PROFILE_AVATARS,
   type ProfileAvatarCrop,
+  type ProfileAvatarOption,
   validateProfileAvatarFile,
 } from './profileAvatars'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
@@ -152,18 +153,22 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
     })
   }
 
-  async function chooseAvatar(preset: string) {
+  async function editPresetAvatar(avatar: ProfileAvatarOption) {
     setAvatarBusy(true)
-    setAnnouncement('')
+    setAnnouncement('กำลังเปิดรูปสำหรับปรับตำแหน่ง…')
     try {
-      if (actions) {
-        await actions.setMyAvatarPreset(preset)
-      } else {
-        updateDemoAvatar({ avatarPreset: preset, avatarUrl: undefined, avatarPath: undefined })
-      }
-      setAnnouncement('เปลี่ยนรูปโปรไฟล์เรียบร้อยแล้ว')
+      const response = await fetch(avatar.src)
+      if (!response.ok) throw new Error('ไม่สามารถเปิดรูปการ์ตูนได้')
+      const blob = await response.blob()
+      const file = new File([blob], `${avatar.id}.webp`, {
+        type: 'image/webp',
+        lastModified: Date.now(),
+      })
+      setAvatarCrop({ ...DEFAULT_PROFILE_AVATAR_CROP })
+      setPendingAvatarFile(file)
+      setAnnouncement('')
     } catch (error) {
-      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนรูปโปรไฟล์ได้')
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเปิดรูปการ์ตูนได้')
     } finally {
       setAvatarBusy(false)
     }
@@ -286,9 +291,10 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
 
           <section className="panel profile-avatar-options">
             <div className="section-heading">
-              <div><p className="eyebrow">เลือกได้ทันที</p><h2>ตัวการ์ตูน</h2></div>
+              <div><p className="eyebrow">เลือกแล้วปรับได้</p><h2>ตัวการ์ตูน</h2></div>
               <span className="counter">10 แบบ</span>
             </div>
+            <p className="profile-avatar-options-help">แตะรูปที่ต้องการ แล้วซูม ย่อ หรือเลื่อนตำแหน่งก่อนกดใช้รูปนี้</p>
             {(['boy', 'girl'] as const).map((group) => (
               <div className="avatar-option-group" key={group}>
                 <h3>{group === 'boy' ? 'ตัวละครชาย' : 'ตัวละครหญิง'}</h3>
@@ -301,7 +307,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
                       aria-label={avatar.label}
                       aria-pressed={account.avatarPreset === avatar.id}
                       disabled={avatarBusy}
-                      onClick={() => void chooseAvatar(avatar.id)}
+                      onClick={() => void editPresetAvatar(avatar)}
                     >
                       <img src={avatar.src} alt="" />
                       <span>{avatar.label.replace(`ตัวละคร${group === 'boy' ? 'ชาย' : 'หญิง'}`, '')}</span>

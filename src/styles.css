@@ -472,6 +472,7 @@ tbody tr:hover td { background: #fbfcfe; }
 .profile-avatar-preview { width: 148px; height: 148px; font-size: 3.2rem; box-shadow: 0 0 0 7px #edf2ff, 0 14px 30px rgba(25, 50, 90, .16); }
 .profile-avatar-status { width: 100%; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #edf8f4; color: #17674f; font-size: .83rem; font-weight: 800; }
 .profile-avatar-options { grid-column: 2; }
+.profile-avatar-options-help { margin: -4px 0 17px; color: var(--muted); font-size: .78rem; line-height: 1.55; }
 .avatar-option-group + .avatar-option-group { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 .avatar-option-group h3 { margin: 0 0 11px; font-size: .88rem; color: var(--navy); }
 .avatar-option-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }

@@ -86,14 +86,14 @@ export function getProfileAvatarPlacement(
   const scale = coverScale * normalizedCrop.zoom
   const width = sourceWidth * scale
   const height = sourceHeight * scale
-  const overflowX = Math.max(0, width - viewportSize)
-  const overflowY = Math.max(0, height - viewportSize)
+  const travelX = Math.max(Math.abs(width - viewportSize) / 2, viewportSize * 0.25)
+  const travelY = Math.max(Math.abs(height - viewportSize) / 2, viewportSize * 0.25)
 
   return {
     width,
     height,
-    x: (viewportSize - width) / 2 + (normalizedCrop.offsetX / 100) * (overflowX / 2),
-    y: (viewportSize - height) / 2 + (normalizedCrop.offsetY / 100) * (overflowY / 2),
+    x: (viewportSize - width) / 2 + (normalizedCrop.offsetX / 100) * travelX,
+    y: (viewportSize - height) / 2 + (normalizedCrop.offsetY / 100) * travelY,
   }
 }
 

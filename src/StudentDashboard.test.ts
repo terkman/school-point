@@ -22,6 +22,7 @@ describe('student profile settings', () => {
     expect(markup).toContain('รูปโปรไฟล์ของฉัน')
     expect(markup).toContain('ตัวละครชาย')
     expect(markup).toContain('ตัวละครหญิง')
+    expect(markup).toContain('แตะรูปที่ต้องการ แล้วซูม ย่อ หรือเลื่อนตำแหน่งก่อนกดใช้รูปนี้')
     expect(markup).toContain('เลือกรูปจากเครื่อง')
     expect(markup).toContain('ซูม ย่อ และเลื่อนตำแหน่งก่อนบันทึกได้')
     expect(markup).toContain('นักเรียนเข้าถึงได้เฉพาะรูปของตนเอง')

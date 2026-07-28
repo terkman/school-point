@@ -51,5 +51,12 @@ describe('student profile avatars', () => {
       x: 0,
       y: 25,
     })
+
+    expect(getProfileAvatarPlacement(800, 400, { zoom: 1, offsetX: 0, offsetY: 100 }, 100)).toEqual({
+      width: 200,
+      height: 100,
+      x: -50,
+      y: 25,
+    })
   })
 })
