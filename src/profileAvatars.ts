@@ -5,11 +5,30 @@ export const PROFILE_AVATAR_SIZE = 512
 
 export type ProfileAvatarGroup = 'boy' | 'girl'
 
+export interface ProfileAvatarCrop {
+  zoom: number
+  offsetX: number
+  offsetY: number
+}
+
+export interface ProfileAvatarPlacement {
+  width: number
+  height: number
+  x: number
+  y: number
+}
+
 export interface ProfileAvatarOption {
   id: string
   label: string
   group: ProfileAvatarGroup
   src: string
+}
+
+export const DEFAULT_PROFILE_AVATAR_CROP: ProfileAvatarCrop = {
+  zoom: 1,
+  offsetX: 0,
+  offsetY: 0,
 }
 
 export const PROFILE_AVATARS: ProfileAvatarOption[] = [
@@ -40,30 +59,67 @@ export function validateProfileAvatarFile(file: Pick<File, 'name' | 'size' | 'ty
   return null
 }
 
-export async function prepareProfileAvatar(file: File): Promise<File> {
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : minimum))
+}
+
+export function normalizeProfileAvatarCrop(crop: ProfileAvatarCrop): ProfileAvatarCrop {
+  return {
+    zoom: clamp(crop.zoom, 0.5, 3),
+    offsetX: clamp(crop.offsetX, -100, 100),
+    offsetY: clamp(crop.offsetY, -100, 100),
+  }
+}
+
+export function getProfileAvatarPlacement(
+  sourceWidth: number,
+  sourceHeight: number,
+  crop: ProfileAvatarCrop,
+  viewportSize = PROFILE_AVATAR_SIZE,
+): ProfileAvatarPlacement {
+  if (sourceWidth <= 0 || sourceHeight <= 0 || viewportSize <= 0) {
+    throw new Error('ไม่สามารถอ่านขนาดรูปโปรไฟล์ได้')
+  }
+
+  const normalizedCrop = normalizeProfileAvatarCrop(crop)
+  const coverScale = Math.max(viewportSize / sourceWidth, viewportSize / sourceHeight)
+  const scale = coverScale * normalizedCrop.zoom
+  const width = sourceWidth * scale
+  const height = sourceHeight * scale
+  const overflowX = Math.max(0, width - viewportSize)
+  const overflowY = Math.max(0, height - viewportSize)
+
+  return {
+    width,
+    height,
+    x: (viewportSize - width) / 2 + (normalizedCrop.offsetX / 100) * (overflowX / 2),
+    y: (viewportSize - height) / 2 + (normalizedCrop.offsetY / 100) * (overflowY / 2),
+  }
+}
+
+export async function prepareProfileAvatar(
+  file: File,
+  crop: ProfileAvatarCrop = DEFAULT_PROFILE_AVATAR_CROP,
+): Promise<File> {
   const validationError = validateProfileAvatarFile(file)
   if (validationError) throw new Error(validationError)
 
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   try {
-    const sourceSize = Math.min(bitmap.width, bitmap.height)
-    const sourceX = Math.max(0, Math.round((bitmap.width - sourceSize) / 2))
-    const sourceY = Math.max(0, Math.round((bitmap.height - sourceSize) / 2))
+    const placement = getProfileAvatarPlacement(bitmap.width, bitmap.height, crop)
     const canvas = document.createElement('canvas')
     canvas.width = PROFILE_AVATAR_SIZE
     canvas.height = PROFILE_AVATAR_SIZE
     const context = canvas.getContext('2d')
     if (!context) throw new Error('อุปกรณ์นี้ไม่รองรับการเตรียมรูปภาพ')
+    context.fillStyle = '#e8eeff'
+    context.fillRect(0, 0, PROFILE_AVATAR_SIZE, PROFILE_AVATAR_SIZE)
     context.drawImage(
       bitmap,
-      sourceX,
-      sourceY,
-      sourceSize,
-      sourceSize,
-      0,
-      0,
-      PROFILE_AVATAR_SIZE,
-      PROFILE_AVATAR_SIZE,
+      placement.x,
+      placement.y,
+      placement.width,
+      placement.height,
     )
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(

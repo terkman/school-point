@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_PROFILE_AVATAR_CROP,
+  getProfileAvatarPlacement,
   getProfileAvatar,
+  normalizeProfileAvatarCrop,
   PROFILE_AVATARS,
   PROFILE_AVATAR_INPUT_BYTES,
   validateProfileAvatarFile,
@@ -26,5 +29,27 @@ describe('student profile avatars', () => {
       type: 'image/png',
       size: PROFILE_AVATAR_INPUT_BYTES + 1,
     })).toContain('10 MB')
+  })
+
+  it('limits crop controls and calculates the same placement used by the preview and saved image', () => {
+    expect(normalizeProfileAvatarCrop({ zoom: 0.1, offsetX: -500, offsetY: 500 })).toEqual({
+      zoom: 0.5,
+      offsetX: -100,
+      offsetY: 100,
+    })
+
+    expect(getProfileAvatarPlacement(800, 400, DEFAULT_PROFILE_AVATAR_CROP, 100)).toEqual({
+      width: 200,
+      height: 100,
+      x: -50,
+      y: 0,
+    })
+
+    expect(getProfileAvatarPlacement(800, 400, { zoom: 0.5, offsetX: 0, offsetY: 0 }, 100)).toEqual({
+      width: 100,
+      height: 50,
+      x: 0,
+      y: 25,
+    })
   })
 })

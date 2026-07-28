@@ -11,9 +11,12 @@ import {
 } from './domain'
 import type { AppDataActions } from './dataActions'
 import { ProfileAvatar } from './ProfileAvatar'
+import { ProfileAvatarEditor } from './ProfileAvatarEditor'
 import {
+  DEFAULT_PROFILE_AVATAR_CROP,
   prepareProfileAvatar,
   PROFILE_AVATARS,
+  type ProfileAvatarCrop,
   validateProfileAvatarFile,
 } from './profileAvatars'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
@@ -71,6 +74,8 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   const [announcement, setAnnouncement] = useState('')
   const [busy, setBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null)
+  const [avatarCrop, setAvatarCrop] = useState<ProfileAvatarCrop>({ ...DEFAULT_PROFILE_AVATAR_CROP })
   const student = state.students.find((item) => item.id === account.studentId)
   const transactions = useMemo(
     () => state.transactions
@@ -164,7 +169,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
     }
   }
 
-  async function uploadAvatar(event: ChangeEvent<HTMLInputElement>) {
+  function selectAvatarFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
@@ -173,10 +178,17 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
       setAnnouncement(validationError)
       return
     }
+    setAnnouncement('')
+    setAvatarCrop({ ...DEFAULT_PROFILE_AVATAR_CROP })
+    setPendingAvatarFile(file)
+  }
+
+  async function uploadAvatar() {
+    if (!pendingAvatarFile) return
     setAvatarBusy(true)
     setAnnouncement('กำลังเตรียมรูปโปรไฟล์…')
     try {
-      const preparedFile = await prepareProfileAvatar(file)
+      const preparedFile = await prepareProfileAvatar(pendingAvatarFile, avatarCrop)
       if (actions) {
         await actions.uploadMyAvatar(preparedFile)
       } else {
@@ -187,6 +199,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
         })
       }
       setAnnouncement('อัปโหลดรูปโปรไฟล์เรียบร้อยแล้ว')
+      setPendingAvatarFile(null)
     } catch (error) {
       setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถอัปโหลดรูปโปรไฟล์ได้')
     } finally {
@@ -304,7 +317,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
             <span className="profile-upload-icon"><Icon name="upload" size={28} /></span>
             <div>
               <h2>ใช้รูปของตัวเอง</h2>
-              <p>รองรับ JPG, PNG และ WEBP ขนาดไม่เกิน 10 MB ระบบจะตัดภาพตรงกลางเป็นสี่เหลี่ยมและย่อขนาดให้อัตโนมัติ</p>
+              <p>รองรับ JPG, PNG และ WEBP ขนาดไม่เกิน 10 MB หลังเลือกรูปสามารถซูม ย่อ และเลื่อนตำแหน่งก่อนบันทึกได้</p>
             </div>
             <label className={`button secondary ${avatarBusy ? 'disabled' : ''}`}>
               <Icon name="upload" size={18} />
@@ -314,12 +327,23 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 disabled={avatarBusy}
-                onChange={(event) => void uploadAvatar(event)}
+                onChange={selectAvatarFile}
               />
             </label>
             <p className="privacy-note profile-upload-privacy"><Icon name="shield" /><span>รูปที่อัปโหลดเก็บแบบส่วนตัว นักเรียนเข้าถึงได้เฉพาะรูปของตนเอง</span></p>
           </section>
         </div>
+      ) : null}
+
+      {pendingAvatarFile ? (
+        <ProfileAvatarEditor
+          file={pendingAvatarFile}
+          crop={avatarCrop}
+          busy={avatarBusy}
+          onCropChange={setAvatarCrop}
+          onCancel={() => setPendingAvatarFile(null)}
+          onConfirm={() => void uploadAvatar()}
+        />
       ) : null}
     </AppShell>
   )
