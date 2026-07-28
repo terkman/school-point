@@ -579,6 +579,11 @@ tbody tr:hover td { background: #fbfcfe; }
 .record-row span:not(.badge), .approval-row span { color: var(--muted); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; }
 .record-row small, .approval-row small { color: #8a94a7; font-size: .69rem; }
 .approval-stack { display: flex; flex-direction: column; gap: 20px; }
+.addition-review-dialog-backdrop { position: fixed; z-index: 110; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(10, 24, 54, .64); backdrop-filter: blur(4px); }
+.addition-review-dialog { width: min(860px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 28px 90px rgba(9, 24, 58, .34); }
+.addition-review-dialog-heading-actions { display: flex; align-items: center; gap: 10px; }
+.addition-review-instruction { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-left: 3px solid var(--teal); background: #edf8f4; color: #17655d; font-size: .77rem; line-height: 1.55; }
+.addition-review-instruction svg { flex: 0 0 auto; margin-top: 1px; }
 .appeal-review-row { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .appeal-review-row:last-child { border-bottom: 0; }
 .appeal-review-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -864,6 +869,10 @@ tbody tr:hover td { background: #fbfcfe; }
   .profile-avatar-preview { width: 126px; height: 126px; }
   .profile-upload-panel { grid-template-columns: auto 1fr; }
   .profile-upload-panel .button { grid-column: 1 / -1; width: 100%; }
+  .addition-review-dialog-backdrop { place-items: stretch; padding: 0; }
+  .addition-review-dialog { width: 100%; max-height: 100dvh; min-height: 100dvh; border: 0; border-radius: 0; }
+  .addition-review-dialog .section-heading { flex-direction: row; }
+  .addition-review-dialog-heading-actions { align-self: flex-start; }
   .avatar-editor-backdrop { place-items: stretch; padding: 0; }
   .avatar-editor-dialog { width: 100%; max-height: 100dvh; min-height: 100dvh; border: 0; border-radius: 0; }
   .avatar-editor-header { padding: 18px 16px 14px; }

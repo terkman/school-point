@@ -72,3 +72,27 @@ describe('admin serious-case workflow', () => {
     expect(markup).toContain('แจ้งผู้ปกครองก่อนปิดเคส')
   })
 })
+
+describe('admin point-addition approvals', () => {
+  it('opens an actionable review dialog with evidence and both decisions', () => {
+    const demo = createDemoState()
+    const account = demo.accounts.find((item) => item.role === 'admin')
+    if (!account) throw new Error('Admin demo account is missing')
+
+    const markup = renderToStaticMarkup(createElement(AdminDashboard, {
+      account,
+      state: demo,
+      initialTab: 'approvals',
+      onChange: () => undefined,
+      onLogout: () => undefined,
+    }))
+
+    expect(markup).toContain('role="dialog"')
+    expect(markup).toContain('aria-modal="true"')
+    expect(markup).toContain('ตรวจสอบหลักฐานก่อนตัดสินใจ')
+    expect(markup).toContain('ปฏิเสธคำขอ')
+    expect(markup).toContain('อนุมัติ +5 คะแนน')
+    expect(markup).toContain('ระบุเหตุผลอย่างน้อย 5 ตัวอักษร')
+    expect(markup).toContain('ปิดรายละเอียดคำขอเพิ่มคะแนน')
+  })
+})

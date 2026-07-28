@@ -209,6 +209,27 @@ describe('Supabase student profile avatars', () => {
   })
 })
 
+describe('Supabase point-addition reviews', () => {
+  it('sends the explicit admin decision and note, then refreshes the approval queue', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 901, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await actions.reviewPointAddition({
+      requestId: '401',
+      approve: true,
+      note: 'ตรวจสอบหลักฐานครบถ้วนแล้ว',
+    })
+
+    expect(rpc).toHaveBeenCalledWith('review_point_addition', {
+      p_request_id: '401',
+      p_approve: true,
+      p_review_note: 'ตรวจสอบหลักฐานครบถ้วนแล้ว',
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('Supabase score mutations', () => {
   it('loads guardian contacts only for the selected task without refreshing school state', async () => {
     const rpc = vi.fn().mockResolvedValue({

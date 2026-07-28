@@ -309,6 +309,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [busyAction, setBusyAction] = useState('')
   const [rulesDialogTab, setRulesDialogTab] = useState<ScoreRulesDialogTab | null>(null)
   const [selectedRequestId, setSelectedRequestId] = useState(pending[0]?.id ?? state.additionRequests[0]?.id ?? '')
+  const [reviewRequestOpen, setReviewRequestOpen] = useState(initialTab === 'approvals' && Boolean(pending[0]))
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionError, setDecisionError] = useState('')
   const [selectedCaseId, setSelectedCaseId] = useState(openCases[0]?.id ?? '')
@@ -355,13 +356,21 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setDecisionNote(request?.decisionNote ?? '')
     setDecisionError('')
     setTab('approvals')
+    setReviewRequestOpen(true)
   }
 
   async function decideAdditionRequest(requestId: string, approve: boolean, note: string) {
     if (mutationBusy) return
     const request = state.additionRequests.find((item) => item.id === requestId)
     const student = state.students.find((item) => item.id === request?.studentId)
-    if (!request || !student || request.status !== 'pending') return
+    if (!request) {
+      setDecisionError('ไม่พบคำขอนี้ กรุณาปิดหน้าต่างแล้วโหลดรายการใหม่')
+      return
+    }
+    if (request.status !== 'pending') {
+      setDecisionError('คำขอนี้ได้รับการพิจารณาไปแล้ว กรุณาโหลดรายการใหม่')
+      return
+    }
     const normalizedNote = note.trim()
     if (normalizedNote.length < 5) {
       setDecisionError('กรุณาระบุเหตุผลประกอบการตัดสินใจอย่างน้อย 5 ตัวอักษร')
@@ -372,15 +381,22 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       setBusyAction(`request-${requestId}`)
       try {
         await actions.reviewPointAddition({ requestId, approve, note: normalizedNote })
+        const studentName = student?.name ?? `นักเรียนรหัส ${request.studentId}`
         setAnnouncement(approve
-          ? `อนุมัติคำขอเพิ่มคะแนนของ ${student.name} แล้ว`
-          : `ปฏิเสธคำขอของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
+          ? `อนุมัติคำขอเพิ่มคะแนนของ ${studentName} แล้ว`
+          : `ปฏิเสธคำขอของ ${studentName} แล้ว คะแนนไม่เปลี่ยนแปลง`)
         setDecisionNote('')
       } catch (error) {
-        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกผลการพิจารณาได้')
+        const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกผลการพิจารณาได้'
+        setDecisionError(message)
+        setAnnouncement(message)
       } finally {
         setBusyAction('')
       }
+      return
+    }
+    if (!student) {
+      setDecisionError('ไม่พบข้อมูลนักเรียนสำหรับคำขอนี้ จึงไม่สามารถจำลองการเปลี่ยนคะแนนได้')
       return
     }
     if (approve) {
@@ -1031,11 +1047,23 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               </div>
             ) : <EmptyState title="ยังไม่มีคำขอ" detail="เมื่อครูขอเพิ่มคะแนน รายการจะปรากฏที่นี่" />}
           </section>
-          {selectedRequest ? (
-            <section className="panel stack-form" aria-labelledby="addition-review-title">
+          {reviewRequestOpen && selectedRequest ? (
+            <div className="addition-review-dialog-backdrop">
+            <section className="panel stack-form addition-review-dialog" role="dialog" aria-modal="true" aria-labelledby="addition-review-title">
               <div className="section-heading">
                 <div><p className="eyebrow">รายละเอียดคำขอ</p><h2 id="addition-review-title">ตรวจสอบหลักฐานก่อนตัดสินใจ</h2></div>
-                <span className={`badge status-${selectedRequest.status}`}>{selectedRequest.status === 'pending' ? 'รอตรวจสอบ' : selectedRequest.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>
+                <div className="addition-review-dialog-heading-actions">
+                  <span className={`badge status-${selectedRequest.status}`}>{selectedRequest.status === 'pending' ? 'รอตรวจสอบ' : selectedRequest.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>
+                  <button
+                    type="button"
+                    className="score-rules-dialog-close"
+                    aria-label="ปิดรายละเอียดคำขอเพิ่มคะแนน"
+                    disabled={mutationBusy}
+                    onClick={() => setReviewRequestOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
               <div className="two-column">
                 <div className="selected-record">
@@ -1070,6 +1098,10 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               </div>
               {selectedRequest.status === 'pending' ? (
                 <>
+                  <div className="addition-review-instruction">
+                    <Icon name="approval" />
+                    <span>ตรวจรายละเอียดและหลักฐาน จากนั้นระบุเหตุผลอย่างน้อย 5 ตัวอักษรก่อนเลือกอนุมัติหรือปฏิเสธ</span>
+                  </div>
                   <label htmlFor="addition-decision-note">บันทึกผลการพิจารณา
                     <textarea
                       id="addition-decision-note"
@@ -1086,10 +1118,10 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                   <small id="addition-decision-help">ต้องระบุอย่างน้อย 5 ตัวอักษรก่อนอนุมัติหรือปฏิเสธ</small>
                   {decisionError ? <p className="form-error" id="addition-decision-error" role="alert">{decisionError}</p> : null}
                   <div className="form-actions">
-                    <button className="button reject" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, false, decisionNote)}>
+                    <button type="button" className="button reject" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, false, decisionNote)}>
                       {busyAction === `request-${selectedRequest.id}` ? 'กำลังบันทึก…' : 'ปฏิเสธคำขอ'}
                     </button>
-                    <button className="button approve" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, true, decisionNote)}>
+                    <button type="button" className="button approve" disabled={!decisionNoteReady || mutationBusy} onClick={() => decideAdditionRequest(selectedRequest.id, true, decisionNote)}>
                       {busyAction === `request-${selectedRequest.id}` ? 'กำลังบันทึก…' : `อนุมัติ +${selectedRequest.requestedPoints} คะแนน`}
                     </button>
                   </div>
@@ -1102,6 +1134,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                 </div>
               )}
             </section>
+            </div>
           ) : null}
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ไม่แก้รายการเดิม</p><h2>คำอุทธรณ์จากนักเรียน</h2></div><span className="counter">{openAppeals.length}</span></div>
             {state.appeals.length ? <div className="record-list">{state.appeals.map((appeal) => { const student = state.students.find((item) => item.id === appeal.studentId); const source = state.transactions.find((item) => item.id === appeal.transactionId); return <article className="appeal-review-row" key={appeal.id}><div><strong>{student?.name} • {Math.abs(source?.appliedDelta ?? 0)} คะแนน</strong><span>{appeal.statement}</span><small>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</small></div>{appeal.status === 'submitted' || appeal.status === 'reviewing' ? <div className="inline-actions"><button className="button approve compact" disabled={mutationBusy} onClick={() => decideAppeal(appeal.id, true)}>คืนคะแนน</button><button className="button reject compact" disabled={mutationBusy} onClick={() => decideAppeal(appeal.id, false)}>ปฏิเสธ</button></div> : <span className={`badge status-${appeal.status === 'accepted' ? 'approved' : 'rejected'}`}>{appeal.status === 'accepted' ? 'คืนคะแนนแล้ว' : 'ไม่อนุมัติ'}</span>}</article> })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="คำอุทธรณ์ที่นักเรียนยื่นภายใน 7 วันจะแสดงที่นี่" />}
