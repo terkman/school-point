@@ -97,6 +97,26 @@ export function getProfileAvatarPlacement(
   }
 }
 
+export function drawProfileAvatar(
+  context: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  crop: ProfileAvatarCrop,
+) {
+  const placement = getProfileAvatarPlacement(sourceWidth, sourceHeight, crop)
+  context.clearRect(0, 0, PROFILE_AVATAR_SIZE, PROFILE_AVATAR_SIZE)
+  context.fillStyle = '#e8eeff'
+  context.fillRect(0, 0, PROFILE_AVATAR_SIZE, PROFILE_AVATAR_SIZE)
+  context.drawImage(
+    source,
+    placement.x,
+    placement.y,
+    placement.width,
+    placement.height,
+  )
+}
+
 export async function prepareProfileAvatar(
   file: File,
   crop: ProfileAvatarCrop = DEFAULT_PROFILE_AVATAR_CROP,
@@ -106,21 +126,12 @@ export async function prepareProfileAvatar(
 
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   try {
-    const placement = getProfileAvatarPlacement(bitmap.width, bitmap.height, crop)
     const canvas = document.createElement('canvas')
     canvas.width = PROFILE_AVATAR_SIZE
     canvas.height = PROFILE_AVATAR_SIZE
     const context = canvas.getContext('2d')
     if (!context) throw new Error('อุปกรณ์นี้ไม่รองรับการเตรียมรูปภาพ')
-    context.fillStyle = '#e8eeff'
-    context.fillRect(0, 0, PROFILE_AVATAR_SIZE, PROFILE_AVATAR_SIZE)
-    context.drawImage(
-      bitmap,
-      placement.x,
-      placement.y,
-      placement.width,
-      placement.height,
-    )
+    drawProfileAvatar(context, bitmap, bitmap.width, bitmap.height, crop)
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
         (result) => result ? resolve(result) : reject(new Error('ไม่สามารถแปลงรูปโปรไฟล์ได้')),

@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   DEFAULT_PROFILE_AVATAR_CROP,
-  getProfileAvatarPlacement,
+  drawProfileAvatar,
+  PROFILE_AVATAR_SIZE,
   type ProfileAvatarCrop,
 } from './profileAvatars'
 
@@ -14,11 +15,6 @@ interface ProfileAvatarEditorProps {
   onConfirm: () => void
 }
 
-interface ImageDimensions {
-  width: number
-  height: number
-}
-
 export function ProfileAvatarEditor({
   file,
   crop,
@@ -27,18 +23,47 @@ export function ProfileAvatarEditor({
   onCancel,
   onConfirm,
 }: ProfileAvatarEditorProps) {
-  const [objectUrl, setObjectUrl] = useState('')
-  const [dimensions, setDimensions] = useState<ImageDimensions>({ width: 1, height: 1 })
+  const [bitmap, setBitmap] = useState<ImageBitmap | null>(null)
+  const [previewError, setPreviewError] = useState('')
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const titleId = useId()
   const zoomId = useId()
   const horizontalId = useId()
   const verticalId = useId()
 
   useEffect(() => {
-    const nextUrl = URL.createObjectURL(file)
-    setObjectUrl(nextUrl)
-    return () => URL.revokeObjectURL(nextUrl)
+    let disposed = false
+    let decodedBitmap: ImageBitmap | null = null
+    setBitmap(null)
+    setPreviewError('')
+    void createImageBitmap(file, { imageOrientation: 'from-image' })
+      .then((nextBitmap) => {
+        decodedBitmap = nextBitmap
+        if (disposed) {
+          nextBitmap.close()
+          return
+        }
+        setBitmap(nextBitmap)
+      })
+      .catch(() => {
+        if (!disposed) setPreviewError('ไม่สามารถแสดงตัวอย่างรูปนี้ได้')
+      })
+    return () => {
+      disposed = true
+      decodedBitmap?.close()
+    }
   }, [file])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !bitmap) return
+    const context = canvas.getContext('2d')
+    if (!context) {
+      setPreviewError('อุปกรณ์นี้ไม่รองรับการแสดงตัวอย่างรูป')
+      return
+    }
+    drawProfileAvatar(context, bitmap, bitmap.width, bitmap.height, crop)
+  }, [bitmap, crop])
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -47,11 +72,6 @@ export function ProfileAvatarEditor({
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [busy, onCancel])
-
-  const placement = useMemo(
-    () => getProfileAvatarPlacement(dimensions.width, dimensions.height, crop, 100),
-    [crop, dimensions.height, dimensions.width],
-  )
 
   function updateCrop(next: Partial<ProfileAvatarCrop>) {
     onCropChange({ ...crop, ...next })
@@ -85,26 +105,16 @@ export function ProfileAvatarEditor({
         <div className="avatar-editor-body">
           <div className="avatar-crop-stage">
             <div className="avatar-crop-viewport" aria-label="ตัวอย่างรูปโปรไฟล์หลังปรับ">
-              {objectUrl ? (
-                <img
-                  src={objectUrl}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    width: `${placement.width}%`,
-                    height: `${placement.height}%`,
-                    left: `${placement.x}%`,
-                    top: `${placement.y}%`,
-                  }}
-                  onLoad={(event) => {
-                    const image = event.currentTarget
-                    setDimensions({ width: image.naturalWidth, height: image.naturalHeight })
-                  }}
-                />
-              ) : null}
-              <span className="avatar-crop-circle" aria-hidden="true" />
+              <canvas
+                ref={canvasRef}
+                width={PROFILE_AVATAR_SIZE}
+                height={PROFILE_AVATAR_SIZE}
+                aria-label="ภาพจริงที่จะใช้เป็นรูปโปรไฟล์"
+              />
+              {!bitmap && !previewError ? <span className="avatar-crop-loading">กำลังเตรียมตัวอย่าง…</span> : null}
+              {previewError ? <span className="avatar-crop-loading error">{previewError}</span> : null}
             </div>
-            <p>พื้นที่ในวงกลมคือส่วนที่จะแสดงบนหน้าเว็บ</p>
+            <p>ภาพในวงกลมนี้ใช้การเรนเดอร์เดียวกับไฟล์ที่บันทึกจริง</p>
           </div>
 
           <div className="avatar-editor-controls">

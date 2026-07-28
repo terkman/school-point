@@ -20,6 +20,8 @@ describe('profile avatar editor', () => {
     expect(markup).toContain('เลื่อนซ้าย–ขวา')
     expect(markup).toContain('เลื่อนขึ้น–ลง')
     expect(markup).toContain('ใช้รูปนี้')
+    expect(markup).toContain('ภาพจริงที่จะใช้เป็นรูปโปรไฟล์')
+    expect(markup).toContain('ใช้การเรนเดอร์เดียวกับไฟล์ที่บันทึกจริง')
     expect(markup).toContain('aria-modal="true"')
   })
 })

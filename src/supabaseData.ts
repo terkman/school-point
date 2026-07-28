@@ -443,7 +443,8 @@ async function createProfileAvatarUrl(client: SupabaseClient, profile: ProfileRo
     .from(PROFILE_AVATAR_BUCKET)
     .createSignedUrl(profile.avatar_path, 3600)
   if (error) throw new Error(`โหลดรูปโปรไฟล์ไม่สำเร็จ: ${error.message}`)
-  return data.signedUrl
+  const separator = data.signedUrl.includes('?') ? '&' : '?'
+  return `${data.signedUrl}${separator}profile-version=${Date.now()}`
 }
 
 export function selectAccessibleTerm(role: Role, activeTerm: TermRow | null, plannedTerm: TermRow | null): TermRow | null {
@@ -1090,7 +1091,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       if (!userId) throw new Error('กรุณาเข้าสู่ระบบใหม่ก่อนอัปโหลดรูป')
       const path = `${userId}/profile.webp`
       const { error: uploadError } = await client.storage.from(PROFILE_AVATAR_BUCKET).upload(path, file, {
-        cacheControl: '60',
+        cacheControl: '0',
         contentType: 'image/webp',
         upsert: true,
       })

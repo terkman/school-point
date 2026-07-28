@@ -199,7 +199,7 @@ describe('Supabase student profile avatars', () => {
     expect(upload).toHaveBeenCalledWith(
       '9ba2f967-4192-45fc-aa31-30bf91862aef/profile.webp',
       file,
-      { cacheControl: '60', contentType: 'image/webp', upsert: true },
+      { cacheControl: '0', contentType: 'image/webp', upsert: true },
     )
     expect(rpc).toHaveBeenCalledWith('update_my_profile_avatar', {
       p_preset: null,
