@@ -4,6 +4,7 @@ import {
   getProfileAvatarPlacement,
   getProfileAvatar,
   normalizeProfileAvatarCrop,
+  PROFILE_AVATAR_ASSET_VERSION,
   PROFILE_AVATARS,
   PROFILE_AVATAR_INPUT_BYTES,
   validateProfileAvatarFile,
@@ -16,7 +17,7 @@ describe('student profile avatars', () => {
     expect(PROFILE_AVATARS.filter((avatar) => avatar.group === 'girl')).toHaveLength(5)
     expect(new Set(PROFILE_AVATARS.map((avatar) => avatar.id))).toHaveProperty('size', 10)
     for (const avatar of PROFILE_AVATARS) {
-      expect(avatar.src).toBe(`/avatars/${avatar.id}.webp`)
+      expect(avatar.src).toBe(`/avatars/${avatar.id}.webp?v=${PROFILE_AVATAR_ASSET_VERSION}`)
       expect(getProfileAvatar(avatar.id)).toBe(avatar)
     }
   })
