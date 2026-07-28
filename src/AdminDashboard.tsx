@@ -343,9 +343,10 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const selectedCase = openCases.find((item) => item.id === selectedCaseId) ?? openCases[0]
   const selectedCaseStudent = state.students.find((student) => student.id === selectedCase?.studentId)
   const decisionNoteReady = decisionNote.trim().length >= 5
+  const approvalQueueCount = pending.length + openAppeals.length
   const navItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'แดชบอร์ด', icon: 'home' },
-    { id: 'approvals', label: 'ศูนย์อนุมัติ', icon: 'approval', count: pending.length },
+    { id: 'approvals', label: 'ศูนย์อนุมัติ', icon: 'approval', count: approvalQueueCount },
     { id: 'cases', label: 'คิวกรณีร้ายแรง', icon: 'alert', count: openCases.length },
     { id: 'manage', label: 'จัดการระบบ', icon: 'settings' },
   ]
@@ -1001,7 +1002,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             <button onClick={() => setTab('approvals')}><span><Icon name="approval" /></span><div><strong>{pending.length}</strong><small>คำขอเพิ่มคะแนนรออนุมัติ</small></div></button>
             <button onClick={() => setTab('cases')}><span className="danger"><Icon name="alert" /></span><div><strong>{openCases.length}</strong><small>กรณีร้ายแรงที่กำลังติดตาม</small></div></button>
             <div><span><Icon name="score" /></span><div><strong>{state.students.length}</strong><small>นักเรียนในภาคเรียนปัจจุบัน</small></div></div>
-            <div><span><Icon name="history" /></span><div><strong>{openAppeals.length}</strong><small>คำอุทธรณ์รอพิจารณา</small></div></div>
+            <button onClick={() => setTab('approvals')}><span><Icon name="history" /></span><div><strong>{openAppeals.length}</strong><small>คำอุทธรณ์รอพิจารณา</small></div></button>
           </section>
           <div className="two-column wide-left">
             <section className="panel"><div className="section-heading"><div><p className="eyebrow">เร่งดำเนินการ</p><h2>คำขอเพิ่มคะแนนล่าสุด</h2></div><button className="text-button" onClick={() => setTab('approvals')}>ดูทั้งหมด</button></div>
@@ -1009,6 +1010,30 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             </section>
             <section className="panel"><div className="section-heading"><div><p className="eyebrow">ความปลอดภัย</p><h2>คิวติดตาม</h2></div><span className="counter danger">{openCases.length}</span></div>
               {openCases.length ? <div className="mini-case-list">{openCases.slice(0, 3).map((item) => { const student = state.students.find((entry) => entry.id === item.studentId); return <article key={item.id}><StatusBadge severity={item.severity} /><strong>{student?.name}</strong><span>{item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span></article> })}</div> : <EmptyState title="ไม่มีเคสค้าง" detail="กรณีร้ายแรงจะปรากฏที่นี่" />}
+            </section>
+            <section className="panel dashboard-appeals-panel">
+              <div className="section-heading">
+                <div><p className="eyebrow">ต้องพิจารณา</p><h2>คำอุทธรณ์ล่าสุด</h2></div>
+                <button className="text-button" onClick={() => setTab('approvals')}>เปิดศูนย์อนุมัติ</button>
+              </div>
+              {openAppeals.length ? (
+                <div className="record-list">
+                  {openAppeals.slice(0, 4).map((appeal) => {
+                    const student = state.students.find((item) => item.id === appeal.studentId)
+                    const source = state.transactions.find((item) => item.id === appeal.transactionId)
+                    return (
+                      <article className="approval-row" key={appeal.id}>
+                        <div>
+                          <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                          <span>{appeal.statement}</span>
+                          <small>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)} • ขอคืน {Math.abs(source?.appliedDelta ?? 0)} คะแนน</small>
+                        </div>
+                        <button className="button secondary compact" onClick={() => setTab('approvals')}>ตรวจสอบคำอุทธรณ์</button>
+                      </article>
+                    )
+                  })}
+                </div>
+              ) : <EmptyState title="ไม่มีคำอุทธรณ์รอพิจารณา" detail="คำอุทธรณ์ใหม่จากนักเรียนจะแสดงที่นี่ทันที" />}
             </section>
           </div>
         </>

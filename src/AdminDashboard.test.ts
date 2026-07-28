@@ -96,3 +96,36 @@ describe('admin point-addition approvals', () => {
     expect(markup).toContain('ปิดรายละเอียดคำขอเพิ่มคะแนน')
   })
 })
+
+describe('admin appeal dashboard', () => {
+  it('shows pending appeals in the overview with the student, reason, and requested restoration', () => {
+    const demo = createDemoState()
+    const account = demo.accounts.find((item) => item.role === 'admin')
+    const source = demo.transactions.find((item) => item.kind === 'deduction')
+    if (!account || !source) throw new Error('Admin appeal demo fixtures are missing')
+    const student = demo.students.find((item) => item.id === source.studentId)
+    if (!student) throw new Error('Admin appeal student fixture is missing')
+    demo.appeals = [{
+      id: 'appeal-dashboard-test',
+      transactionId: source.id,
+      studentId: source.studentId,
+      statement: 'ขอให้ตรวจสอบหลักฐานการเข้าเรียนอีกครั้ง',
+      status: 'submitted',
+      createdAt: new Date().toISOString(),
+    }]
+
+    const markup = renderToStaticMarkup(createElement(AdminDashboard, {
+      account,
+      state: demo,
+      initialTab: 'overview',
+      onChange: () => undefined,
+      onLogout: () => undefined,
+    }))
+
+    expect(markup).toContain('คำอุทธรณ์ล่าสุด')
+    expect(markup).toContain('ขอให้ตรวจสอบหลักฐานการเข้าเรียนอีกครั้ง')
+    expect(markup).toContain(student.name)
+    expect(markup).toContain(`ขอคืน ${Math.abs(source.appliedDelta)} คะแนน`)
+    expect(markup).toContain('ตรวจสอบคำอุทธรณ์')
+  })
+})
