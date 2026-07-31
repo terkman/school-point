@@ -8,10 +8,12 @@ dist
 .DS_Store
 supabase/.temp
 .wrangler/
+outputs/
 
 # ห้ามนำข้อมูลจริงหรือหลักฐานเหตุการณ์ขึ้น repository สาธารณะ
 private-data/
 imports/
 evidence/
 *.xlsx
+!public/templates/*.xlsx
 *.csv

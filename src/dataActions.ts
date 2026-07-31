@@ -1,5 +1,6 @@
 import type { GuardianContact } from './domain'
 import type { EvidenceAttachment } from './evidence'
+import type { SchoolImportPreview, SchoolImportResult } from './schoolImport'
 import type {
   ActivationCodeResult,
   CreateSchoolClassroomInput,
@@ -203,4 +204,6 @@ export interface AppDataActions {
   updateSchoolStudent: (input: UpdateSchoolStudentInput) => Promise<void>
   updateSchoolStaff: (input: UpdateSchoolStaffInput) => Promise<void>
   issueActivationCode: (username: string) => Promise<ActivationCodeResult>
+  previewSchoolImport: (file: File) => Promise<SchoolImportPreview>
+  applySchoolImport: (file: File, fingerprint: string) => Promise<SchoolImportResult>
 }

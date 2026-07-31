@@ -37,6 +37,12 @@ import {
   type CreateSchoolClassroomResult,
   type CreateSchoolPersonResult,
 } from './schoolDirectory'
+import {
+  normalizeSchoolImportPreview,
+  normalizeSchoolImportResult,
+  type SchoolImportPreview,
+  type SchoolImportResult,
+} from './schoolImport'
 
 interface QueryResult<T> {
   data: T | null
@@ -926,6 +932,36 @@ async function invokeAdminDirectory<T>(
   return data.data as T
 }
 
+async function invokeAdminSchoolImport<T>(
+  client: SupabaseClient,
+  file: File,
+  mode: 'preview' | 'apply',
+  fingerprint = '',
+): Promise<T> {
+  const body = new FormData()
+  body.append('mode', mode)
+  body.append('file', file, file.name)
+  if (fingerprint) body.append('fingerprint', fingerprint)
+  const { data, error } = await client.functions.invoke('admin-school-import', { body })
+  if (error) {
+    let detail = error.message
+    const context = 'context' in error ? error.context : undefined
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as { error?: unknown }
+        if (typeof payload.error === 'string' && payload.error.trim()) detail = payload.error
+      } catch {
+        // Keep the SDK error when the server did not return a JSON explanation.
+      }
+    }
+    throw new Error(detail)
+  }
+  if (!data || data.ok !== true) {
+    throw new Error(typeof data?.error === 'string' ? data.error : 'บริการนำเข้าข้อมูลไม่ส่งผลลัพธ์กลับมา')
+  }
+  return data.data as T
+}
+
 const evidenceExtensions: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -1164,5 +1200,15 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       action: 'issue-activation',
       input: { username },
     }),
+    previewSchoolImport: async (file): Promise<SchoolImportPreview> => normalizeSchoolImportPreview(
+      await invokeAdminSchoolImport<unknown>(client, file, 'preview'),
+    ),
+    applySchoolImport: async (file, fingerprint): Promise<SchoolImportResult> => {
+      const result = normalizeSchoolImportResult(
+        await invokeAdminSchoolImport<unknown>(client, file, 'apply', fingerprint),
+      )
+      await refresh()
+      return result
+    },
   }
 }

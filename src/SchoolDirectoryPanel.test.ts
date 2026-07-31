@@ -68,5 +68,14 @@ describe('school directory administration', () => {
     expect(markup).not.toContain('เพิ่มนักเรียน')
     expect(markup).not.toContain('>แก้ไข<')
     expect(markup).not.toMatch(/<button[^>]*>ออกรหัสครั้งแรก/)
+    expect(markup).not.toContain('นำเข้า Excel')
+  })
+
+  it('offers the Excel import center only in the editable admin directory', () => {
+    const markup = renderToStaticMarkup(createElement(SchoolDirectoryPanel, {
+      initialSnapshot: snapshot,
+    }))
+
+    expect(markup).toContain('นำเข้า Excel')
   })
 })

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { AppDataActions } from './dataActions'
+import { SchoolImportPanel } from './SchoolImportPanel'
 import {
   classroomDisplayName,
   gradeLevelOptions,
@@ -16,7 +17,7 @@ import {
 } from './schoolDirectory'
 import { EmptyState, Icon } from './ui'
 
-type DirectorySection = 'students' | 'staff' | 'classrooms'
+type DirectorySection = 'students' | 'staff' | 'classrooms' | 'import'
 type EditorTarget =
   | { kind: 'new-student' }
   | { kind: 'new-staff' }
@@ -452,8 +453,8 @@ export function SchoolDirectoryPanel({
   return (
     <div className="directory-page">
       <section className="directory-hero">
-        <div><p className="eyebrow">ข้อมูลกลางของโรงเรียน</p><h1>ศูนย์บริหารบุคคลและบัญชี</h1><p>เพิ่ม แก้ไข ย้ายห้อง ปิดใช้งาน และคืนสถานะ โดยเก็บประวัติเดิมไว้ครบถ้วน</p></div>
-        {!readOnly ? (
+        <div><p className="eyebrow">ข้อมูลกลางของโรงเรียน</p><h1>ศูนย์บริหารบุคคลและบัญชี</h1><p>{section === 'import' ? 'นำเข้าข้อมูลจำนวนมากผ่าน Excel พร้อมตรวจสอบก่อนบันทึกและเก็บประวัติทุกครั้ง' : 'เพิ่ม แก้ไข ย้ายห้อง ปิดใช้งาน และคืนสถานะ โดยเก็บประวัติเดิมไว้ครบถ้วน'}</p></div>
+        {!readOnly && section !== 'import' ? (
           <button className="button primary" type="button" onClick={() => {
             if (section === 'classrooms') setClassroomEditorOpen(true)
             else setEditor(section === 'students' ? { kind: 'new-student' } : { kind: 'new-staff' })
@@ -477,8 +478,12 @@ export function SchoolDirectoryPanel({
           <button className={section === 'students' ? 'active' : ''} type="button" onClick={() => setSection('students')}>นักเรียน <b>{snapshot.students.length}</b></button>
           <button className={section === 'staff' ? 'active' : ''} type="button" onClick={() => setSection('staff')}>บุคลากร <b>{snapshot.staff.length}</b></button>
           <button className={section === 'classrooms' ? 'active' : ''} type="button" onClick={() => setSection('classrooms')}>ชั้นและห้อง <b>{snapshot.classrooms.length}</b></button>
+          {!readOnly ? <button className={section === 'import' ? 'active' : ''} type="button" onClick={() => setSection('import')}><Icon name="upload" size={17} /> นำเข้า Excel</button> : null}
         </div>
-        <div className={section === 'classrooms' ? 'directory-toolbar classroom-directory-toolbar' : 'directory-toolbar'}>
+        {section === 'import' ? (
+          actions && !readOnly ? <SchoolImportPanel actions={actions} onApplied={load} /> : null
+        ) : <>
+          <div className={section === 'classrooms' ? 'directory-toolbar classroom-directory-toolbar' : 'directory-toolbar'}>
           {section === 'classrooms' ? (
             <p>ห้องเรียนของ {snapshot.termLabel || 'ภาคเรียนปัจจุบัน'} — ห้องหมายเลข 0 หมายถึงระดับชั้นนั้นมีห้องเดียว</p>
           ) : (
@@ -488,10 +493,10 @@ export function SchoolDirectoryPanel({
             </>
           )}
           <button className="button ghost compact" type="button" disabled={loading} onClick={() => void load()}>{loading ? 'กำลังโหลด…' : 'โหลดข้อมูลใหม่'}</button>
-        </div>
-        {error ? <p className="form-error" role="alert">{error}</p> : null}
+          </div>
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
 
-        {section === 'classrooms' ? (
+          {section === 'classrooms' ? (
           <div className="classroom-directory-list">
             {classroomGroups.map((group) => (
               <article className={group.classrooms.length ? 'classroom-directory-row' : 'classroom-directory-row empty'} key={group.value}>
@@ -532,7 +537,8 @@ export function SchoolDirectoryPanel({
               </div>
             </article>
           ))}</div> : <EmptyState title="ไม่พบบุคลากร" detail="ลองเปลี่ยนคำค้นหรือเปิดการแสดงผู้ที่ปิดใช้งาน" />
-        )}
+          )}
+        </>}
       </section>
 
       {editor && actions ? <DirectoryEditor key={`${editor.kind}:${'person' in editor ? editor.person.id : 'new'}`} target={editor} snapshot={snapshot} actions={actions} onSaved={afterSaved} onClose={() => setEditor(null)} /> : null}
