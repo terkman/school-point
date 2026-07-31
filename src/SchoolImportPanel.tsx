@@ -146,7 +146,7 @@ export function SchoolImportPanel({ actions, onApplied }: SchoolImportPanelProps
           <h2>Excel 1 ไฟล์ • 5 แผ่นงาน</h2>
           <p>ใช้แบบฟอร์มของระบบเพื่อเพิ่มหรืออัปเดตห้อง นักเรียน บุคลากร ห้องที่ครูรับผิดชอบ และผู้ปกครอง โดยช่องว่างจะไม่ลบข้อมูลเดิม</p>
         </div>
-        <a className="button secondary school-import-download" href="/templates/school-point-import-template.xlsx" download="แบบฟอร์มนำเข้าข้อมูลโรงเรียน.xlsx">
+        <a className="button secondary school-import-download" href="/templates/school-point-import-template-v2.xlsx" download="แบบฟอร์มนำเข้าข้อมูลโรงเรียน.xlsx">
           <Icon name="book" size={18} /> ดาวน์โหลดแบบฟอร์ม
         </a>
       </section>
