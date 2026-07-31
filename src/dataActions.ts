@@ -1,5 +1,13 @@
 import type { GuardianContact } from './domain'
 import type { EvidenceAttachment } from './evidence'
+import type {
+  ActivationCodeResult,
+  CreateSchoolPersonInput,
+  CreateSchoolPersonResult,
+  SchoolDirectorySnapshot,
+  UpdateSchoolStaffInput,
+  UpdateSchoolStudentInput,
+} from './schoolDirectory'
 
 export type DeductionScope = 'single' | 'selected' | 'classroom'
 
@@ -187,4 +195,9 @@ export interface AppDataActions {
   setMyAvatarPreset: (preset: string) => Promise<void>
   uploadMyAvatar: (file: File) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
+  getSchoolDirectory: () => Promise<SchoolDirectorySnapshot>
+  createSchoolPerson: (input: CreateSchoolPersonInput) => Promise<CreateSchoolPersonResult>
+  updateSchoolStudent: (input: UpdateSchoolStudentInput) => Promise<void>
+  updateSchoolStaff: (input: UpdateSchoolStaffInput) => Promise<void>
+  issueActivationCode: (username: string) => Promise<ActivationCodeResult>
 }

@@ -15,6 +15,10 @@ describe('Supabase term selection', () => {
     expect(selectAccessibleTerm('admin', null, plannedTerm)).toBe(plannedTerm)
   })
 
+  it('lets a director read the latest planned term without granting mutations', () => {
+    expect(selectAccessibleTerm('director', null, plannedTerm)).toBe(plannedTerm)
+  })
+
   it('keeps planned terms unavailable to students and teachers', () => {
     expect(selectAccessibleTerm('student', null, plannedTerm)).toBeNull()
     expect(selectAccessibleTerm('teacher', null, plannedTerm)).toBeNull()

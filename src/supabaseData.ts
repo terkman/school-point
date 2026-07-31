@@ -31,6 +31,11 @@ import {
   PROFILE_AVATAR_BUCKET,
   PROFILE_AVATAR_OUTPUT_BYTES,
 } from './profileAvatars'
+import {
+  normalizeDirectorySnapshot,
+  type ActivationCodeResult,
+  type CreateSchoolPersonResult,
+} from './schoolDirectory'
 
 interface QueryResult<T> {
   data: T | null
@@ -430,7 +435,7 @@ async function loadProfile(client: SupabaseClient, user: User): Promise<ProfileR
   const profile = unwrap<ProfileRow>('โหลดสิทธิ์ผู้ใช้', result as QueryResult<ProfileRow>)
   if (!profile.is_active) throw new Error('บัญชีนี้ถูกระงับการใช้งาน')
   if (profile.activation_required) throw new Error('ต้องตั้งรหัสผ่านส่วนตัวก่อนใช้งานข้อมูลโรงเรียน')
-  if (!['student', 'teacher', 'admin'].includes(profile.role)) throw new Error('บทบาทผู้ใช้ไม่ถูกต้อง')
+  if (!['student', 'teacher', 'director', 'admin'].includes(profile.role)) throw new Error('บทบาทผู้ใช้ไม่ถูกต้อง')
   return profile
 }
 
@@ -449,7 +454,7 @@ async function createProfileAvatarUrl(client: SupabaseClient, profile: ProfileRo
 
 export function selectAccessibleTerm(role: Role, activeTerm: TermRow | null, plannedTerm: TermRow | null): TermRow | null {
   if (activeTerm) return activeTerm
-  return role === 'admin' ? plannedTerm : null
+  return role === 'admin' || role === 'director' ? plannedTerm : null
 }
 
 async function loadAccessibleTermAndRules(
@@ -479,7 +484,7 @@ async function loadAccessibleTermAndRules(
       .order('id')
       .range(from, to))
 
-  if (role !== 'admin') {
+  if (role !== 'admin' && role !== 'director') {
     const [activeResult, rulesResult, positiveRulesResult] = await Promise.all([
       activeTermQuery,
       rulesQuery,
@@ -896,6 +901,30 @@ async function runRpc<T>(client: SupabaseClient, name: string, parameters: Recor
   return data as T
 }
 
+async function invokeAdminDirectory<T>(
+  client: SupabaseClient,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const { data, error } = await client.functions.invoke('admin-directory', { body })
+  if (error) {
+    let detail = error.message
+    const context = 'context' in error ? error.context : undefined
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as { error?: unknown }
+        if (typeof payload.error === 'string' && payload.error.trim()) detail = payload.error
+      } catch {
+        // Keep the SDK error when the server did not return a JSON explanation.
+      }
+    }
+    throw new Error(detail)
+  }
+  if (!data || data.ok !== true) {
+    throw new Error(typeof data?.error === 'string' ? data.error : 'บริการศูนย์บริหารโรงเรียนไม่ส่งผลลัพธ์กลับมา')
+  }
+  return data.data as T
+}
+
 const evidenceExtensions: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -1103,5 +1132,28 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       await refresh()
     },
     activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
+    getSchoolDirectory: async () => normalizeDirectorySnapshot(
+      await invokeAdminDirectory<unknown>(client, { action: 'snapshot' }),
+    ),
+    createSchoolPerson: async (input) => {
+      const result = await invokeAdminDirectory<CreateSchoolPersonResult>(client, {
+        action: 'create-person',
+        input,
+      })
+      await refresh()
+      return result
+    },
+    updateSchoolStudent: async (input) => {
+      await invokeAdminDirectory<void>(client, { action: 'update-student', input })
+      await refresh()
+    },
+    updateSchoolStaff: async (input) => {
+      await invokeAdminDirectory<void>(client, { action: 'update-staff', input })
+      await refresh()
+    },
+    issueActivationCode: (username) => invokeAdminDirectory<ActivationCodeResult>(client, {
+      action: 'issue-activation',
+      input: { username },
+    }),
   }
 }

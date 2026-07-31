@@ -1,0 +1,423 @@
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import type { AppDataActions } from './dataActions'
+import {
+  personStatusLabels,
+  staffRoleLabels,
+  type ActivationCodeResult,
+  type CreateSchoolPersonResult,
+  type DirectoryStaff,
+  type DirectoryStudent,
+  type PersonStatus,
+  type SchoolDirectorySnapshot,
+  type StaffRole,
+} from './schoolDirectory'
+import { EmptyState, Icon } from './ui'
+
+type DirectorySection = 'students' | 'staff'
+type EditorTarget =
+  | { kind: 'new-student' }
+  | { kind: 'new-staff' }
+  | { kind: 'student'; person: DirectoryStudent }
+  | { kind: 'staff'; person: DirectoryStaff }
+
+interface SchoolDirectoryPanelProps {
+  actions?: AppDataActions
+  readOnly?: boolean
+  initialSnapshot?: SchoolDirectorySnapshot
+}
+
+const emptySnapshot: SchoolDirectorySnapshot = {
+  termId: '',
+  termLabel: '',
+  classrooms: [],
+  students: [],
+  staff: [],
+}
+
+function fullName(person: { title: string; givenName: string; familyName: string }) {
+  return [person.title, person.givenName, person.familyName].filter(Boolean).join(' ')
+}
+
+function statusClass(status: PersonStatus) {
+  if (status === 'active') return 'status-approved'
+  if (status === 'suspended') return 'status-pending'
+  return 'status-rejected'
+}
+
+function Dialog({
+  title,
+  eyebrow,
+  onClose,
+  children,
+}: {
+  title: string
+  eyebrow: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="directory-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose()
+    }}>
+      <section className="panel directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directory-dialog-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">{eyebrow}</p><h2 id="directory-dialog-title">{title}</h2></div>
+          <button className="score-rules-dialog-close" type="button" onClick={onClose} aria-label="ปิดหน้าต่าง">×</button>
+        </div>
+        {children}
+      </section>
+    </div>
+  )
+}
+
+function ActivationDialog({
+  result,
+  onClose,
+}: {
+  result: ActivationCodeResult
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(result.activationCode)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <Dialog title="รหัสเปิดใช้ครั้งเดียว" eyebrow="แสดงเพียงครั้งนี้" onClose={onClose}>
+      <div className="activation-code-card">
+        <span>ชื่อผู้ใช้</span>
+        <strong>{result.username}</strong>
+        <span>รหัสเปิดใช้</span>
+        <b>{result.activationCode}</b>
+      </div>
+      <p className="form-help">ส่งรหัสนี้ให้เจ้าของบัญชีโดยตรง รหัสมีอายุจำกัดและใช้ได้ครั้งเดียว หลังจากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว</p>
+      <div className="form-actions">
+        <button className="button secondary" type="button" onClick={() => void copyCode()}>
+          {copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'}
+        </button>
+        <button className="button primary" type="button" onClick={onClose}>ปิด</button>
+      </div>
+    </Dialog>
+  )
+}
+
+function DirectoryEditor({
+  target,
+  snapshot,
+  actions,
+  onSaved,
+  onClose,
+}: {
+  target: EditorTarget
+  snapshot: SchoolDirectorySnapshot
+  actions: AppDataActions
+  onSaved: (result?: CreateSchoolPersonResult) => Promise<void>
+  onClose: () => void
+}) {
+  const person = target.kind === 'student' || target.kind === 'staff' ? target.person : undefined
+  const isStudent = target.kind === 'student' || target.kind === 'new-student'
+  const isNew = target.kind === 'new-student' || target.kind === 'new-staff'
+  const [code, setCode] = useState(
+    target.kind === 'student' ? target.person.studentCode
+      : target.kind === 'staff' ? target.person.employeeCode : '',
+  )
+  const [username, setUsername] = useState(person?.username ?? '')
+  const [title, setTitle] = useState(person?.title ?? '')
+  const [givenName, setGivenName] = useState(person?.givenName ?? '')
+  const [familyName, setFamilyName] = useState(person?.familyName ?? '')
+  const [status, setStatus] = useState<PersonStatus>(person?.status ?? 'active')
+  const [role, setRole] = useState<StaffRole>(target.kind === 'staff' ? target.person.role : 'teacher')
+  const [classroomId, setClassroomId] = useState(target.kind === 'student' ? target.person.classroomId : snapshot.classrooms[0]?.id ?? '')
+  const [classroomIds, setClassroomIds] = useState(() => new Set(target.kind === 'staff' ? target.person.classroomIds : []))
+  const [birthDate, setBirthDate] = useState(target.kind === 'student' ? target.person.birthDate : '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  function toggleClassroom(id: string) {
+    setClassroomIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (isNew) {
+        const result = await actions.createSchoolPerson({
+          kind: isStudent ? 'student' : 'staff',
+          username,
+          code,
+          title,
+          givenName,
+          familyName,
+          ...(isStudent ? { classroomId, birthDate } : { role }),
+        })
+        if (!isStudent && role === 'teacher' && classroomIds.size) {
+          await actions.updateSchoolStaff({
+            teacherId: result.id,
+            title,
+            givenName,
+            familyName,
+            status: 'active',
+            role,
+            classroomIds: [...classroomIds],
+          })
+        }
+        await onSaved(result)
+        return
+      }
+      if (target.kind === 'student') {
+        await actions.updateSchoolStudent({
+          studentId: target.person.id,
+          title,
+          givenName,
+          familyName,
+          status,
+          classroomId,
+          birthDate,
+        })
+      } else if (target.kind === 'staff') {
+        await actions.updateSchoolStaff({
+          teacherId: target.person.id,
+          title,
+          givenName,
+          familyName,
+          status: status === 'graduated' ? 'archived' : status,
+          role,
+          classroomIds: role === 'teacher' ? [...classroomIds] : [],
+        })
+      }
+      await onSaved()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถบันทึกข้อมูลได้')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      eyebrow={isNew ? 'เพิ่มเข้าสู่ระบบ' : 'แก้ไขและเก็บประวัติ'}
+      title={isNew ? `เพิ่ม${isStudent ? 'นักเรียน' : 'บุคลากร'}ใหม่` : fullName(person!)}
+      onClose={onClose}
+    >
+      <form className="stack-form directory-editor-form" onSubmit={submit}>
+        {isNew ? (
+          <div className="date-field-grid">
+            <label>{isStudent ? 'รหัสนักเรียน' : 'รหัสบุคลากร'}
+              <input value={code} maxLength={80} required disabled={busy} onChange={(event) => {
+                const next = event.target.value
+                setCode(next)
+                if (!username || username === code) setUsername(next.toLowerCase())
+              }} />
+            </label>
+            <label>ชื่อผู้ใช้
+              <input value={username} maxLength={80} pattern="[a-z0-9._-]+" required disabled={busy} onChange={(event) => setUsername(event.target.value.toLowerCase())} />
+            </label>
+          </div>
+        ) : null}
+        <div className="directory-name-grid">
+          <label>คำนำหน้า<input value={title} maxLength={80} disabled={busy} onChange={(event) => setTitle(event.target.value)} /></label>
+          <label>ชื่อ<input value={givenName} maxLength={160} required disabled={busy} onChange={(event) => setGivenName(event.target.value)} /></label>
+          <label>นามสกุล<input value={familyName} maxLength={160} required disabled={busy} onChange={(event) => setFamilyName(event.target.value)} /></label>
+        </div>
+        {isStudent ? (
+          <div className="date-field-grid">
+            <label>ห้องเรียน
+              <select value={classroomId} required={status === 'active'} disabled={busy || status !== 'active'} onChange={(event) => setClassroomId(event.target.value)}>
+                <option value="">เลือกห้องเรียน</option>
+                {snapshot.classrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name}</option>)}
+              </select>
+            </label>
+            <label>วันเกิด (ไม่บังคับ)<input type="date" value={birthDate} disabled={busy} onChange={(event) => setBirthDate(event.target.value)} /></label>
+          </div>
+        ) : (
+          <>
+            <label>ตำแหน่งและสิทธิ์
+              <select value={role} disabled={busy} onChange={(event) => setRole(event.target.value as StaffRole)}>
+                <option value="teacher">ครู</option>
+                <option value="director">ผู้อำนวยการ — ดูข้อมูลทั้งหมดอย่างเดียว</option>
+                <option value="admin">ผู้ดูแลระบบ — จัดการระบบทั้งหมด</option>
+              </select>
+            </label>
+            {role === 'teacher' ? (
+              <fieldset className="directory-classroom-fieldset" disabled={busy}>
+                <legend>ห้องที่รับผิดชอบ</legend>
+                <div className="classroom-access-grid">
+                  {snapshot.classrooms.map((classroom) => (
+                    <label className={classroomIds.has(classroom.id) ? 'classroom-access-option selected' : 'classroom-access-option'} key={classroom.id}>
+                      <input type="checkbox" checked={classroomIds.has(classroom.id)} onChange={() => toggleClassroom(classroom.id)} />
+                      <span><strong>{classroom.name}</strong><small>{classroom.gradeLevel}</small></span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ) : <p className="scope-note"><Icon name="shield" size={18} /> ตำแหน่งนี้ไม่ใช้สิทธิ์รายห้อง</p>}
+          </>
+        )}
+        {!isNew ? (
+          <label>สถานะ
+            <select value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as PersonStatus)}>
+              <option value="active">กำลังใช้งาน</option>
+              <option value="suspended">ระงับชั่วคราว</option>
+              {isStudent ? <option value="graduated">จบการศึกษา</option> : null}
+              <option value="archived">ย้ายออก/ปิดใช้งาน</option>
+            </select>
+          </label>
+        ) : null}
+        {!isNew && status !== 'active' ? <div className="warning-note"><Icon name="alert" /><span>บัญชีจะเข้าสู่ระบบไม่ได้ แต่ข้อมูลและประวัติทั้งหมดจะยังคงอยู่และสามารถคืนสถานะภายหลัง</span></div> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="form-actions">
+          <button className="button secondary" type="button" disabled={busy} onClick={onClose}>ยกเลิก</button>
+          <button className="button primary" type="submit" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกข้อมูล'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+export function SchoolDirectoryPanel({
+  actions,
+  readOnly = false,
+  initialSnapshot,
+}: SchoolDirectoryPanelProps) {
+  const [snapshot, setSnapshot] = useState(initialSnapshot ?? emptySnapshot)
+  const [section, setSection] = useState<DirectorySection>('students')
+  const [query, setQuery] = useState('')
+  const [showInactive, setShowInactive] = useState(false)
+  const [editor, setEditor] = useState<EditorTarget | null>(null)
+  const [activation, setActivation] = useState<ActivationCodeResult | null>(null)
+  const [loading, setLoading] = useState(!initialSnapshot && Boolean(actions))
+  const [busyUsername, setBusyUsername] = useState('')
+  const [error, setError] = useState('')
+
+  async function load() {
+    if (!actions) return
+    setLoading(true)
+    setError('')
+    try {
+      setSnapshot(await actions.getSchoolDirectory())
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'ไม่สามารถโหลดรายชื่อได้')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!initialSnapshot) void load()
+    // Loading once on entry avoids replacing a form while an administrator is editing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const normalizedQuery = query.trim().toLocaleLowerCase('th')
+  const students = useMemo(() => snapshot.students.filter((student) => {
+    if (!showInactive && student.status !== 'active') return false
+    if (!normalizedQuery) return true
+    return `${fullName(student)} ${student.studentCode} ${student.username} ${student.classroomName}`
+      .toLocaleLowerCase('th').includes(normalizedQuery)
+  }), [normalizedQuery, showInactive, snapshot.students])
+  const staff = useMemo(() => snapshot.staff.filter((person) => {
+    if (!showInactive && person.status !== 'active') return false
+    if (!normalizedQuery) return true
+    return `${fullName(person)} ${person.employeeCode} ${person.username} ${staffRoleLabels[person.role]}`
+      .toLocaleLowerCase('th').includes(normalizedQuery)
+  }), [normalizedQuery, showInactive, snapshot.staff])
+
+  async function afterSaved(result?: CreateSchoolPersonResult) {
+    setEditor(null)
+    await load()
+    if (result?.activationCode && result.issuedAt) {
+      setActivation({
+        username: result.username,
+        activationCode: result.activationCode,
+        issuedAt: result.issuedAt,
+      })
+    }
+  }
+
+  async function issueCode(username: string) {
+    if (!actions || busyUsername) return
+    setBusyUsername(username)
+    setError('')
+    try {
+      setActivation(await actions.issueActivationCode(username))
+    } catch (issueError) {
+      setError(issueError instanceof Error ? issueError.message : 'ไม่สามารถออกรหัสเปิดใช้ได้')
+    } finally {
+      setBusyUsername('')
+    }
+  }
+
+  if (!actions && !initialSnapshot) {
+    return <section className="panel"><EmptyState title="ศูนย์บริหารใช้กับฐานข้อมูลจริง" detail="เข้าสู่ระบบจริงด้วยบัญชีแอดมินเพื่อจัดการรายชื่อและบัญชี" /></section>
+  }
+
+  return (
+    <div className="directory-page">
+      <section className="directory-hero">
+        <div><p className="eyebrow">ข้อมูลกลางของโรงเรียน</p><h1>ศูนย์บริหารบุคคลและบัญชี</h1><p>เพิ่ม แก้ไข ย้ายห้อง ปิดใช้งาน และคืนสถานะ โดยเก็บประวัติเดิมไว้ครบถ้วน</p></div>
+        {!readOnly ? <button className="button primary" type="button" onClick={() => setEditor(section === 'students' ? { kind: 'new-student' } : { kind: 'new-staff' })}><Icon name="plus" /> เพิ่ม{section === 'students' ? 'นักเรียน' : 'บุคลากร'}</button> : null}
+      </section>
+
+      {readOnly ? <div className="scope-note director-readonly-note"><Icon name="eye" size={18} /> ผู้อำนวยการดูข้อมูลได้ทั้งหมด แต่ไม่สามารถแก้ไขรายชื่อ สิทธิ์ หรือการตั้งค่าระบบ</div> : null}
+
+      <section className="directory-summary-grid">
+        <div><span>นักเรียนทั้งหมด</span><strong>{snapshot.students.length}</strong><small>กำลังใช้งาน {snapshot.students.filter((item) => item.status === 'active').length}</small></div>
+        <div><span>บุคลากรทั้งหมด</span><strong>{snapshot.staff.length}</strong><small>ครู {snapshot.staff.filter((item) => item.role === 'teacher' && item.status === 'active').length}</small></div>
+        <div><span>ห้องเรียนปัจจุบัน</span><strong>{snapshot.classrooms.length}</strong><small>{snapshot.termLabel || 'ยังไม่มีภาคเรียน'}</small></div>
+        <div><span>รอเปิดใช้บัญชี</span><strong>{[...snapshot.students, ...snapshot.staff].filter((item) => item.activationRequired && item.accountActive).length}</strong><small>ต้องออกรหัสครั้งแรก</small></div>
+      </section>
+
+      <section className="panel directory-list-panel">
+        <div className="directory-tabs" role="tablist" aria-label="ประเภทรายชื่อ">
+          <button className={section === 'students' ? 'active' : ''} type="button" onClick={() => setSection('students')}>นักเรียน <b>{snapshot.students.length}</b></button>
+          <button className={section === 'staff' ? 'active' : ''} type="button" onClick={() => setSection('staff')}>บุคลากร <b>{snapshot.staff.length}</b></button>
+        </div>
+        <div className="directory-toolbar">
+          <label className="directory-search"><span className="sr-only">ค้นหารายชื่อ</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อ รหัส ห้อง หรือตำแหน่ง" /></label>
+          <label className="directory-inactive-toggle"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> แสดงผู้ที่ปิดใช้งาน</label>
+          <button className="button ghost compact" type="button" disabled={loading} onClick={() => void load()}>{loading ? 'กำลังโหลด…' : 'โหลดข้อมูลใหม่'}</button>
+        </div>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+
+        {section === 'students' ? (
+          students.length ? <div className="directory-record-list">{students.map((student) => (
+            <article className="directory-record" key={student.id}>
+              <div className="directory-record-main"><span className="student-avatar">{student.givenName.slice(0, 1)}</span><div><strong>{fullName(student)}</strong><span>{student.studentCode} • {student.classroomName || 'ยังไม่ระบุห้อง'}</span><small>ชื่อผู้ใช้ {student.username || 'ยังไม่มีบัญชี'}</small></div></div>
+              <div className="directory-record-status"><span className={`badge ${statusClass(student.status)}`}>{personStatusLabels[student.status]}</span>{student.activationRequired && student.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
+              <div className="inline-actions">
+                {!readOnly && student.activationRequired && student.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(student.username)}>{busyUsername === student.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'student', person: student })}>แก้ไข</button> : null}
+              </div>
+            </article>
+          ))}</div> : <EmptyState title="ไม่พบนักเรียน" detail="ลองเปลี่ยนคำค้นหรือเปิดการแสดงผู้ที่ปิดใช้งาน" />
+        ) : (
+          staff.length ? <div className="directory-record-list">{staff.map((person) => (
+            <article className="directory-record" key={person.id}>
+              <div className="directory-record-main"><span className="student-avatar">{person.givenName.slice(0, 1)}</span><div><strong>{fullName(person)}</strong><span>{person.employeeCode} • {staffRoleLabels[person.role]}</span><small>{person.role === 'teacher' ? `รับผิดชอบ ${person.classroomIds.length} ห้อง` : person.username}</small></div></div>
+              <div className="directory-record-status"><span className={`badge ${statusClass(person.status)}`}>{personStatusLabels[person.status]}</span>{person.activationRequired && person.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
+              <div className="inline-actions">
+                {!readOnly && person.activationRequired && person.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(person.username)}>{busyUsername === person.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'staff', person })}>แก้ไข</button> : null}
+              </div>
+            </article>
+          ))}</div> : <EmptyState title="ไม่พบบุคลากร" detail="ลองเปลี่ยนคำค้นหรือเปิดการแสดงผู้ที่ปิดใช้งาน" />
+        )}
+      </section>
+
+      {editor && actions ? <DirectoryEditor key={`${editor.kind}:${'person' in editor ? editor.person.id : 'new'}`} target={editor} snapshot={snapshot} actions={actions} onSaved={afterSaved} onClose={() => setEditor(null)} /> : null}
+      {activation ? <ActivationDialog result={activation} onClose={() => setActivation(null)} /> : null}
+    </div>
+  )
+}

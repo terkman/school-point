@@ -1597,6 +1597,80 @@ begin
     end if;
   end loop;
 
+  if not exists (
+    select 1
+    from pg_enum enum_value
+    join pg_type enum_type on enum_type.oid = enum_value.enumtypid
+    join pg_namespace namespace on namespace.oid = enum_type.typnamespace
+    where namespace.nspname = 'public'
+      and enum_type.typname = 'app_role'
+      and enum_value.enumlabel = 'director'
+  ) then
+    raise exception 'director role is missing from app_role';
+  end if;
+
+  foreach v_table_name in array array[
+    'profiles',
+    'academic_terms',
+    'classrooms',
+    'students',
+    'teachers',
+    'enrollments',
+    'teacher_classroom_assignments',
+    'behavior_rules',
+    'positive_behavior_rules',
+    'score_accounts',
+    'incidents',
+    'point_addition_requests',
+    'appeals',
+    'follow_up_cases',
+    'guardian_contact_tasks',
+    'score_ledger',
+    'audit_logs'
+  ] loop
+    if not exists (
+      select 1
+      from pg_policies policy
+      where policy.schemaname = 'public'
+        and policy.tablename = v_table_name
+        and policy.policyname = 'director_read_all'
+        and lower(policy.cmd) = 'select'
+        and 'authenticated' = any(policy.roles)
+        and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+        and position('director' in lower(coalesce(policy.qual, ''))) > 0
+    ) then
+      raise exception 'table % is missing read-only director access', v_table_name;
+    end if;
+  end loop;
+
+  if has_function_privilege(
+    'authenticated',
+    'public.service_create_school_person(uuid,uuid,text,text,text,text,text,text,text,bigint,date)',
+    'EXECUTE'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.service_create_school_person(uuid,uuid,text,text,text,text,text,text,text,bigint,date)',
+    'EXECUTE'
+  ) then
+    raise exception 'school-person creation endpoint privileges are unsafe';
+  end if;
+
+  if has_function_privilege(
+    'authenticated',
+    'public.service_update_school_student(uuid,bigint,text,text,text,text,bigint,date)',
+    'EXECUTE'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.service_update_school_staff(uuid,bigint,text,text,text,text,text,bigint[])',
+    'EXECUTE'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.service_get_activation_account(uuid,text)',
+    'EXECUTE'
+  ) then
+    raise exception 'service-only directory mutation endpoint is callable by authenticated';
+  end if;
+
   if has_sequence_privilege('authenticated', 'public.score_ledger_id_seq', 'USAGE') then
     raise exception 'authenticated has unnecessary score-ledger sequence usage';
   end if;

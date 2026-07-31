@@ -756,6 +756,50 @@ tbody tr:hover td { background: #fbfcfe; }
 .score-rules-dialog-empty strong { color: var(--navy); font-size: .86rem; }
 .score-rules-dialog-empty span { font-size: .72rem; }
 
+.directory-page { display: flex; flex-direction: column; gap: 20px; }
+.directory-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 28px; color: #fff; border-radius: 22px; background: linear-gradient(135deg, #123a86 0%, #175bc4 68%, #3282e8 100%); box-shadow: 0 18px 42px rgba(22, 72, 157, .2); }
+.directory-hero h1 { margin: 3px 0 8px; color: #fff; font-size: clamp(1.55rem, 3vw, 2.25rem); }
+.directory-hero p { margin: 0; color: rgba(255, 255, 255, .82); }
+.directory-hero .eyebrow { color: #bdd8ff; }
+.directory-hero .button { flex: 0 0 auto; color: #174caa; background: #fff; border-color: #fff; }
+.director-readonly-note { margin: 0; background: #edf5ff; border-color: #bad4ff; color: #174a9b; }
+.directory-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.directory-summary-grid > div { display: flex; flex-direction: column; gap: 5px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.directory-summary-grid span { color: var(--muted); font-size: .76rem; }
+.directory-summary-grid strong { color: var(--ink); font-size: 1.7rem; line-height: 1; }
+.directory-summary-grid small { color: #7f8ba0; font-size: .7rem; }
+.directory-list-panel { padding: 0; overflow: hidden; }
+.directory-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); background: #f8faff; }
+.directory-tabs button { display: flex; align-items: center; gap: 8px; padding: 13px 18px; color: #68758c; font: inherit; font-weight: 700; border: 0; border-radius: 12px 12px 0 0; background: transparent; cursor: pointer; }
+.directory-tabs button.active { color: var(--primary); background: #fff; box-shadow: inset 0 -3px var(--primary); }
+.directory-tabs b { min-width: 24px; padding: 2px 7px; color: inherit; font-size: .67rem; border-radius: 999px; background: #e8effa; }
+.directory-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) auto auto; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.directory-search input { width: 100%; margin: 0; }
+.directory-inactive-toggle { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .77rem; white-space: nowrap; }
+.directory-inactive-toggle input { width: auto; margin: 0; }
+.directory-record-list { display: flex; flex-direction: column; }
+.directory-record { display: grid; grid-template-columns: minmax(260px, 1.6fr) minmax(130px, .55fr) auto; align-items: center; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #edf0f5; }
+.directory-record:last-child { border-bottom: 0; }
+.directory-record:hover { background: #fbfcff; }
+.directory-record-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.directory-record-main > div { display: flex; flex-direction: column; min-width: 0; }
+.directory-record-main strong, .directory-record-main span, .directory-record-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.directory-record-main strong { color: var(--ink); font-size: .86rem; }
+.directory-record-main span { color: var(--muted); font-size: .75rem; }
+.directory-record-main small { color: #8994a7; font-size: .67rem; }
+.directory-record-status { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.directory-record-status small { color: #b17900; font-size: .65rem; }
+.directory-dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(8, 21, 49, .68); backdrop-filter: blur(4px); }
+.directory-dialog { width: min(820px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 28px 90px rgba(9, 24, 58, .34); }
+.directory-editor-form { margin-top: 20px; }
+.directory-name-grid { display: grid; grid-template-columns: .65fr 1fr 1fr; gap: 12px; }
+.directory-classroom-fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+.directory-classroom-fieldset legend { padding: 0 7px; color: var(--ink); font-size: .78rem; font-weight: 700; }
+.activation-code-card { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 12px; margin: 18px 0; padding: 20px; border: 1px solid #bfd3f6; border-radius: 16px; background: #f1f6ff; }
+.activation-code-card span { color: var(--muted); font-size: .74rem; }
+.activation-code-card strong { color: var(--ink); }
+.activation-code-card b { color: #124ca6; font: 800 1.8rem/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .12em; }
+
 .mobile-nav { display: none; }
 
 /* Login */
@@ -810,6 +854,10 @@ tbody tr:hover td { background: #fbfcfe; }
   .login-intro { min-height: 330px; gap: 34px; }
   .login-intro h1 { font-size: 2.3rem; }
   .login-benefits { display: none; }
+  .directory-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .directory-record { grid-template-columns: 1fr auto; }
+  .directory-record-status { align-items: flex-end; }
+  .directory-record > .inline-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
 
 @media (max-width: 640px) {
@@ -890,6 +938,19 @@ tbody tr:hover td { background: #fbfcfe; }
   .login-panel { padding: 30px 20px 44px; }
   .demo-accounts { grid-template-columns: 1fr; }
   .demo-account { min-height: 58px; }
+  .directory-hero { align-items: stretch; flex-direction: column; padding: 22px; border-radius: 14px; }
+  .directory-hero .button { width: 100%; justify-content: center; }
+  .directory-summary-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
+  .directory-summary-grid > div { padding: 14px; }
+  .directory-toolbar { grid-template-columns: 1fr; }
+  .directory-record { grid-template-columns: 1fr; align-items: flex-start; }
+  .directory-record-status { align-items: flex-start; }
+  .directory-record > .inline-actions { grid-column: auto; width: 100%; }
+  .directory-record > .inline-actions .button { flex: 1; }
+  .directory-name-grid { grid-template-columns: 1fr; }
+  .directory-dialog-backdrop { align-items: end; padding: 0; }
+  .directory-dialog { width: 100%; max-height: 92dvh; border-radius: 22px 22px 0 0; }
+  .activation-code-card { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

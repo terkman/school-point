@@ -86,6 +86,7 @@ interface AppShellProps<T extends string> {
 const roleLabels = {
   student: 'นักเรียน',
   teacher: 'คุณครู',
+  director: 'ผู้อำนวยการ',
   admin: 'ผู้ดูแลระบบ',
 }
 

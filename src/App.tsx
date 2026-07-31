@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 import { AdminDashboard } from './AdminDashboard'
+import { DirectorDashboard } from './DirectorDashboard'
 import type { Account, DemoState } from './domain'
 import {
   completeFirstPasswordActivation,
@@ -57,6 +58,9 @@ function DemoApp() {
 
   if (account.role === 'teacher') {
     return <TeacherDashboard account={account} state={state} onChange={setState} onLogout={logout} />
+  }
+  if (account.role === 'director') {
+    return <DirectorDashboard account={account} state={state} onLogout={logout} />
   }
 
   return <AdminDashboard account={account} state={state} onChange={setState} onResetDemo={resetDemo} onLogout={logout} />
@@ -341,6 +345,9 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
   if (account.role === 'teacher') {
     return <TeacherDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />
+  }
+  if (account.role === 'director') {
+    return <DirectorDashboard account={account} state={state} actions={actions} onLogout={() => void logout()} />
   }
   return <AdminDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />
 }

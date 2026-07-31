@@ -31,9 +31,10 @@ import {
 } from './ScoreRulesDialog'
 import { ScoreActionSelector, StudentTargetSelector, type ScoreAction } from './StudentTargetSelector'
 import { buildClassroomGroups, createInitialStudentSelection, resolveStudentTargets } from './studentSelection'
+import { SchoolDirectoryPanel } from './SchoolDirectoryPanel'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 
-export type AdminTab = 'overview' | 'approvals' | 'cases' | 'manage'
+export type AdminTab = 'overview' | 'directory' | 'approvals' | 'cases' | 'manage'
 
 function newRequestId(): string {
   return globalThis.crypto.randomUUID()
@@ -346,6 +347,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const approvalQueueCount = pending.length + openAppeals.length
   const navItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'แดชบอร์ด', icon: 'home' },
+    { id: 'directory', label: 'บุคคลและบัญชี', icon: 'users' },
     { id: 'approvals', label: 'ศูนย์อนุมัติ', icon: 'approval', count: approvalQueueCount },
     { id: 'cases', label: 'คิวกรณีร้ายแรง', icon: 'alert', count: openCases.length },
     { id: 'manage', label: 'จัดการระบบ', icon: 'settings' },
@@ -1252,6 +1254,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           ) : null}
         </div>
       ) : null}
+
+      {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} /> : null}
 
       {tab === 'manage' ? (
         <div className="manage-grid">

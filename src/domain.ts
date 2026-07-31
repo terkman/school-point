@@ -1,4 +1,4 @@
-export type Role = 'student' | 'teacher' | 'admin'
+export type Role = 'student' | 'teacher' | 'director' | 'admin'
 export type Severity = 'low' | 'medium' | 'serious' | 'critical'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
 
