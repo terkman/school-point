@@ -769,7 +769,7 @@ tbody tr:hover td { background: #fbfcfe; }
 .directory-summary-grid strong { color: var(--ink); font-size: 1.7rem; line-height: 1; }
 .directory-summary-grid small { color: #7f8ba0; font-size: .7rem; }
 .directory-list-panel { padding: 0; overflow: hidden; }
-.directory-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); background: #f8faff; }
+.directory-tabs { display: flex; gap: 2px; padding: 8px 8px 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: #f8faff; }
 .directory-tabs button { display: flex; align-items: center; gap: 8px; padding: 13px 18px; color: #68758c; font: inherit; font-weight: 700; border: 0; border-radius: 12px 12px 0 0; background: transparent; cursor: pointer; }
 .directory-tabs button.active { color: var(--primary); background: #fff; box-shadow: inset 0 -3px var(--primary); }
 .directory-tabs b { min-width: 24px; padding: 2px 7px; color: inherit; font-size: .67rem; border-radius: 999px; background: #e8effa; }
@@ -777,6 +777,26 @@ tbody tr:hover td { background: #fbfcfe; }
 .directory-search input { width: 100%; margin: 0; }
 .directory-inactive-toggle { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .77rem; white-space: nowrap; }
 .directory-inactive-toggle input { width: auto; margin: 0; }
+.classroom-directory-toolbar { grid-template-columns: minmax(240px, 1fr) auto; }
+.classroom-directory-toolbar p { margin: 0; color: var(--muted); font-size: .76rem; }
+.classroom-directory-list { display: flex; flex-direction: column; }
+.classroom-directory-row { display: grid; grid-template-columns: minmax(250px, .65fr) minmax(320px, 1.35fr); align-items: center; gap: 20px; min-height: 86px; padding: 14px 20px; border-bottom: 1px solid #edf0f5; }
+.classroom-directory-row:last-child { border-bottom: 0; }
+.classroom-directory-row.empty { background: #fbfcff; }
+.classroom-grade-name { display: flex; align-items: center; gap: 12px; }
+.classroom-grade-name > span { display: grid; flex: 0 0 50px; min-height: 50px; place-items: center; color: #174caa; font-size: .78rem; font-weight: 800; border-radius: 13px; background: #eaf2ff; }
+.classroom-grade-name > div { display: flex; flex-direction: column; gap: 2px; }
+.classroom-grade-name strong { color: var(--ink); font-size: .84rem; }
+.classroom-grade-name small { color: var(--muted); font-size: .68rem; }
+.classroom-room-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.classroom-room-list > small { color: #8994a7; font-size: .7rem; }
+.classroom-room-item { display: flex; flex-direction: column; gap: 2px; min-width: 112px; padding: 9px 12px; border: 1px solid #c9d9f3; border-radius: 10px; background: #f5f8ff; }
+.classroom-room-item strong { color: #174caa; font-size: .78rem; }
+.classroom-room-item small { color: var(--muted); font-size: .64rem; }
+.classroom-name-preview { display: grid; grid-template-columns: minmax(150px, 1fr) auto; align-items: center; gap: 5px 18px; padding: 16px 18px; border: 1px solid #bfd3f6; border-radius: 14px; background: #f1f6ff; }
+.classroom-name-preview span { color: var(--muted); font-size: .74rem; }
+.classroom-name-preview strong { grid-row: 1 / span 2; grid-column: 2; color: #174caa; font-size: 1.35rem; }
+.classroom-name-preview small { color: #6f7c91; font-size: .68rem; }
 .directory-record-list { display: flex; flex-direction: column; }
 .directory-record { display: grid; grid-template-columns: minmax(260px, 1.6fr) minmax(130px, .55fr) auto; align-items: center; gap: 16px; padding: 15px 20px; border-bottom: 1px solid #edf0f5; }
 .directory-record:last-child { border-bottom: 0; }
@@ -943,6 +963,10 @@ tbody tr:hover td { background: #fbfcfe; }
   .directory-summary-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
   .directory-summary-grid > div { padding: 14px; }
   .directory-toolbar { grid-template-columns: 1fr; }
+  .classroom-directory-toolbar { grid-template-columns: 1fr; }
+  .classroom-directory-row { grid-template-columns: 1fr; gap: 12px; }
+  .classroom-name-preview { grid-template-columns: 1fr; }
+  .classroom-name-preview strong { grid-row: auto; grid-column: auto; }
   .directory-record { grid-template-columns: 1fr; align-items: flex-start; }
   .directory-record-status { align-items: flex-start; }
   .directory-record > .inline-actions { grid-column: auto; width: 100%; }

@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { AppDataActions } from './dataActions'
 import {
+  classroomDisplayName,
+  gradeLevelOptions,
   personStatusLabels,
   staffRoleLabels,
   type ActivationCodeResult,
   type CreateSchoolPersonResult,
   type DirectoryStaff,
   type DirectoryStudent,
+  type GradeLevel,
   type PersonStatus,
   type SchoolDirectorySnapshot,
   type StaffRole,
 } from './schoolDirectory'
 import { EmptyState, Icon } from './ui'
 
-type DirectorySection = 'students' | 'staff'
+type DirectorySection = 'students' | 'staff' | 'classrooms'
 type EditorTarget =
   | { kind: 'new-student' }
   | { kind: 'new-staff' }
@@ -286,6 +289,79 @@ function DirectoryEditor({
   )
 }
 
+function ClassroomEditor({
+  snapshot,
+  actions,
+  onSaved,
+  onClose,
+}: {
+  snapshot: SchoolDirectorySnapshot
+  actions: AppDataActions
+  onSaved: () => Promise<void>
+  onClose: () => void
+}) {
+  const [gradeLevel, setGradeLevel] = useState<GradeLevel>('P1')
+  const [roomNumber, setRoomNumber] = useState('0')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const previewName = classroomDisplayName(gradeLevel, roomNumber || '0')
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy || !snapshot.termId) return
+    setBusy(true)
+    setError('')
+    try {
+      await actions.createSchoolClassroom({
+        termId: snapshot.termId,
+        gradeLevel,
+        roomNumber,
+      })
+      await onSaved()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถเพิ่มชั้นและห้องเรียนได้')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog title="เพิ่มชั้นและห้องเรียน" eyebrow={snapshot.termLabel || 'ภาคเรียนปัจจุบัน'} onClose={onClose}>
+      <form className="stack-form directory-editor-form" onSubmit={submit}>
+        <div className="date-field-grid">
+          <label>ระดับชั้น
+            <select value={gradeLevel} disabled={busy} onChange={(event) => setGradeLevel(event.target.value as GradeLevel)}>
+              {gradeLevelOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}
+            </select>
+          </label>
+          <label>หมายเลขห้อง
+            <input
+              value={roomNumber}
+              maxLength={20}
+              pattern="[0-9A-Za-zก-๙._-]+"
+              required
+              disabled={busy}
+              onChange={(event) => setRoomNumber(event.target.value)}
+              placeholder="เช่น 0, 1 หรือ 2"
+            />
+          </label>
+        </div>
+        <div className="classroom-name-preview">
+          <span>ชื่อที่จะแสดงในระบบ</span>
+          <strong>{previewName}</strong>
+          <small>ถ้าระดับชั้นนี้มีห้องเดียว ให้ใช้หมายเลขห้อง 0 ระบบจะแสดงเฉพาะชื่อชั้น</small>
+        </div>
+        {!snapshot.termId ? <p className="form-error" role="alert">กรุณาสร้างหรือเลือกภาคเรียนก่อนเพิ่มห้องเรียน</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="form-actions">
+          <button className="button secondary" type="button" disabled={busy} onClick={onClose}>ยกเลิก</button>
+          <button className="button primary" type="submit" disabled={busy || !snapshot.termId}>{busy ? 'กำลังเพิ่ม…' : 'เพิ่มชั้นและห้อง'}</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
 export function SchoolDirectoryPanel({
   actions,
   readOnly = false,
@@ -296,6 +372,7 @@ export function SchoolDirectoryPanel({
   const [query, setQuery] = useState('')
   const [showInactive, setShowInactive] = useState(false)
   const [editor, setEditor] = useState<EditorTarget | null>(null)
+  const [classroomEditorOpen, setClassroomEditorOpen] = useState(false)
   const [activation, setActivation] = useState<ActivationCodeResult | null>(null)
   const [loading, setLoading] = useState(!initialSnapshot && Boolean(actions))
   const [busyUsername, setBusyUsername] = useState('')
@@ -333,6 +410,10 @@ export function SchoolDirectoryPanel({
     return `${fullName(person)} ${person.employeeCode} ${person.username} ${staffRoleLabels[person.role]}`
       .toLocaleLowerCase('th').includes(normalizedQuery)
   }), [normalizedQuery, showInactive, snapshot.staff])
+  const classroomGroups = useMemo(() => gradeLevelOptions.map((grade) => ({
+    ...grade,
+    classrooms: snapshot.classrooms.filter((classroom) => classroom.gradeLevel === grade.value),
+  })), [snapshot.classrooms])
 
   async function afterSaved(result?: CreateSchoolPersonResult) {
     setEditor(null)
@@ -359,6 +440,11 @@ export function SchoolDirectoryPanel({
     }
   }
 
+  async function afterClassroomSaved() {
+    setClassroomEditorOpen(false)
+    await load()
+  }
+
   if (!actions && !initialSnapshot) {
     return <section className="panel"><EmptyState title="ศูนย์บริหารใช้กับฐานข้อมูลจริง" detail="เข้าสู่ระบบจริงด้วยบัญชีแอดมินเพื่อจัดการรายชื่อและบัญชี" /></section>
   }
@@ -367,7 +453,14 @@ export function SchoolDirectoryPanel({
     <div className="directory-page">
       <section className="directory-hero">
         <div><p className="eyebrow">ข้อมูลกลางของโรงเรียน</p><h1>ศูนย์บริหารบุคคลและบัญชี</h1><p>เพิ่ม แก้ไข ย้ายห้อง ปิดใช้งาน และคืนสถานะ โดยเก็บประวัติเดิมไว้ครบถ้วน</p></div>
-        {!readOnly ? <button className="button primary" type="button" onClick={() => setEditor(section === 'students' ? { kind: 'new-student' } : { kind: 'new-staff' })}><Icon name="plus" /> เพิ่ม{section === 'students' ? 'นักเรียน' : 'บุคลากร'}</button> : null}
+        {!readOnly ? (
+          <button className="button primary" type="button" onClick={() => {
+            if (section === 'classrooms') setClassroomEditorOpen(true)
+            else setEditor(section === 'students' ? { kind: 'new-student' } : { kind: 'new-staff' })
+          }}>
+            <Icon name="plus" /> เพิ่ม{section === 'students' ? 'นักเรียน' : section === 'staff' ? 'บุคลากร' : 'ชั้นและห้อง'}
+          </button>
+        ) : null}
       </section>
 
       {readOnly ? <div className="scope-note director-readonly-note"><Icon name="eye" size={18} /> ผู้อำนวยการดูข้อมูลได้ทั้งหมด แต่ไม่สามารถแก้ไขรายชื่อ สิทธิ์ หรือการตั้งค่าระบบ</div> : null}
@@ -383,15 +476,41 @@ export function SchoolDirectoryPanel({
         <div className="directory-tabs" role="tablist" aria-label="ประเภทรายชื่อ">
           <button className={section === 'students' ? 'active' : ''} type="button" onClick={() => setSection('students')}>นักเรียน <b>{snapshot.students.length}</b></button>
           <button className={section === 'staff' ? 'active' : ''} type="button" onClick={() => setSection('staff')}>บุคลากร <b>{snapshot.staff.length}</b></button>
+          <button className={section === 'classrooms' ? 'active' : ''} type="button" onClick={() => setSection('classrooms')}>ชั้นและห้อง <b>{snapshot.classrooms.length}</b></button>
         </div>
-        <div className="directory-toolbar">
-          <label className="directory-search"><span className="sr-only">ค้นหารายชื่อ</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อ รหัส ห้อง หรือตำแหน่ง" /></label>
-          <label className="directory-inactive-toggle"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> แสดงผู้ที่ปิดใช้งาน</label>
+        <div className={section === 'classrooms' ? 'directory-toolbar classroom-directory-toolbar' : 'directory-toolbar'}>
+          {section === 'classrooms' ? (
+            <p>ห้องเรียนของ {snapshot.termLabel || 'ภาคเรียนปัจจุบัน'} — ห้องหมายเลข 0 หมายถึงระดับชั้นนั้นมีห้องเดียว</p>
+          ) : (
+            <>
+              <label className="directory-search"><span className="sr-only">ค้นหารายชื่อ</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อ รหัส ห้อง หรือตำแหน่ง" /></label>
+              <label className="directory-inactive-toggle"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> แสดงผู้ที่ปิดใช้งาน</label>
+            </>
+          )}
           <button className="button ghost compact" type="button" disabled={loading} onClick={() => void load()}>{loading ? 'กำลังโหลด…' : 'โหลดข้อมูลใหม่'}</button>
         </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
-        {section === 'students' ? (
+        {section === 'classrooms' ? (
+          <div className="classroom-directory-list">
+            {classroomGroups.map((group) => (
+              <article className={group.classrooms.length ? 'classroom-directory-row' : 'classroom-directory-row empty'} key={group.value}>
+                <div className="classroom-grade-name">
+                  <span>{classroomDisplayName(group.value, '0')}</span>
+                  <div><strong>{group.label}</strong><small>{group.classrooms.length ? `${group.classrooms.length} ห้อง` : 'ยังไม่ได้เปิดชั้นนี้'}</small></div>
+                </div>
+                <div className="classroom-room-list">
+                  {group.classrooms.length ? group.classrooms.map((classroom) => (
+                    <div className="classroom-room-item" key={classroom.id}>
+                      <strong>{classroom.name}</strong>
+                      <small>หมายเลขห้อง {classroom.roomNumber}</small>
+                    </div>
+                  )) : <small>กด “เพิ่มชั้นและห้อง” เพื่อเปิดระดับชั้นนี้</small>}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : section === 'students' ? (
           students.length ? <div className="directory-record-list">{students.map((student) => (
             <article className="directory-record" key={student.id}>
               <div className="directory-record-main"><span className="student-avatar">{student.givenName.slice(0, 1)}</span><div><strong>{fullName(student)}</strong><span>{student.studentCode} • {student.classroomName || 'ยังไม่ระบุห้อง'}</span><small>ชื่อผู้ใช้ {student.username || 'ยังไม่มีบัญชี'}</small></div></div>
@@ -417,6 +536,7 @@ export function SchoolDirectoryPanel({
       </section>
 
       {editor && actions ? <DirectoryEditor key={`${editor.kind}:${'person' in editor ? editor.person.id : 'new'}`} target={editor} snapshot={snapshot} actions={actions} onSaved={afterSaved} onClose={() => setEditor(null)} /> : null}
+      {classroomEditorOpen && actions ? <ClassroomEditor snapshot={snapshot} actions={actions} onSaved={afterClassroomSaved} onClose={() => setClassroomEditorOpen(false)} /> : null}
       {activation ? <ActivationDialog result={activation} onClose={() => setActivation(null)} /> : null}
     </div>
   )

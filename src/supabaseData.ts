@@ -34,6 +34,7 @@ import {
 import {
   normalizeDirectorySnapshot,
   type ActivationCodeResult,
+  type CreateSchoolClassroomResult,
   type CreateSchoolPersonResult,
 } from './schoolDirectory'
 
@@ -1135,6 +1136,14 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
     getSchoolDirectory: async () => normalizeDirectorySnapshot(
       await invokeAdminDirectory<unknown>(client, { action: 'snapshot' }),
     ),
+    createSchoolClassroom: async (input) => {
+      const classroom = await invokeAdminDirectory<CreateSchoolClassroomResult>(client, {
+        action: 'create-classroom',
+        input,
+      })
+      await refresh()
+      return classroom
+    },
     createSchoolPerson: async (input) => {
       const result = await invokeAdminDirectory<CreateSchoolPersonResult>(client, {
         action: 'create-person',

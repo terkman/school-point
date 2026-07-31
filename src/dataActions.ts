@@ -2,6 +2,8 @@ import type { GuardianContact } from './domain'
 import type { EvidenceAttachment } from './evidence'
 import type {
   ActivationCodeResult,
+  CreateSchoolClassroomInput,
+  CreateSchoolClassroomResult,
   CreateSchoolPersonInput,
   CreateSchoolPersonResult,
   SchoolDirectorySnapshot,
@@ -196,6 +198,7 @@ export interface AppDataActions {
   uploadMyAvatar: (file: File) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
   getSchoolDirectory: () => Promise<SchoolDirectorySnapshot>
+  createSchoolClassroom: (input: CreateSchoolClassroomInput) => Promise<CreateSchoolClassroomResult>
   createSchoolPerson: (input: CreateSchoolPersonInput) => Promise<CreateSchoolPersonResult>
   updateSchoolStudent: (input: UpdateSchoolStudentInput) => Promise<void>
   updateSchoolStaff: (input: UpdateSchoolStaffInput) => Promise<void>

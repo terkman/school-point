@@ -9,6 +9,8 @@ const corsHeaders = {
 }
 
 const usernamePattern = /^[a-z0-9][a-z0-9._-]*[a-z0-9]$|^[a-z0-9]$/
+const gradeLevels = new Set(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3'])
+const roomNumberPattern = /^[0-9A-Za-zก-๙._-]+$/
 const authDomain = 'accounts.school-point.invalid'
 
 type JsonRecord = Record<string, unknown>
@@ -147,6 +149,26 @@ Deno.serve(async (request) => {
     }
     if (!isActiveDirectoryAdmin(profile)) {
       return response(403, { ok: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขข้อมูลนี้ได้' })
+    }
+
+    if (action === 'create-classroom') {
+      const gradeLevel = String(input.gradeLevel ?? '').trim().toUpperCase()
+      const roomNumber = requiredText(input.roomNumber, 'หมายเลขห้อง', 20)
+      if (!gradeLevels.has(gradeLevel)) throw new Error('ระดับชั้นไม่ถูกต้อง')
+      if (!roomNumberPattern.test(roomNumber)) {
+        throw new Error('หมายเลขห้องใช้ได้เฉพาะตัวอักษร ตัวเลข จุด ขีดกลาง และขีดล่าง')
+      }
+      const { data, error } = await serviceClient.rpc('service_create_school_classroom', {
+        p_actor_user_id: userData.user.id,
+        p_term_id: idValue(input.termId, 'รหัสภาคเรียน'),
+        p_grade_level: gradeLevel,
+        p_room_number: roomNumber,
+      })
+      if (error) {
+        if (error.code === '23505') throw new Error('ชั้นและห้องนี้มีอยู่ในภาคเรียนปัจจุบันแล้ว')
+        throw new Error(error.message)
+      }
+      return response(200, { ok: true, data: data as JsonRecord })
     }
 
     if (action === 'create-person') {

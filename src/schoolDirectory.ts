@@ -2,11 +2,12 @@ import type { Role } from './domain'
 
 export type PersonStatus = 'active' | 'suspended' | 'graduated' | 'archived'
 export type StaffRole = Extract<Role, 'teacher' | 'director' | 'admin'>
+export type GradeLevel = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'M1' | 'M2' | 'M3'
 
 export interface DirectoryClassroom {
   id: string
   name: string
-  gradeLevel: string
+  gradeLevel: GradeLevel
   roomNumber: string
 }
 
@@ -92,6 +93,44 @@ export interface CreateSchoolPersonResult {
   issuedAt?: string
 }
 
+export interface CreateSchoolClassroomInput {
+  termId: string
+  gradeLevel: GradeLevel
+  roomNumber: string
+}
+
+export type CreateSchoolClassroomResult = DirectoryClassroom
+
+export const gradeLevelOptions: ReadonlyArray<{ value: GradeLevel; label: string }> = [
+  { value: 'P1', label: 'ประถมศึกษาปีที่ 1' },
+  { value: 'P2', label: 'ประถมศึกษาปีที่ 2' },
+  { value: 'P3', label: 'ประถมศึกษาปีที่ 3' },
+  { value: 'P4', label: 'ประถมศึกษาปีที่ 4' },
+  { value: 'P5', label: 'ประถมศึกษาปีที่ 5' },
+  { value: 'P6', label: 'ประถมศึกษาปีที่ 6' },
+  { value: 'M1', label: 'มัธยมศึกษาปีที่ 1' },
+  { value: 'M2', label: 'มัธยมศึกษาปีที่ 2' },
+  { value: 'M3', label: 'มัธยมศึกษาปีที่ 3' },
+]
+
+const shortGradeLabels: Record<GradeLevel, string> = {
+  P1: 'ป.1',
+  P2: 'ป.2',
+  P3: 'ป.3',
+  P4: 'ป.4',
+  P5: 'ป.5',
+  P6: 'ป.6',
+  M1: 'ม.1',
+  M2: 'ม.2',
+  M3: 'ม.3',
+}
+
+export function classroomDisplayName(gradeLevel: GradeLevel, roomNumber: string): string {
+  const grade = shortGradeLabels[gradeLevel]
+  const room = roomNumber.trim()
+  return room === '0' ? grade : `${grade}/${room}`
+}
+
 export const staffRoleLabels: Record<StaffRole, string> = {
   teacher: 'ครู',
   director: 'ผู้อำนวยการ',
@@ -119,7 +158,7 @@ export function normalizeDirectorySnapshot(value: unknown): SchoolDirectorySnaps
       return {
         id: String(entry.id ?? ''),
         name: String(entry.name ?? ''),
-        gradeLevel: String(entry.gradeLevel ?? ''),
+        gradeLevel: String(entry.gradeLevel ?? '') as GradeLevel,
         roomNumber: String(entry.roomNumber ?? ''),
       }
     }),
