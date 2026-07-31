@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { SpreadsheetFile, Workbook } from '@oai/artifact-tool'
+import JSZip from 'jszip'
 
 const outputDir = path.resolve(process.argv[2] ?? 'outputs/school-import-template')
 const outputPath = path.join(outputDir, 'แบบฟอร์มนำเข้าข้อมูลโรงเรียน.xlsx')
@@ -123,6 +124,53 @@ function columnName(index) {
   return label
 }
 
+function wholeColumnRange(range) {
+  const [start, end] = range.split(':')
+  const startColumn = start.match(/^[A-Z]+/)?.[0]
+  const endColumn = end.match(/^[A-Z]+/)?.[0]
+  if (!startColumn || !endColumn) throw new Error(`Invalid spreadsheet range: ${range}`)
+  return `${startColumn}:${endColumn}`
+}
+
+async function makeExcelJsCompatible(filePath) {
+  const archive = await JSZip.loadAsync(await fs.readFile(filePath))
+  const rootRelationships = archive.file('_rels/.rels')
+  const workbookRelationships = archive.file('xl/_rels/workbook.xml.rels')
+  if (!rootRelationships || !workbookRelationships) throw new Error('Missing Excel relationship metadata')
+  archive.file(
+    '_rels/.rels',
+    (await rootRelationships.async('string')).replace(/Target="\/(?!\/)/g, 'Target="'),
+  )
+  archive.file(
+    'xl/_rels/workbook.xml.rels',
+    (await workbookRelationships.async('string')).replace(/Target="\/xl\//g, 'Target="'),
+  )
+  const spreadsheetNamespace = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+  const spreadsheetXmlPaths = Object.keys(archive.files).filter((entry) =>
+    entry === 'xl/workbook.xml'
+    || entry === 'xl/styles.xml'
+    || entry === 'xl/sharedStrings.xml'
+    || /^xl\/worksheets\/sheet\d+\.xml$/.test(entry),
+  )
+  for (const spreadsheetPath of spreadsheetXmlPaths) {
+    const spreadsheetFile = archive.file(spreadsheetPath)
+    if (!spreadsheetFile) continue
+    const xml = await spreadsheetFile.async('string')
+    archive.file(
+      spreadsheetPath,
+      xml
+        .replace(new RegExp(`xmlns:x="${spreadsheetNamespace}"`, 'g'), `xmlns="${spreadsheetNamespace}"`)
+        .replace(/<(\/?)x:/g, '<$1'),
+    )
+  }
+  const result = await archive.generateAsync({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  })
+  await fs.writeFile(filePath, result)
+}
+
 function buildSheet(workbook, definition) {
   const sheet = workbook.worksheets.add(definition.name)
   const lastColumn = columnName(definition.columns.length - 1)
@@ -177,9 +225,9 @@ function buildSheet(workbook, definition) {
   for (const [range, values] of definition.validations) {
     sheet.dataValidations.add({ range, rule: { type: 'list', values } })
   }
-  for (const range of definition.textColumns ?? []) sheet.getRange(range).format.numberFormat = '@'
-  for (const range of definition.dateColumns ?? []) sheet.getRange(range).format.numberFormat = 'yyyy-mm-dd'
-  for (const range of definition.wholeColumns ?? []) sheet.getRange(range).format.numberFormat = '0'
+  for (const range of definition.textColumns ?? []) sheet.getRange(wholeColumnRange(range)).format.numberFormat = '@'
+  for (const range of definition.dateColumns ?? []) sheet.getRange(wholeColumnRange(range)).format.numberFormat = 'yyyy-mm-dd'
+  for (const range of definition.wholeColumns ?? []) sheet.getRange(wholeColumnRange(range)).format.numberFormat = '0'
   return sheet
 }
 
@@ -218,4 +266,5 @@ for (const definition of definitions) {
 
 const xlsx = await SpreadsheetFile.exportXlsx(workbook)
 await xlsx.save(outputPath)
+await makeExcelJsCompatible(outputPath)
 console.log(outputPath)

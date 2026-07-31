@@ -759,16 +759,16 @@ async function provisionAccounts(
 
 async function loadContext(
   userClient: ReturnType<typeof createClient>,
-  serviceClient: ReturnType<typeof createClient>,
 ): Promise<ImportContext> {
   const { data: snapshotData, error: snapshotError } = await userClient.rpc('school_directory_snapshot')
   if (snapshotError || !snapshotData) throw new Error('โหลดข้อมูลปัจจุบันสำหรับเปรียบเทียบไม่สำเร็จ')
   const snapshot = snapshotData as DirectorySnapshot
   if (!snapshot.termId) throw new Error('กรุณาสร้างหรือเลือกภาคเรียนปัจจุบันก่อนนำเข้า')
   const termId = Number(snapshot.termId)
+  if (!Number.isSafeInteger(termId) || termId <= 0) throw new Error('รหัสภาคเรียนปัจจุบันไม่ถูกต้อง')
   const [termResult, assignmentsResult] = await Promise.all([
-    serviceClient.from('academic_terms').select('id,school_year,semester,name,starts_on,ends_on').eq('id', termId).single(),
-    serviceClient.from('teacher_classroom_assignments').select('teacher_id,classroom_id,subject_name,is_active').eq('term_id', termId),
+    userClient.from('academic_terms').select('id,school_year,semester,name,starts_on,ends_on').eq('id', termId).single(),
+    userClient.from('teacher_classroom_assignments').select('teacher_id,classroom_id,subject_name,is_active').eq('term_id', termId),
   ])
   if (termResult.error || !termResult.data) throw new Error('ไม่พบภาคเรียนปัจจุบัน')
   if (assignmentsResult.error) throw new Error('โหลดห้องที่ครูรับผิดชอบไม่สำเร็จ')
@@ -863,7 +863,7 @@ Deno.serve(async (request) => {
     if (file.size <= 0 || file.size > maxFileBytes) throw new Error('ไฟล์ต้องมีขนาดไม่เกิน 10 MB')
     if (!['preview', 'apply'].includes(mode)) throw new Error('โหมดนำเข้าไม่ถูกต้อง')
 
-    const context = await loadContext(userClient, serviceClient)
+    const context = await loadContext(userClient)
     const result = await parseAndValidate(file, context, serviceClient)
     const hasErrors = result.issues.some((item) => item.severity === 'error')
     if (mode === 'preview') {
