@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.110.2'
+import { isActiveDirectoryAdmin } from '../_shared/directoryAuthorization.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -130,13 +131,21 @@ Deno.serve(async (request) => {
       return response(200, { ok: true, data })
     }
 
-    const { data: profile, error: profileError } = await serviceClient
+    // Authorize the caller with their own JWT-bound client. The secret-key
+    // client is reserved for the privileged operation after this check.
+    const { data: profile, error: profileError } = await userClient
       .from('profiles')
       .select('role,is_active,activation_required')
       .eq('user_id', userData.user.id)
       .maybeSingle()
-    if (profileError || !profile || profile.role !== 'admin'
-      || profile.is_active !== true || profile.activation_required === true) {
+    if (profileError) {
+      console.error('admin profile lookup failed', profileError)
+      return response(500, {
+        ok: false,
+        error: 'ตรวจสอบสิทธิ์ผู้ดูแลระบบไม่สำเร็จ กรุณาลองใหม่',
+      })
+    }
+    if (!isActiveDirectoryAdmin(profile)) {
       return response(403, { ok: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขข้อมูลนี้ได้' })
     }
 
