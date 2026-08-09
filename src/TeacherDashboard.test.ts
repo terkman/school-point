@@ -23,7 +23,8 @@ describe('teacher score pages', () => {
 
     expect(markup).toContain('ตัดคะแนนนักเรียน')
     expect(markup).toContain('ตัดคะแนนพร้อมตรวจสอบรายชื่อ')
-    expect(markup).toContain('<b>1</b> เลือกชั้น')
+    expect(markup).toContain('ขั้นตอนที่ 1 จาก 3')
+    expect(markup).toContain('เลือกทั้งหมดในห้องนี้')
     expect(markup).not.toContain('เลือกงานที่ต้องการทำ')
     expect(markup).not.toContain('กิจกรรมหรือพฤติกรรมเชิงบวก')
   })
@@ -32,8 +33,9 @@ describe('teacher score pages', () => {
     const markup = renderTeacherTab('request')
 
     expect(markup).toContain('เพิ่มคะแนนนักเรียน')
-    expect(markup).toContain('สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน')
-    expect(markup).toContain('<b>1</b> เลือกชั้น')
+    expect(markup).toContain('สร้างคำขอเพิ่มคะแนน')
+    expect(markup).toContain('หลักฐานประกอบ (ไม่บังคับ)')
+    expect(markup).toContain('เลือกทั้งหมดในห้องนี้')
     expect(markup).not.toContain('เลือกงานที่ต้องการทำ')
     expect(markup).not.toContain('บันทึกการกระทำผิดระเบียบ')
   })
@@ -59,7 +61,7 @@ describe('teacher score pages', () => {
 
     expect(markup).toContain('ยังไม่มีชั้นในสิทธิ์')
     expect(markup).toContain('ยังไม่มีห้องในสิทธิ์')
-    expect(markup).toContain('ยังเลือกชั้น ห้อง และขอบเขตไม่ได้')
+    expect(markup).toContain('ยังเลือกชั้น ห้อง และรายชื่อนักเรียนไม่ได้')
     expect(markup).toContain('ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน')
   })
 })

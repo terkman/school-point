@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { Account, DemoState, Role } from './domain'
 import { PasswordInput } from './PasswordInput'
 import { DemoBanner, Icon } from './ui'
+import { brand } from './brand'
 
 interface LoginPageProps {
   state?: DemoState
@@ -63,7 +64,7 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
       <DemoBanner />
       <div className="login-layout">
         <section className="login-intro" aria-labelledby="product-title">
-          <div className="login-brand"><span>SP</span> School Point</div>
+          <div className="login-brand"><span>{brand.shortMark}</span> {brand.productName}</div>
           <div>
             <p className="eyebrow">ระบบดูแลวินัยเชิงสร้างสรรค์</p>
             <h1 id="product-title">คะแนนที่ตรวจสอบได้<br />การดูแลที่เป็นธรรม</h1>
@@ -80,8 +81,8 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
         <section className="login-panel" aria-labelledby="login-title">
           <div className="login-heading">
             <p className="eyebrow">ยินดีต้อนรับ</p>
-            <h2 id="login-title">{activationMode ? 'เปิดใช้บัญชีครั้งแรก' : 'เข้าสู่ระบบ'}</h2>
-            <p>{isDemo ? 'เลือกบัญชีตัวอย่างหรือกรอกข้อมูลด้านล่าง' : activationMode ? 'กรอกชื่อผู้ใช้และรหัสเปิดใช้ครั้งเดียวที่ได้รับจากโรงเรียน' : 'กรอกชื่อผู้ใช้และรหัสผ่านของคุณ'}</p>
+            <h2 id="login-title">{activationMode ? 'เปิดใช้บัญชีหรือกู้รหัสผ่าน' : 'เข้าสู่ระบบ'}</h2>
+            <p>{isDemo ? 'เลือกบัญชีตัวอย่างหรือกรอกข้อมูลด้านล่าง' : activationMode ? 'กรอกชื่อผู้ใช้และรหัสใช้ครั้งเดียวที่ได้รับจากโรงเรียน' : 'กรอกชื่อผู้ใช้และรหัสผ่านของคุณ'}</p>
           </div>
           {isDemo ? <div className="demo-accounts" aria-label="เลือกบัญชีสาธิต">
             {demos.map((demo) => (
@@ -108,7 +109,7 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
             </label>
             {activationMode ? (
               <label>
-                รหัสเปิดใช้ครั้งเดียว
+                รหัสใช้ครั้งเดียว
                 <input
                   type="text"
                   value={password}
@@ -141,13 +142,13 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
                   setError('')
                 }}
               >
-                {activationMode ? 'กลับไปเข้าสู่ระบบปกติ' : 'เปิดใช้บัญชีครั้งแรก'}
+                {activationMode ? 'กลับไปเข้าสู่ระบบปกติ' : 'เปิดใช้บัญชี / กู้รหัสผ่าน'}
               </button>
             ) : null}
           </form>
           <div className="login-note">
             <Icon name="alert" />
-            <p><strong>ระบบไม่ใช้วันเกิดเป็นรหัสผ่านถาวร</strong><br />รหัสเปิดใช้มีอายุจำกัดและใช้ได้ครั้งเดียว จากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว</p>
+            <p><strong>ระบบไม่ใช้วันเกิดเป็นรหัสผ่านถาวร</strong><br />รหัสเปิดใช้หรือกู้บัญชีมีอายุจำกัดและใช้ได้ครั้งเดียว จากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว</p>
           </div>
         </section>
       </div>

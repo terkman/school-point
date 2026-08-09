@@ -56,10 +56,10 @@ function TransactionRow({
     && !existingAppeal
   return (
     <tr>
-      <td><strong>{rule?.title ?? transaction.reason}</strong><small>{formatThaiDate(transaction.occurredAt)}</small></td>
-      <td><span className={`delta ${transaction.appliedDelta < 0 ? 'negative' : 'positive'}`}>{transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta}</span></td>
-      <td>{transaction.scoreBefore} → <strong>{transaction.scoreAfter}</strong></td>
-      <td>
+      <td data-label="รายการ"><strong>{rule?.title ?? transaction.reason}</strong><small>{formatThaiDate(transaction.occurredAt)}</small></td>
+      <td data-label="เปลี่ยนแปลง"><span className={`delta ${transaction.appliedDelta < 0 ? 'negative' : 'positive'}`}>{transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta}</span></td>
+      <td data-label="คะแนนรวม">{transaction.scoreBefore} → <strong>{transaction.scoreAfter}</strong></td>
+      <td data-label="ดำเนินการ">
         {existingAppeal ? <span className="badge status-pending">ยื่นอุทธรณ์แล้ว</span> : null}
         {eligible ? <button className="button ghost compact" onClick={() => onAppeal(transaction)}>ยื่นอุทธรณ์</button> : null}
         {!eligible && !existingAppeal ? <span className="muted">—</span> : null}
@@ -89,10 +89,15 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   if (!student) return <p>ไม่พบข้อมูลนักเรียน</p>
   const currentStudent = student
 
+  function navigateStudentTab(nextTab: StudentTab) {
+    setTab(nextTab)
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }
+
   function openAppeal(transaction: ScoreTransaction) {
     setAppealTarget(transaction)
     setStatement('')
-    setTab('appeals')
+    navigateStudentTab('appeals')
   }
 
   async function submitAppeal(event: FormEvent<HTMLFormElement>) {
@@ -213,7 +218,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   }
 
   return (
-    <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={setTab} onLogout={onLogout}>
+    <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={navigateStudentTab} onLogout={onLogout}>
       <div className="page-heading">
         <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : tab === 'appeals' ? 'การอุทธรณ์' : 'รูปโปรไฟล์ของฉัน'}</h1></div>
         <span className="class-chip">{currentStudent.classroomName} • {currentStudent.studentCode}</span>
@@ -232,9 +237,9 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
             </div>
           </section>
           <section className="panel">
-            <div className="section-heading"><div><p className="eyebrow">ล่าสุด</p><h2>การเปลี่ยนแปลงคะแนน</h2></div><button className="text-button" onClick={() => setTab('history')}>ดูทั้งหมด</button></div>
+            <div className="section-heading"><div><p className="eyebrow">ล่าสุด</p><h2>การเปลี่ยนแปลงคะแนน</h2></div><button className="text-button" onClick={() => navigateStudentTab('history')}>ดูทั้งหมด</button></div>
             <div className="table-wrap">
-              <table><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
+              <table className="transaction-table"><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
                 <tbody>{transactions.slice(0, 4).map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
               </table>
             </div>
@@ -247,7 +252,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
         <section className="panel">
           <div className="privacy-note"><Icon name="shield" /><span>เพื่อความเป็นส่วนตัว หน้านี้ไม่แสดงชื่อหรือข้อมูลของผู้บันทึกรายการ</span></div>
           <div className="table-wrap">
-            <table><caption className="sr-only">ประวัติการเปลี่ยนแปลงคะแนนของนักเรียน</caption><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
+            <table className="transaction-table"><caption className="sr-only">ประวัติการเปลี่ยนแปลงคะแนนของนักเรียน</caption><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
               <tbody>{transactions.map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
             </table>
           </div>
@@ -273,7 +278,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
               const rule = state.rules.find((item) => item.id === transaction?.ruleId)
               const label = appeal.status === 'accepted' ? 'คืนคะแนนแล้ว' : appeal.status === 'rejected' ? 'ไม่อนุมัติ' : 'อยู่ระหว่างพิจารณา'
               const statusClass = appeal.status === 'accepted' ? 'approved' : appeal.status === 'rejected' ? 'rejected' : 'pending'
-              return <article className="record-row" key={appeal.id}><div><strong>{rule?.title ?? transaction?.reason ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span></div><span className={`badge status-${statusClass}`}>{label}</span></article>
+              return <article className="record-row detailed-record" key={appeal.id}><div><strong>{rule?.title ?? transaction?.reason ?? 'รายการคะแนน'}</strong><span>ยื่นเมื่อ {formatThaiDate(appeal.createdAt)}</span>{appeal.decisionNote ? <><small>คำชี้แจงจากฝ่ายปกครอง</small><span>{appeal.decisionNote}</span>{appeal.status === 'accepted' ? <em>คืนคะแนนตามผลพิจารณา {appeal.restoredPoints ?? 0} คะแนน</em> : null}</> : null}</div><span className={`badge status-${statusClass}`}>{label}</span></article>
             })}</div> : <EmptyState title="ยังไม่มีคำอุทธรณ์" detail="เมื่อยื่นคำอุทธรณ์แล้ว สถานะจะแสดงที่นี่" />}
           </section>
         </div>

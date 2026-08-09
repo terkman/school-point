@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Account, DemoState, Severity } from './domain'
 import { ProfileAvatar } from './ProfileAvatar'
 import { dataMode } from './supabaseClient'
+import { brand } from './brand'
 
 export type IconName =
   | 'home'
@@ -19,6 +20,10 @@ export type IconName =
   | 'eye'
   | 'eyeOff'
   | 'upload'
+  | 'calendar'
+  | 'star'
+  | 'document'
+  | 'chevronRight'
 
 const paths: Record<IconName, ReactNode> = {
   home: <path d="M3 11.5 12 4l9 7.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5v-8Z M9 21v-6h6v6" />,
@@ -36,6 +41,10 @@ const paths: Record<IconName, ReactNode> = {
   eye: <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm10 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />,
   eyeOff: <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.3 17.3 0 0 1-2.1 3.1M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 4.1-.9" />,
   upload: <path d="M12 16V4M7 9l5-5 5 5M5 15v5h14v-5" />,
+  calendar: <path d="M6 2v4M18 2v4M3 9h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2ZM7 13h3M14 13h3M7 17h3M14 17h3" />,
+  star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" />,
+  document: <path d="M6 2h8l4 4v16H6V2Zm8 0v5h5M9 12h6M9 16h6" />,
+  chevronRight: <path d="m9 18 6-6-6-6" />,
 }
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -77,6 +86,7 @@ interface AppShellProps<T extends string> {
   account: Account
   state: DemoState
   items: NavItem<T>[]
+  mobileItems?: NavItem<T>[]
   active: T
   onNavigate: (id: T) => void
   onLogout: () => void
@@ -94,20 +104,22 @@ export function AppShell<T extends string>({
   account,
   state,
   items,
+  mobileItems,
   active,
   onNavigate,
   onLogout,
   children,
 }: AppShellProps<T>) {
+  const resolvedMobileItems = mobileItems ?? items.slice(0, 4)
   return (
     <div className="app-root">
       <a className="skip-link" href="#main-content">ข้ามไปยังเนื้อหา</a>
       <DemoBanner />
       <header className="topbar">
-        <div className="brand-mark" aria-hidden="true">SP</div>
+        <div className="brand-mark" aria-hidden="true">{brand.shortMark}</div>
         <div className="brand-copy">
-          <strong>School Point</strong>
-          <span>ระบบคะแนนความประพฤติ</span>
+          <strong>{brand.productName}</strong>
+          <span>{brand.descriptor}</span>
         </div>
         <div className="topbar-actions">
           <div className="term-chip">{state.term.label}</div>
@@ -149,16 +161,18 @@ export function AppShell<T extends string>({
           {children}
         </main>
       </div>
-      <nav className="mobile-nav" aria-label="เมนูมือถือ">
-        {items.slice(0, 4).map((item) => (
+      <nav className="mobile-nav" aria-label="เมนูมือถือ" style={{ gridTemplateColumns: `repeat(${Math.max(1, resolvedMobileItems.length)}, minmax(0, 1fr))` }}>
+        {resolvedMobileItems.map((item) => (
           <button
             key={item.id}
             className={active === item.id ? 'active' : ''}
             onClick={() => onNavigate(item.id)}
-            aria-label={item.label}
+            aria-label={item.count ? `${item.label} ${item.count} รายการ` : item.label}
+            aria-current={active === item.id ? 'page' : undefined}
           >
             <Icon name={item.icon} size={19} />
             <span>{item.label}</span>
+            {item.count ? <b className="mobile-nav-count" aria-hidden="true">{item.count > 99 ? '99+' : item.count}</b> : null}
           </button>
         ))}
       </nav>

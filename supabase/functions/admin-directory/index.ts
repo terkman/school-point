@@ -1,5 +1,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.110.2'
-import { isActiveDirectoryAdmin } from '../_shared/directoryAuthorization.ts'
+import {
+  isActiveDirectoryAdmin,
+  tokenHasPasswordAuthentication,
+} from '../_shared/directoryAuthorization.ts'
+import {
+  createTemporaryRecoveryPassword,
+  passwordResetReason,
+} from '../_shared/passwordReset.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -284,6 +291,53 @@ Deno.serve(async (request) => {
       if (error) throw new Error(error.message)
       const activation = await generateActivationCode(serviceClient, username)
       return response(200, { ok: true, data: activation })
+    }
+
+    if (action === 'reset-password') {
+      if (!tokenHasPasswordAuthentication(accessToken)) {
+        return response(403, {
+          ok: false,
+          error: 'กรุณาเข้าสู่ระบบด้วยรหัสผ่านอีกครั้งก่อนกู้บัญชีให้ผู้อื่น',
+        })
+      }
+      const username = usernameValue(input.username)
+      const reason = passwordResetReason(input.reason)
+      const { data: account, error: prepareError } = await serviceClient.rpc(
+        'service_prepare_school_account_password_reset',
+        {
+          p_actor_user_id: userData.user.id,
+          p_username: username,
+          p_reason: reason,
+        },
+      )
+      if (prepareError) throw new Error(prepareError.message)
+      if (!account || typeof account !== 'object') {
+        throw new Error('ไม่พบข้อมูลบัญชีสำหรับกู้รหัสผ่าน')
+      }
+      const userId = String((account as JsonRecord).userId ?? '')
+      const accountUsername = usernameValue((account as JsonRecord).username)
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+        throw new Error('ข้อมูลบัญชีสำหรับกู้รหัสผ่านไม่ถูกต้อง')
+      }
+
+      const { error: passwordError } = await serviceClient.auth.admin.updateUserById(userId, {
+        password: createTemporaryRecoveryPassword(),
+        user_metadata: { username: accountUsername, must_change_password: true },
+      })
+      if (passwordError) {
+        throw new Error('บัญชีถูกกั้นไว้เพื่อความปลอดภัยแล้ว แต่ยังยกเลิกรหัสผ่านเดิมไม่สำเร็จ กรุณาออกรหัสครั้งเดียวใหม่')
+      }
+
+      let activation
+      try {
+        activation = await generateActivationCode(serviceClient, accountUsername)
+      } catch {
+        throw new Error('รหัสผ่านเดิมถูกยกเลิกแล้ว แต่ยังสร้างรหัสกู้บัญชีไม่สำเร็จ กรุณาออกรหัสครั้งเดียวใหม่')
+      }
+      return response(200, {
+        ok: true,
+        data: { ...activation, purpose: 'password-reset' },
+      })
     }
 
     return response(400, { ok: false, error: 'ไม่รู้จักคำสั่งที่ร้องขอ' })

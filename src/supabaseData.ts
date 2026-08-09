@@ -3,7 +3,11 @@ import type {
   AdminAddPointsBulkResult,
   AdminAddPointsResult,
   AppDataActions,
+  PaperDocumentRecord,
+  PaperDocumentSnapshot,
+  RecordGuardianContactAttemptResult,
   RecordDeductionsResult,
+  RequestDeductionsResult,
   RequestPointAdditionsResult,
 } from './dataActions'
 import type {
@@ -11,7 +15,11 @@ import type {
   Appeal,
   BehaviorRule,
   DemoState,
+  DeductionRequest,
   GuardianContact,
+  GuardianContactAttempt,
+  GuardianContactChannel,
+  GuardianContactOutcome,
   PositiveBehaviorRule,
   RequestStatus,
   Role,
@@ -36,6 +44,7 @@ import {
   type ActivationCodeResult,
   type CreateSchoolClassroomResult,
   type CreateSchoolPersonResult,
+  type PasswordResetCodeResult,
 } from './schoolDirectory'
 import {
   normalizeSchoolImportPreview,
@@ -146,6 +155,7 @@ interface LedgerRow {
   balance_after: number
   incident_id: number | string | null
   addition_request_id: number | string | null
+  deduction_request_id?: number | string | null
   reason: string
   actor_user_id: string | null
   created_at: string
@@ -173,7 +183,11 @@ interface StudentIncidentRow {
   appeal_deadline: string
   appeal_id: number | string | null
   appeal_status: Appeal['status'] | null
+  public_explanation?: string | null
+  restored_points?: number | null
+  review_version?: number | null
   appeal_created_at?: string | null
+  appeal_decided_at?: string | null
 }
 
 interface RequestRow {
@@ -182,9 +196,27 @@ interface RequestRow {
   positive_rule_id: number | string | null
   rule_snapshot: Record<string, unknown> | null
   requested_points: number
+  approved_points: number | null
   reason: string
   evidence_note: string | null
   activity_occurred_at: string | null
+  requested_by: string | null
+  status: RequestStatus
+  created_at: string
+  reviewed_at: string | null
+  review_note: string | null
+}
+
+interface DeductionRequestRow {
+  id: number | string
+  batch_id: number | string
+  student_id: number | string
+  rule_id: number | string
+  rule_snapshot: Record<string, unknown>
+  requested_points: number
+  approved_points: number | null
+  occurred_at: string
+  internal_note: string | null
   requested_by: string | null
   status: RequestStatus
   created_at: string
@@ -198,6 +230,11 @@ interface AppealRow {
   student_id: number | string
   reason: string
   status: Appeal['status']
+  restored_points: number
+  public_explanation: string | null
+  decided_at: string | null
+  reopen_reason: string | null
+  review_version: number
   created_at: string
 }
 
@@ -218,6 +255,18 @@ interface GuardianTaskRow {
   status: 'pending' | 'completed' | 'cancelled'
   note: string | null
   completed_at: string | null
+  next_reminder_at: string | null
+}
+
+interface GuardianContactAttemptRow {
+  id: number | string
+  task_id: number | string
+  channel: GuardianContactChannel
+  outcome: GuardianContactOutcome
+  note: string | null
+  evidence_note: string | null
+  closes_notification: boolean
+  attempted_at: string
 }
 
 interface GuardianContactRow {
@@ -264,8 +313,8 @@ function fullName(row: { title: string | null; given_name: string; family_name: 
   return [row.title, row.given_name, row.family_name].filter(Boolean).join(' ')
 }
 
-function ledgerKind(entryType: string): ScoreTransaction['kind'] {
-  if (entryType === 'deduction') return 'deduction'
+function ledgerKind(entryType: string, appliedDelta: number): ScoreTransaction['kind'] {
+  if (entryType === 'deduction' || appliedDelta < 0) return 'deduction'
   if (entryType === 'semester_opening') return 'reset'
   return 'addition'
 }
@@ -351,6 +400,31 @@ function normalizeRecordDeductionsResult(value: unknown): RecordDeductionsResult
   }
 }
 
+function normalizeRequestDeductionsResult(value: unknown): RequestDeductionsResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปคำขอตัดคะแนนกลับมา')
+  const row = value as Record<string, unknown>
+  if (!['single', 'selected', 'classroom'].includes(String(row.scope)) || !Array.isArray(row.requests)) {
+    throw new Error('รูปแบบผลสรุปคำขอตัดคะแนนไม่ถูกต้อง')
+  }
+  return {
+    ok: row.ok === true,
+    replayed: row.replayed === true,
+    batchId: String(row.batchId ?? ''),
+    scope: String(row.scope) as RequestDeductionsResult['scope'],
+    ...(row.classroomId === null || row.classroomId === undefined ? {} : { classroomId: String(row.classroomId) }),
+    targetCount: Number(row.targetCount),
+    requestedPointsEach: Number(row.requestedPointsEach),
+    requests: row.requests.map((value) => {
+      const item = value as Record<string, unknown>
+      return {
+        studentId: String(item.studentId ?? ''),
+        requestId: String(item.requestId ?? ''),
+        status: 'pending' as const,
+      }
+    }),
+  }
+}
+
 function normalizeAdminAddPointsResult(value: unknown): AdminAddPointsResult {
   if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปการเพิ่มคะแนนกลับมา')
   const row = value as Record<string, unknown>
@@ -425,6 +499,119 @@ function normalizeAdminAddPointsBulkResult(value: unknown): AdminAddPointsBulkRe
     throw new Error('รูปแบบผลสรุปการเพิ่มคะแนนแบบกลุ่มไม่ถูกต้อง')
   }
   return result
+}
+
+function normalizeGuardianContactAttemptResult(value: unknown): RecordGuardianContactAttemptResult {
+  if (!value || typeof value !== 'object') {
+    throw new Error('ฐานข้อมูลไม่ส่งผลการติดต่อผู้ปกครองกลับมา')
+  }
+  const row = value as Record<string, unknown>
+  const status = String(row.status)
+  if (row.ok !== true || !['pending', 'completed'].includes(status)
+    || !row.attemptId || !row.taskId || typeof row.closesNotification !== 'boolean'
+    || typeof row.attemptedAt !== 'string') {
+    throw new Error('รูปแบบผลการติดต่อผู้ปกครองไม่ถูกต้อง')
+  }
+  return {
+    ok: true,
+    attemptId: String(row.attemptId),
+    taskId: String(row.taskId),
+    status: status as RecordGuardianContactAttemptResult['status'],
+    closesNotification: row.closesNotification,
+    attemptedAt: row.attemptedAt,
+    nextReminderAt: typeof row.nextReminderAt === 'string' ? row.nextReminderAt : undefined,
+  }
+}
+
+function normalizePaperDocumentSnapshot(value: unknown): PaperDocumentSnapshot {
+  if (!value || typeof value !== 'object') throw new Error('ข้อมูลสำหรับพิมพ์เอกสารไม่ถูกต้อง')
+  const row = value as Record<string, unknown>
+  const student = row.student as Record<string, unknown> | undefined
+  const term = row.term as Record<string, unknown> | undefined
+  const transactions = Array.isArray(row.transactions) ? row.transactions : []
+  if (!student || !term || !student.id || !student.code || !student.name || !term.id) {
+    throw new Error('ข้อมูลนักเรียนหรือภาคเรียนในเอกสารไม่ครบถ้วน')
+  }
+  const optionalText = (item: unknown): string | undefined => typeof item === 'string' && item.trim() ? item : undefined
+  const incident = row.incident && typeof row.incident === 'object'
+    ? row.incident as Record<string, unknown>
+    : undefined
+  const appeal = row.appeal && typeof row.appeal === 'object'
+    ? row.appeal as Record<string, unknown>
+    : undefined
+  return {
+    student: {
+      id: String(student.id),
+      code: String(student.code),
+      name: String(student.name),
+      classroomName: String(student.classroomName ?? ''),
+      gradeLevel: optionalText(student.gradeLevel),
+      roomNumber: optionalText(student.roomNumber),
+    },
+    term: {
+      id: String(term.id),
+      schoolYear: Number(term.schoolYear),
+      semester: Number(term.semester),
+      name: String(term.name ?? ''),
+    },
+    score: Number(row.score ?? 0),
+    transactions: transactions.map((value) => {
+      const item = value as Record<string, unknown>
+      return {
+        id: String(item.id ?? ''),
+        occurredAt: String(item.occurredAt ?? ''),
+        reason: String(item.reason ?? ''),
+        appliedDelta: Number(item.appliedDelta ?? 0),
+        scoreBefore: Number(item.scoreBefore ?? 0),
+        scoreAfter: Number(item.scoreAfter ?? 0),
+      }
+    }),
+    ...(incident ? {
+      incident: {
+        id: String(incident.id ?? ''),
+        occurredAt: String(incident.occurredAt ?? ''),
+        reason: String(incident.reason ?? ''),
+        appliedPoints: Number(incident.appliedPoints ?? 0),
+        appealDeadline: String(incident.appealDeadline ?? ''),
+      },
+    } : {}),
+    ...(appeal ? {
+      appeal: {
+        id: String(appeal.id ?? ''),
+        incidentId: String(appeal.incidentId ?? ''),
+        status: String(appeal.status) as NonNullable<PaperDocumentSnapshot['appeal']>['status'],
+        statement: String(appeal.statement ?? ''),
+        restoredPoints: Number(appeal.restoredPoints ?? 0),
+        publicExplanation: optionalText(appeal.publicExplanation),
+        createdAt: String(appeal.createdAt ?? ''),
+        decidedAt: optionalText(appeal.decidedAt),
+      },
+    } : {}),
+  }
+}
+
+function normalizePaperDocumentRecord(value: unknown): PaperDocumentRecord {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งข้อมูลเอกสารกลับมา')
+  const row = value as Record<string, unknown>
+  const documentType = String(row.documentType)
+  const status = String(row.status)
+  if (!['behavior_score_summary', 'score_appeal_form', 'appeal_decision_notice'].includes(documentType)
+    || !['generated', 'printed', 'received', 'delivered', 'delivery_failed', 'voided'].includes(status)
+    || !row.id || !row.documentNumber || !row.studentId || !row.termId || !row.issuedAt) {
+    throw new Error('รูปแบบข้อมูลเอกสารไม่ถูกต้อง')
+  }
+  return {
+    id: String(row.id),
+    documentNumber: String(row.documentNumber),
+    documentType: documentType as PaperDocumentRecord['documentType'],
+    status: status as PaperDocumentRecord['status'],
+    studentId: String(row.studentId),
+    termId: String(row.termId),
+    incidentId: row.incidentId === null || row.incidentId === undefined ? undefined : String(row.incidentId),
+    appealId: row.appealId === null || row.appealId === undefined ? undefined : String(row.appealId),
+    issuedAt: String(row.issuedAt),
+    snapshot: normalizePaperDocumentSnapshot(row.snapshot),
+  }
 }
 
 export function getSessionUsername(user: User): string {
@@ -567,7 +754,7 @@ async function loadStudentState(
       id: asId(row.id),
       studentId,
       termId: asId(row.term_id),
-      kind: ledgerKind(row.entry_type),
+      kind: ledgerKind(row.entry_type, row.applied_delta),
       requestedDelta: row.requested_delta,
       appliedDelta: row.applied_delta,
       scoreBefore: row.balance_before,
@@ -591,6 +778,10 @@ async function loadStudentState(
       statement: '',
       status: row.appeal_status,
       createdAt: row.appeal_created_at ?? row.recorded_at,
+      restoredPoints: row.restored_points ?? undefined,
+      decisionNote: row.public_explanation ?? undefined,
+      decidedAt: row.appeal_decided_at ?? undefined,
+      reviewVersion: row.review_version ?? undefined,
     }]
   })
   const student: Student = {
@@ -620,6 +811,7 @@ async function loadStudentState(
     rules,
     positiveRules: [],
     transactions,
+    deductionRequests: [],
     additionRequests: [],
     appeals,
     seriousCases: [],
@@ -637,7 +829,7 @@ export async function loadMyStudentHistory(client: SupabaseClient): Promise<{
       .order('id', { ascending: false })
       .range(from, to)),
     fetchAllPages<StudentIncidentRow>('โหลดเหตุการณ์', (from, to) => client
-      .rpc('get_my_incident_history')
+      .rpc('get_my_incident_history_v2')
       .order('occurred_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
@@ -654,7 +846,7 @@ async function loadStaffState(
   positiveRules: PositiveBehaviorRule[],
 ): Promise<DemoState> {
   const [studentsResult, teachersResult, enrollmentsResult, classroomsResult, assignmentsResult, scoresResult,
-    ledgerResult, incidentsResult, requestsResult, appealsResult, casesResult, guardianResult] = await Promise.all([
+    ledgerResult, incidentsResult, deductionRequestsResult, requestsResult, appealsResult, casesResult, guardianResult] = await Promise.all([
     fetchAllPages<StudentRow>('โหลดนักเรียน', (from, to) => client
       .from('students')
       .select('id,user_id,student_code,title,given_name,family_name,status')
@@ -695,7 +887,7 @@ async function loadStaffState(
       .range(from, to)),
     fetchAllPages<LedgerRow>('โหลดประวัติคะแนน', (from, to) => client
       .from('score_ledger')
-      .select('id,student_id,term_id,entry_type,requested_delta,applied_delta,balance_before,balance_after,incident_id,addition_request_id,positive_rule_id,positive_rule_snapshot,activity_occurred_at,internal_reason,evidence_note,reason,actor_user_id,created_at')
+      .select('id,student_id,term_id,entry_type,requested_delta,applied_delta,balance_before,balance_after,incident_id,addition_request_id,deduction_request_id,positive_rule_id,positive_rule_snapshot,activity_occurred_at,internal_reason,evidence_note,reason,actor_user_id,created_at')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
@@ -705,16 +897,23 @@ async function loadStaffState(
       .order('occurred_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
+    fetchAllPages<DeductionRequestRow>('โหลดคำขอตัดคะแนน', (from, to) => client
+      .from('deduction_approval_requests')
+      .select('id,batch_id,student_id,rule_id,rule_snapshot,requested_points,approved_points,occurred_at,internal_note,requested_by,status,created_at,reviewed_at,review_note')
+      .eq('term_id', term.id)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)),
     fetchAllPages<RequestRow>('โหลดคำขอเพิ่มคะแนน', (from, to) => client
       .from('point_addition_requests')
-      .select('id,student_id,positive_rule_id,rule_snapshot,requested_points,reason,evidence_note,activity_occurred_at,requested_by,status,created_at,reviewed_at,review_note')
+      .select('id,student_id,positive_rule_id,rule_snapshot,requested_points,approved_points,reason,evidence_note,activity_occurred_at,requested_by,status,created_at,reviewed_at,review_note')
       .eq('term_id', term.id)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
     fetchAllPages<AppealRow>('โหลดคำอุทธรณ์', (from, to) => client
       .from('appeals')
-      .select('id,incident_id,student_id,reason,status,created_at')
+      .select('id,incident_id,student_id,reason,status,restored_points,public_explanation,decided_at,reopen_reason,review_version,created_at')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to)),
@@ -727,7 +926,7 @@ async function loadStaffState(
       .range(from, to)),
     fetchAllPages<GuardianTaskRow>('โหลดงานติดต่อผู้ปกครอง', (from, to) => client
       .from('guardian_contact_tasks')
-      .select('id,incident_id,status,note,completed_at')
+      .select('id,incident_id,status,note,completed_at,next_reminder_at')
       .order('id')
       .range(from, to)),
   ])
@@ -739,10 +938,16 @@ async function loadStaffState(
   const scores = scoresResult
   const ledgerRows = ledgerResult
   const incidents = incidentsResult
+  const deductionRequestRows = deductionRequestsResult
   const requestRows = requestsResult
   const appealRows = appealsResult
   const caseRows = casesResult
   const guardianRows = guardianResult
+  const guardianAttemptRows = profile.role === 'admin' && guardianRows.length
+    ? await runRpc<GuardianContactAttemptRow[]>(client, 'get_guardian_contact_attempts_v2', {
+      p_task_ids: guardianRows.map((row) => row.id),
+    })
+    : []
 
   const classroomById = new Map(classrooms.map((row) => [asId(row.id), row]))
   const enrollmentByStudent = new Map(enrollments.map((row) => [asId(row.student_id), row]))
@@ -784,7 +989,7 @@ async function loadStaffState(
       id: asId(row.id),
       studentId: asId(row.student_id),
       termId: asId(row.term_id),
-      kind: ledgerKind(row.entry_type),
+      kind: ledgerKind(row.entry_type, row.applied_delta),
       requestedDelta: row.requested_delta,
       appliedDelta: row.applied_delta,
       scoreBefore: row.balance_before,
@@ -794,7 +999,9 @@ async function loadStaffState(
       occurredAt: incident?.occurred_at ?? row.created_at,
       actorId: row.actor_user_id ?? '',
       incidentId,
-      sourceRequestId: row.addition_request_id === null ? undefined : asId(row.addition_request_id),
+      sourceRequestId: row.deduction_request_id !== null && row.deduction_request_id !== undefined
+        ? asId(row.deduction_request_id)
+        : row.addition_request_id === null ? undefined : asId(row.addition_request_id),
       positiveRuleId: row.positive_rule_id === null || row.positive_rule_id === undefined ? undefined : asId(row.positive_rule_id),
       positiveRuleTitle: snapshotText(row.positive_rule_snapshot ?? null, 'title_th', 'title'),
       activityOccurredAt: row.activity_occurred_at ?? undefined,
@@ -804,7 +1011,7 @@ async function loadStaffState(
         ? 'admin_direct'
         : row.entry_type === 'teacher_request_approved'
           ? 'teacher_request'
-          : row.entry_type === 'appeal_reversal'
+          : row.entry_type === 'appeal_reversal' || row.entry_type === 'appeal_adjustment'
             ? 'appeal'
             : undefined,
     }
@@ -813,6 +1020,26 @@ async function loadStaffState(
     transactions.filter((row) => row.incidentId).map((row) => [row.incidentId as string, row.id]),
   )
   const positiveRuleById = new Map(positiveRules.map((rule) => [rule.id, rule]))
+  const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
+  const deductionRequests: DeductionRequest[] = deductionRequestRows.map((row) => {
+    const ruleId = asId(row.rule_id)
+    return {
+      id: asId(row.id),
+      batchId: asId(row.batch_id),
+      studentId: asId(row.student_id),
+      teacherId: row.requested_by ? teacherIdByUserId.get(row.requested_by) ?? row.requested_by : '',
+      ruleId,
+      ruleTitle: snapshotText(row.rule_snapshot, 'title_th', 'title') ?? ruleById.get(ruleId)?.title ?? 'เหตุการณ์ตามระเบียบ',
+      requestedPoints: row.requested_points,
+      approvedPoints: row.approved_points ?? undefined,
+      occurredAt: row.occurred_at,
+      internalNote: row.internal_note ?? '',
+      status: row.status,
+      createdAt: row.created_at,
+      decidedAt: row.reviewed_at ?? undefined,
+      decisionNote: row.review_note ?? undefined,
+    }
+  })
   const additionRequests = requestRows.map((row) => {
     const positiveRuleId = row.positive_rule_id === null ? undefined : asId(row.positive_rule_id)
     const positiveRule = positiveRuleId ? positiveRuleById.get(positiveRuleId) : undefined
@@ -824,6 +1051,7 @@ async function loadStaffState(
       positiveRuleCode: snapshotText(row.rule_snapshot, 'rule_code', 'code') ?? positiveRule?.code,
       positiveRuleTitle: snapshotText(row.rule_snapshot, 'title_th', 'title') ?? positiveRule?.title,
       requestedPoints: row.requested_points,
+      approvedPoints: row.approved_points ?? undefined,
       reason: row.reason,
       evidenceNote: row.evidence_note ?? undefined,
       activityOccurredAt: row.activity_occurred_at ?? undefined,
@@ -840,7 +1068,26 @@ async function loadStaffState(
     statement: row.reason,
     status: row.status,
     createdAt: row.created_at,
+    restoredPoints: row.restored_points,
+    decisionNote: row.public_explanation ?? undefined,
+    decidedAt: row.decided_at ?? undefined,
+    reopenReason: row.reopen_reason ?? undefined,
+    reviewVersion: row.review_version,
   }))
+  const guardianAttemptsByTask = new Map<string, GuardianContactAttempt[]>()
+  for (const row of guardianAttemptRows) {
+    const taskId = asId(row.task_id)
+    const attempts = guardianAttemptsByTask.get(taskId) ?? []
+    attempts.push({
+      id: asId(row.id),
+      channel: row.channel,
+      outcome: row.outcome,
+      note: row.note ?? undefined,
+      evidenceNote: row.evidence_note ?? undefined,
+      createdAt: row.attempted_at,
+    })
+    guardianAttemptsByTask.set(taskId, attempts)
+  }
   const guardianByIncident = new Map(guardianRows.map((row) => [asId(row.incident_id), row]))
   const seriousCases: SeriousCase[] = caseRows.map((row) => {
     const incidentId = asId(row.incident_id)
@@ -857,6 +1104,8 @@ async function loadStaffState(
       guardianTaskId: guardian ? asId(guardian.id) : undefined,
       guardianContactNote: guardian?.note ?? undefined,
       guardianContactCompletedAt: guardian?.completed_at ?? undefined,
+      guardianNextReminderAt: guardian?.next_reminder_at ?? undefined,
+      guardianContactAttempts: guardian ? guardianAttemptsByTask.get(asId(guardian.id)) ?? [] : [],
       createdAt: row.opened_at,
       internalNote: row.internal_note ?? '',
       followUpNote: row.follow_up_note ?? undefined,
@@ -888,6 +1137,7 @@ async function loadStaffState(
     rules,
     positiveRules,
     transactions,
+    deductionRequests,
     additionRequests,
     appeals,
     seriousCases,
@@ -1043,7 +1293,26 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         p_confirm_serious_bulk: input.confirmSeriousBulk,
       }),
     ),
-    requestPointAddition: (input) => mutate<void>('request_point_addition_detailed', {
+    requestDeductions: async (input) => normalizeRequestDeductionsResult(
+      await mutate<unknown>('request_deductions_bulk_v1', {
+        p_client_request_id: input.clientRequestId,
+        p_scope: input.scope,
+        p_student_ids: input.studentIds,
+        p_classroom_id: input.classroomId ?? null,
+        p_rule_id: input.ruleId,
+        p_occurred_at: input.occurredAt,
+        p_student_visible_note: input.studentVisibleNote?.trim() || null,
+        p_internal_note: input.internalNote.trim(),
+        p_confirm_serious_bulk: input.confirmSeriousBulk,
+      }),
+    ),
+    reviewDeduction: (input) => mutate<void>('review_deduction_request_v1', {
+      p_request_id: input.requestId,
+      p_approve: input.approve,
+      p_approved_points: input.approvedPoints,
+      p_review_note: input.note ?? null,
+    }),
+    requestPointAddition: (input) => mutate<void>('request_point_addition_v2', {
       p_client_request_id: input.clientRequestId,
       p_student_id: input.studentId,
       p_positive_rule_id: input.positiveRuleId,
@@ -1053,7 +1322,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_evidence_note: input.evidenceNote.trim(),
     }),
     requestPointAdditions: async (input) => normalizeRequestPointAdditionsResult(
-      await mutate<unknown>('request_point_additions_bulk', {
+      await mutate<unknown>('request_point_additions_bulk_v2', {
         p_client_request_id: input.clientRequestId,
         p_scope: input.scope,
         p_student_ids: input.studentIds,
@@ -1069,15 +1338,20 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_incident_id: input.incidentId,
       p_reason: input.reason,
     }),
-    reviewPointAddition: (input) => mutate<void>('review_point_addition', {
+    reviewPointAddition: (input) => mutate<void>('review_point_addition_v2', {
       p_request_id: input.requestId,
       p_approve: input.approve,
+      p_approved_points: input.approvedPoints,
       p_review_note: input.note ?? null,
     }),
-    reviewAppeal: (input) => mutate<void>('review_appeal', {
+    reviewAppeal: (input) => mutate<void>('review_appeal_v2', {
       p_appeal_id: input.appealId,
-      p_accept: input.accept,
-      p_decision_note: input.note,
+      p_restored_points: input.restoredPoints,
+      p_public_explanation: input.note,
+    }),
+    reopenAppeal: (input) => mutate<void>('reopen_appeal_v2', {
+      p_appeal_id: input.appealId,
+      p_reason: input.reason.trim(),
     }),
     adminAddPoints: async (input) => normalizeAdminAddPointsResult(
       await mutate<unknown>('admin_add_points_detailed', {
@@ -1128,6 +1402,15 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         isPrimary: row.is_primary,
       }))
     },
+    recordGuardianContactAttempt: async (input) => normalizeGuardianContactAttemptResult(
+      await mutate<unknown>('record_guardian_contact_attempt_v2', {
+        p_task_id: input.taskId,
+        p_channel: input.channel,
+        p_outcome: input.outcome,
+        p_note: input.note?.trim() || null,
+        p_evidence_note: input.evidenceNote?.trim() || null,
+      }),
+    ),
     completeGuardianContact: (input) => mutate<void>('complete_guardian_contact_task', {
       p_task_id: input.taskId,
       p_note: input.note.trim(),
@@ -1136,6 +1419,31 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       p_case_id: input.caseId,
       p_status: input.status,
       p_note: input.note.trim(),
+    }),
+    getPaperDocuments: async (termId) => {
+      const rows = await runRpc<unknown[]>(client, 'list_paper_documents_v1', { p_term_id: termId })
+      return rows.map(normalizePaperDocumentRecord)
+    },
+    issuePaperDocument: async (input) => normalizePaperDocumentRecord(
+      await runRpc<unknown>(client, 'issue_paper_document_v1', {
+        p_document_type: input.documentType,
+        p_student_id: input.studentId,
+        p_term_id: input.termId,
+        p_incident_id: input.incidentId ?? null,
+        p_appeal_id: input.appealId ?? null,
+      }),
+    ),
+    recordPaperDocumentEvent: async (input) => normalizePaperDocumentRecord(
+      await runRpc<unknown>(client, 'record_paper_document_event_v1', {
+        p_document_id: input.documentId,
+        p_event_type: input.eventType,
+        p_note: input.note?.trim() || null,
+      }),
+    ),
+    submitPaperAppeal: (input) => mutate<void>('submit_paper_appeal_v1', {
+      p_document_id: input.documentId,
+      p_reason: input.reason.trim(),
+      p_received_at: input.receivedAt,
     }),
     setMyAvatarPreset: async (preset) => {
       if (!getProfileAvatar(preset)) throw new Error('ไม่พบตัวการ์ตูนที่เลือก')
@@ -1199,6 +1507,10 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
     issueActivationCode: (username) => invokeAdminDirectory<ActivationCodeResult>(client, {
       action: 'issue-activation',
       input: { username },
+    }),
+    resetSchoolAccountPassword: (input) => invokeAdminDirectory<PasswordResetCodeResult>(client, {
+      action: 'reset-password',
+      input,
     }),
     previewSchoolImport: async (file): Promise<SchoolImportPreview> => normalizeSchoolImportPreview(
       await invokeAdminSchoolImport<unknown>(client, file, 'preview'),

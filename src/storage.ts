@@ -15,7 +15,10 @@ export function loadDemoState(): DemoState {
     if (!raw) return createDemoState()
     const parsed = JSON.parse(raw) as DemoState
     if (parsed.version !== 2) return createDemoState()
-    return parsed
+    return {
+      ...parsed,
+      deductionRequests: Array.isArray(parsed.deductionRequests) ? parsed.deductionRequests : [],
+    }
   } catch {
     return createDemoState()
   }

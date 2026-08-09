@@ -9,8 +9,10 @@ import {
 import type {
   AppDataActions,
   RecordDeductionsResult,
+  RequestDeductionsResult,
   RequestPointAdditionsResult,
 } from './dataActions'
+import { requiresDeductionApproval } from './adminDomain'
 import {
   localDateTimeToIso,
   toLocalDateTimeInputValue,
@@ -19,7 +21,6 @@ import {
 import { EvidenceField, EvidenceSummary } from './EvidenceField'
 import {
   encodeEvidenceBundle,
-  hasEvidence,
   type EvidenceAttachment,
 } from './evidence'
 import {
@@ -91,6 +92,7 @@ export function TeacherDashboard({
   const [confirmSeriousBulk, setConfirmSeriousBulk] = useState(false)
   const [deductionRequestId, setDeductionRequestId] = useState(() => newRequestId())
   const [deductionResult, setDeductionResult] = useState<RecordDeductionsResult | null>(null)
+  const [deductionApprovalResult, setDeductionApprovalResult] = useState<RequestDeductionsResult | null>(null)
 
   const [additionSelection, setAdditionSelection] = useState(() => createInitialStudentSelection(assignedStudents))
   const [positiveRuleId, setPositiveRuleId] = useState(activePositiveRules[0]?.id ?? '')
@@ -111,6 +113,7 @@ export function TeacherDashboard({
   const [additionBusy, setAdditionBusy] = useState(false)
   const [rulesDialogTab, setRulesDialogTab] = useState<ScoreRulesDialogTab | null>(null)
   const selectedRule = activeDeductionRules.find((item) => item.id === ruleId)
+  const deductionNeedsApproval = Boolean(selectedRule && requiresDeductionApproval(selectedRule.points))
   const selectedPositiveRule = activePositiveRules.find((item) => item.id === positiveRuleId)
   const additionTargets = resolveStudentTargets(assignedStudents, additionSelection)
   const additionBeforeTotal = additionTargets.reduce((sum, student) => sum + student.score, 0)
@@ -120,10 +123,11 @@ export function TeacherDashboard({
   const deductionTargets = resolveStudentTargets(assignedStudents, deductionSelection)
   const isSeriousBulk = Boolean(selectedRule && ['serious', 'critical'].includes(selectedRule.severity) && deductionTargets.length > 1)
   const teacherRequests = state.additionRequests.filter((item) => item.teacherId === teacher?.id)
+  const teacherDeductionRequests = state.deductionRequests.filter((item) => item.teacherId === teacher?.id)
   const assignedCases = state.seriousCases.filter((item) => assignedStudents.some((student) => student.id === item.studentId))
   const navItems: NavItem<TeacherTab>[] = [
     { id: 'overview', label: 'ห้องที่รับผิดชอบ', icon: 'users' },
-    { id: 'deduct', label: 'ตัดคะแนน', icon: 'score' },
+    { id: 'deduct', label: 'ตัดคะแนน', icon: 'score', count: teacherDeductionRequests.filter((item) => item.status === 'pending').length },
     { id: 'request', label: 'เพิ่มคะแนน', icon: 'plus', count: teacherRequests.filter((item) => item.status === 'pending').length },
     { id: 'cases', label: 'กรณีติดตาม', icon: 'alert', count: assignedCases.filter((item) => item.status !== 'resolved').length },
   ]
@@ -135,6 +139,7 @@ export function TeacherDashboard({
     setReviewingDeduction(false)
     setConfirmSeriousBulk(false)
     setDeductionResult(null)
+    setDeductionApprovalResult(null)
   }
 
   function invalidateDeductionRequest() {
@@ -171,6 +176,7 @@ export function TeacherDashboard({
       setAdditionError('')
     }
     setTab(nextTab)
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
 
   function reportDeductionError(message: string) {
@@ -188,10 +194,6 @@ export function TeacherDashboard({
     const eventIso = localDateTimeToIso(occurredAt)
     if (!selectedRule || !eventIso) {
       reportDeductionError('กรุณาเลือกเหตุผลในการตัดคะแนนและวันเวลาเกิดเหตุ')
-      return
-    }
-    if (deductionSelection.scope === 'selected' && deductionTargets.length < 2) {
-      reportDeductionError('โหมดเฉพาะกลุ่มต้องเลือกนักเรียนอย่างน้อย 2 คน')
       return
     }
     if (!deductionTargets.length) {
@@ -215,17 +217,74 @@ export function TeacherDashboard({
 
     setDeductionBusy(true)
     try {
+      const input = {
+        clientRequestId: deductionRequestId,
+        scope: deductionTargets.length === 1 ? 'single' as const : 'selected' as const,
+        studentIds: deductionTargets.map((student) => student.id),
+        classroomId: deductionSelection.classroomId,
+        ruleId: selectedRule.id,
+        occurredAt: eventIso,
+        internalNote: internalNote.trim() || selectedRule.title,
+        confirmSeriousBulk: isSeriousBulk && confirmSeriousBulk,
+      }
+
+      if (deductionNeedsApproval) {
+        let approvalResult: RequestDeductionsResult
+        if (actions) {
+          approvalResult = await actions.requestDeductions({ ...input, internalNote: internalNote.trim() })
+        } else {
+          const batchId = createId('deduction-request-batch')
+          const createdAt = new Date().toISOString()
+          const requests = deductionTargets.map((student) => ({
+            studentId: student.id,
+            requestId: createId('deduction-request'),
+            status: 'pending' as const,
+          }))
+          onChange({
+            ...state,
+            deductionRequests: [
+              ...requests.map((request) => ({
+                id: request.requestId,
+                batchId,
+                studentId: request.studentId,
+                teacherId: currentTeacher.id,
+                ruleId: selectedRule.id,
+                ruleTitle: selectedRule.title,
+                requestedPoints: selectedRule.points,
+                occurredAt: eventIso,
+                internalNote: internalNote.trim(),
+                status: 'pending' as const,
+                createdAt,
+              })),
+              ...state.deductionRequests,
+            ],
+          })
+          approvalResult = {
+            ok: true,
+            replayed: false,
+            batchId,
+            scope: input.scope,
+            classroomId: input.classroomId,
+            targetCount: requests.length,
+            requestedPointsEach: selectedRule.points,
+            requests,
+          }
+        }
+        setDeductionApprovalResult(approvalResult)
+        setDeductionResult(null)
+        setInternalNote('')
+        setReviewingDeduction(false)
+        setConfirmSeriousBulk(false)
+        setDeductionError('')
+        setDeductionRequestId(newRequestId())
+        setAnnouncement(`ส่งคำขอตัดคะแนน ${approvalResult.targetCount} คนให้แอดมินตรวจแล้ว คะแนนยังไม่เปลี่ยนแปลง`)
+        return
+      }
+
       let result: RecordDeductionsResult
       if (actions) {
         result = await actions.recordDeductions({
-          clientRequestId: deductionRequestId,
-          scope: deductionSelection.scope,
-          studentIds: deductionTargets.map((student) => student.id),
-          classroomId: deductionSelection.classroomId,
-          ruleId: selectedRule.id,
-          occurredAt: eventIso,
-          internalNote: internalNote.trim() || selectedRule.title,
-          confirmSeriousBulk: isSeriousBulk && confirmSeriousBulk,
+          ...input,
         })
       } else {
         const resultRows = deductionTargets.map((student) => {
@@ -283,7 +342,7 @@ export function TeacherDashboard({
           ok: true,
           replayed: false,
           batchId: createId('batch'),
-          scope: deductionSelection.scope,
+          scope: deductionTargets.length === 1 ? 'single' : 'selected',
           classroomId: deductionSelection.classroomId,
           targetCount: resultRows.length,
           requestedPointsEach: selectedRule.points,
@@ -315,20 +374,12 @@ export function TeacherDashboard({
       reportAdditionError(pointValidation.message ?? 'กรุณาเลือกเหตุผลในการเพิ่มคะแนนและวันทำกิจกรรม')
       return
     }
-    if (additionSelection.scope === 'selected' && additionTargets.length < 2) {
-      reportAdditionError('โหมดเฉพาะกลุ่มต้องเลือกนักเรียนอย่างน้อย 2 คน')
-      return
-    }
     if (!additionTargets.length) {
       reportAdditionError('กรุณาเลือกนักเรียนหรือห้องเรียนที่ต้องการเพิ่มคะแนน')
       return
     }
     if (!additionTargets.every((student) => currentTeacher.classroomIds.includes(student.classroomId))) {
       reportAdditionError('มีนักเรียนอยู่นอกห้องที่คุณครูรับผิดชอบ ระบบจึงยกเลิกรายการทั้งหมด')
-      return
-    }
-    if (!hasEvidence(evidenceNote, uploadedEvidence.length ? uploadedEvidence : evidenceFiles)) {
-      reportAdditionError('กรุณาพิมพ์คำอธิบายหลักฐานอย่างน้อย 5 ตัวอักษร หรือแนบไฟล์อย่างน้อย 1 ไฟล์')
       return
     }
     setAdditionBusy(true)
@@ -352,7 +403,7 @@ export function TeacherDashboard({
       if (actions) {
         result = await actions.requestPointAdditions({
           clientRequestId: additionRequestId,
-          scope: additionSelection.scope,
+          scope: additionTargets.length === 1 ? 'single' : 'selected',
           studentIds: additionTargets.map((student) => student.id),
           classroomId: additionSelection.classroomId,
           positiveRuleId: selectedPositiveRule.id,
@@ -387,7 +438,7 @@ export function TeacherDashboard({
           ok: true,
           replayed: false,
           batchId: createId('addition-batch'),
-          scope: additionSelection.scope,
+          scope: additionTargets.length === 1 ? 'single' : 'selected',
           classroomId: additionSelection.classroomId,
           targetCount: requestRows.length,
           requestedPointsEach: requestPoints,
@@ -428,14 +479,15 @@ export function TeacherDashboard({
       {tab === 'overview' ? (
         <section className="panel">
           <div className="section-heading"><div><p className="eyebrow">ภาคเรียนปัจจุบัน</p><h2>รายชื่อนักเรียนที่ดูแล</h2></div><button className="button primary compact" onClick={() => navigateTeacherTab('deduct')}><Icon name="plus" size={17} /> ตัดคะแนน</button></div>
-          <div className="table-wrap"><table><thead><tr><th>รหัส</th><th>นักเรียน</th><th>ห้อง</th><th>คะแนนปัจจุบัน</th><th>ดำเนินการ</th></tr></thead><tbody>
-            {assignedStudents.map((student) => <tr key={student.id}><td>{student.studentCode}</td><td><strong>{student.name}</strong></td><td>{student.classroomName}</td><td><span className={`score-text ${student.score < 60 ? 'danger' : ''}`}>{student.score}</span> / 100</td><td><button className="text-button" onClick={() => { setDeductionSelection(selectionForStudent(assignedStudents, student.id)); invalidateDeductionRequest(); navigateTeacherTab('deduct') }}>เลือกตัดคะแนน</button></td></tr>)}
+          <div className="table-wrap"><table className="teacher-roster-table"><thead><tr><th>รหัส</th><th>นักเรียน</th><th>ห้อง</th><th>คะแนนปัจจุบัน</th><th>ดำเนินการ</th></tr></thead><tbody>
+            {assignedStudents.map((student) => <tr key={student.id}><td data-label="รหัส">{student.studentCode}</td><td data-label="นักเรียน"><strong>{student.name}</strong></td><td data-label="ห้อง">{student.classroomName}</td><td data-label="คะแนน"><span className={`score-text ${student.score < 60 ? 'danger' : ''}`}>{student.score}</span> / 100</td><td data-label="ดำเนินการ"><button className="text-button" onClick={() => { setDeductionSelection(selectionForStudent(assignedStudents, student.id)); invalidateDeductionRequest(); navigateTeacherTab('deduct') }}>เลือกตัดคะแนน</button></td></tr>)}
           </tbody></table></div>
           <p className="scope-note"><Icon name="shield" size={18} /> ระบบแสดงและอนุญาตให้ดำเนินการเฉพาะห้องที่ได้รับมอบหมายเท่านั้น</p>
         </section>
       ) : null}
 
       {tab === 'deduct' ? (
+        <>
         <div className="workspace-grid">
             <StudentTargetSelector
               students={assignedStudents}
@@ -458,6 +510,7 @@ export function TeacherDashboard({
                 onChange={(nextRuleId) => { setRuleId(nextRuleId); invalidateDeductionRequest() }}
               />
               {selectedRule ? <div className="rule-summary"><div><StatusBadge severity={selectedRule.severity} /> <span>{selectedRule.category} • คนละ {selectedRule.points} คะแนน</span></div><strong>{deductionTargets.length ? deductionTargets.reduce((sum, student) => sum + student.score, 0) : 0} <span>→</span> {deductionTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, -selectedRule.points).after, 0)}</strong></div> : null}
+              {deductionNeedsApproval ? <div className="warning-note"><Icon name="shield" /><span>ตั้งแต่ 10 คะแนนขึ้นไปจะส่งให้แอดมินอนุมัติก่อน คะแนนนักเรียนยังไม่เปลี่ยนจนกว่าจะอนุมัติ</span></div> : null}
               <div className="date-field-grid">
                 <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={deductionBusy} max={toLocalDateTimeInputValue()} value={occurredAt} onChange={(event) => { setOccurredAt(event.target.value); invalidateDeductionRequest() }} required /></label>
                 <div className="field-help"><strong>คะแนนรวมก่อน → หลัง</strong><span>ตัวเลขด้านบนคำนวณโดยไม่ให้คะแนนต่ำกว่า 0</span></div>
@@ -481,9 +534,16 @@ export function TeacherDashboard({
 
               {deductionError ? <p className="form-error" role="alert">{deductionError}</p> : null}
               <div className="form-actions">
-                <button type="button" className="button secondary" disabled={deductionBusy} onClick={() => { if (!reviewingDeduction) setInternalNote(''); invalidateDeductionRequest() }}>{reviewingDeduction ? 'กลับไปแก้ไข' : 'ล้างรายละเอียด'}</button>
-                <button type="submit" className="button primary" disabled={deductionBusy}>{deductionBusy ? 'กำลังบันทึกทั้งชุด…' : reviewingDeduction ? `ยืนยันตัดคะแนน ${deductionTargets.length} คน` : 'ตรวจสอบก่อนยืนยัน'}</button>
+                <button type="button" className="button secondary" disabled={deductionBusy} onClick={() => { if (!reviewingDeduction) setInternalNote(''); invalidateDeductionRequest() }}>{deductionResult || deductionApprovalResult ? 'ทำรายการใหม่' : reviewingDeduction ? 'กลับไปแก้ไข' : 'ล้างรายละเอียด'}</button>
+                <button type="submit" className="button primary" disabled={deductionBusy || Boolean(deductionResult || deductionApprovalResult)}>{deductionBusy ? (deductionNeedsApproval ? 'กำลังส่งคำขอ…' : 'กำลังบันทึกทั้งชุด…') : reviewingDeduction ? (deductionNeedsApproval ? `ยืนยันส่งคำขอ ${deductionTargets.length} คน` : `ยืนยันตัดคะแนน ${deductionTargets.length} คน`) : 'ตรวจสอบก่อนยืนยัน'}</button>
               </div>
+
+              {deductionApprovalResult ? (
+                <section className="batch-result" aria-label="ผลการส่งคำขอ">
+                  <div className="review-heading"><div><p className="eyebrow">ส่งคำขอสำเร็จ</p><h2>รอแอดมินตรวจ {deductionApprovalResult.targetCount} รายการ</h2></div><span className="badge status-pending">คะแนนยังไม่เปลี่ยน</span></div>
+                  <p>ระบบเก็บคำขอแล้วและปิดปุ่มยืนยันเพื่อป้องกันการส่งซ้ำ กด “ทำรายการใหม่” เมื่อต้องการบันทึกเหตุการณ์ถัดไป</p>
+                </section>
+              ) : null}
 
               {deductionResult ? (
                 <section className="batch-result" aria-label="ผลการบันทึก">
@@ -494,6 +554,10 @@ export function TeacherDashboard({
               ) : null}
             </form>
           </div>
+          {teacherDeductionRequests.length ? <section className="panel"><div className="section-heading"><div><p className="eyebrow">ประวัติคำขอตัดคะแนน</p><h2>ผลการพิจารณาจากแอดมิน</h2></div><span className="counter">{teacherDeductionRequests.length}</span></div>
+            <div className="record-list">{teacherDeductionRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); return <article className="record-row detailed-record" key={request.id}><div><strong>{student?.name} • -{request.approvedPoints ?? request.requestedPoints}</strong><span>{request.ruleTitle}</span><small>เกิดเหตุ {formatThaiDate(request.occurredAt)} • ส่ง {formatThaiDate(request.createdAt)}</small>{request.decisionNote ? <small>หมายเหตุแอดมิน: {request.decisionNote}</small> : null}</div><span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span></article> })}</div>
+          </section> : null}
+        </>
       ) : null}
 
       {tab === 'request' ? (
@@ -508,7 +572,7 @@ export function TeacherDashboard({
             emptyDetail="บัญชีครูยังไม่ได้รับมอบหมายห้อง กรุณาให้ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน"
           />
           <form className="panel stack-form" onSubmit={submitAdditionRequest}>
-            <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนนพร้อมหลักฐาน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
+            <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div><span className="student-avatar large">{additionTargets.length}</span><div><strong>{additionSelection.scope === 'single' ? additionTargets[0]?.name ?? 'ยังไม่เลือกนักเรียน' : additionSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : classrooms.find((item) => item.id === additionSelection.classroomId)?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>ระบบจะสร้างคำขอแยกให้นักเรียนทุกคน เพื่อให้แอดมินตรวจสอบรายคน</small></div></div>
               <div><span>จำนวนคำขอ</span><b>{additionTargets.length} รายการ</b></div>

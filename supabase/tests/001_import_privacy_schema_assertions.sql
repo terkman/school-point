@@ -72,7 +72,10 @@ begin
       and policy.policyname = 'score_evidence_upload'
       and lower(policy.cmd) = 'insert'
       and 'authenticated' = any(policy.roles)
-      and position('private.current_role' in lower(coalesce(policy.with_check, ''))) > 0
+      and position(
+        'private.current_role'
+        in lower(replace(coalesce(policy.with_check, ''), '"', ''))
+      ) > 0
       and position('storage.foldername' in lower(coalesce(policy.with_check, ''))) > 0
       and position('auth.uid()' in lower(coalesce(policy.with_check, ''))) > 0
   ) then
@@ -87,7 +90,10 @@ begin
       and policy.policyname = 'score_evidence_read'
       and lower(policy.cmd) = 'select'
       and 'authenticated' = any(policy.roles)
-      and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+      and position(
+        'private.current_role'
+        in lower(replace(coalesce(policy.qual, ''), '"', ''))
+      ) > 0
       and position('owner_id' in lower(coalesce(policy.qual, ''))) > 0
       and position('private.is_admin' in lower(coalesce(policy.qual, ''))) > 0
   ) then
@@ -102,7 +108,10 @@ begin
       and policy.policyname = 'score_evidence_delete'
       and lower(policy.cmd) = 'delete'
       and 'authenticated' = any(policy.roles)
-      and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+      and position(
+        'private.current_role'
+        in lower(replace(coalesce(policy.qual, ''), '"', ''))
+      ) > 0
       and position('owner_id' in lower(coalesce(policy.qual, ''))) > 0
       and position('private.is_admin' in lower(coalesce(policy.qual, ''))) > 0
   ) then
@@ -543,14 +552,28 @@ begin
     raise exception 'legacy student-readable appeals_select policy still exists';
   end if;
 
-  if not exists (
+  if exists (
     select 1
     from pg_policies
     where schemaname = 'public'
       and tablename = 'appeals'
       and policyname = 'appeals_staff_select'
   ) then
-    raise exception 'staff-only appeals policy is missing';
+    raise exception 'legacy teacher-readable appeals_staff_select policy still exists';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies policy
+    where policy.schemaname = 'public'
+      and policy.tablename = 'appeals'
+      and policy.policyname = 'appeals_admin_select_v2'
+      and position(
+        'private.is_admin'
+        in lower(replace(coalesce(policy.qual, ''), '"', ''))
+      ) > 0
+  ) then
+    raise exception 'admin-only appeals policy is missing or too broad';
   end if;
 
   if not exists (
@@ -1636,7 +1659,10 @@ begin
         and policy.policyname = 'director_read_all'
         and lower(policy.cmd) = 'select'
         and 'authenticated' = any(policy.roles)
-        and position('private.current_role' in lower(coalesce(policy.qual, ''))) > 0
+        and position(
+          'private.current_role'
+          in lower(replace(coalesce(policy.qual, ''), '"', ''))
+        ) > 0
         and position('director' in lower(coalesce(policy.qual, ''))) > 0
     ) then
       raise exception 'table % is missing read-only director access', v_table_name;

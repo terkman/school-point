@@ -18,6 +18,7 @@ describe('first-login password activation', () => {
 
   it('describes the OTP as a one-time activation code, not a temporary password', () => {
     expect(ONE_TIME_ACTIVATION_COPY).toContain('รหัสเปิดใช้ครั้งเดียว')
+    expect(ONE_TIME_ACTIVATION_COPY).toContain('รหัสกู้บัญชี')
     expect(ONE_TIME_ACTIVATION_COPY).not.toContain('รหัสชั่วคราว')
   })
 

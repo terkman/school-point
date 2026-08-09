@@ -86,6 +86,15 @@ export interface ActivationCodeResult {
   issuedAt: string
 }
 
+export interface PasswordResetInput {
+  username: string
+  reason: string
+}
+
+export interface PasswordResetCodeResult extends ActivationCodeResult {
+  purpose: 'password-reset'
+}
+
 export interface CreateSchoolPersonResult {
   id: string
   username: string

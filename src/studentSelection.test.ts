@@ -43,6 +43,12 @@ describe('classroom-scoped target selection', () => {
     })
   })
 
+  it('starts the unified checkbox picker empty to prevent accidental bulk scoring', () => {
+    const selection = createInitialStudentSelection(students, 'selected')
+    expect([...selection.selectedStudentIds]).toEqual([])
+    expect(resolveStudentTargets(students, selection)).toEqual([])
+  })
+
   it('never includes selected ids from another classroom', () => {
     const selection = {
       ...createInitialStudentSelection(students, 'selected'),

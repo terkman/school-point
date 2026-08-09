@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { PasswordInput } from './PasswordInput'
 import { Icon } from './ui'
+import { brand } from './brand'
 
-export const ONE_TIME_ACTIVATION_COPY = 'ยืนยันด้วยรหัสเปิดใช้ครั้งเดียวแล้ว'
+export const ONE_TIME_ACTIVATION_COPY = 'ยืนยันด้วยรหัสเปิดใช้ครั้งเดียวหรือรหัสกู้บัญชีแล้ว'
 
 interface PasswordActivationPageProps {
   username: string
@@ -66,14 +67,14 @@ export function PasswordActivationPage({
   return (
     <main className="status-page activation-page">
       <section className="status-card activation-card" aria-labelledby="activation-title">
-        <div className="brand-mark">SP</div>
-        <p className="eyebrow">{canResume ? 'ดำเนินการเปิดใช้บัญชีต่อ' : 'เปิดใช้งานบัญชีครั้งแรก'}</p>
+        <div className="brand-mark">{brand.shortMark}</div>
+        <p className="eyebrow">{canResume ? 'ดำเนินการตั้งค่าบัญชีต่อ' : 'ยืนยันตัวตนสำเร็จ'}</p>
         <h1 id="activation-title">{canResume ? 'ยืนยันการเปิดใช้บัญชี' : 'ตั้งรหัสผ่านส่วนตัว'}</h1>
         <p>
           {canResume ? (
             <>บัญชี <strong>{username}</strong> เข้าสู่ระบบด้วยรหัสผ่านส่วนตัวแล้ว กรุณาดำเนินการยืนยันบัญชีให้เสร็จสมบูรณ์</>
           ) : (
-            <>บัญชี <strong>{username}</strong> {ONE_TIME_ACTIVATION_COPY} กรุณาตั้งรหัสผ่านส่วนตัวก่อนใช้งานระบบ</>
+            <>บัญชี <strong>{username}</strong> {ONE_TIME_ACTIVATION_COPY} กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งานระบบ</>
           )}
         </p>
         <form className="login-form" onSubmit={submit}>

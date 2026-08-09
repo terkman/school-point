@@ -11,6 +11,7 @@ import {
   type DirectoryStaff,
   type DirectoryStudent,
   type GradeLevel,
+  type PasswordResetCodeResult,
   type PersonStatus,
   type SchoolDirectorySnapshot,
   type StaffRole,
@@ -23,6 +24,8 @@ type EditorTarget =
   | { kind: 'new-staff' }
   | { kind: 'student'; person: DirectoryStudent }
   | { kind: 'staff'; person: DirectoryStaff }
+type PasswordResetTarget = { username: string; displayName: string }
+type OneTimeCodeResult = ActivationCodeResult | PasswordResetCodeResult
 
 interface SchoolDirectoryPanelProps {
   actions?: AppDataActions
@@ -78,10 +81,11 @@ function ActivationDialog({
   result,
   onClose,
 }: {
-  result: ActivationCodeResult
+  result: OneTimeCodeResult
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const isPasswordReset = 'purpose' in result && result.purpose === 'password-reset'
   async function copyCode() {
     try {
       await navigator.clipboard.writeText(result.activationCode)
@@ -91,20 +95,91 @@ function ActivationDialog({
     }
   }
   return (
-    <Dialog title="รหัสเปิดใช้ครั้งเดียว" eyebrow="แสดงเพียงครั้งนี้" onClose={onClose}>
+    <Dialog title={isPasswordReset ? 'รหัสกู้บัญชีใช้ครั้งเดียว' : 'รหัสเปิดใช้ครั้งเดียว'} eyebrow="แสดงเพียงครั้งนี้" onClose={onClose}>
       <div className="activation-code-card">
         <span>ชื่อผู้ใช้</span>
         <strong>{result.username}</strong>
         <span>รหัสเปิดใช้</span>
         <b>{result.activationCode}</b>
       </div>
-      <p className="form-help">ส่งรหัสนี้ให้เจ้าของบัญชีโดยตรง รหัสมีอายุจำกัดและใช้ได้ครั้งเดียว หลังจากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว</p>
+      <p className="form-help">
+        ส่งรหัสนี้ให้เจ้าของบัญชีโดยตรง รหัสมีอายุ 1 ชั่วโมงและใช้ได้ครั้งเดียว
+        {isPasswordReset ? ' รหัสผ่านเดิมใช้ไม่ได้แล้ว เจ้าของบัญชีต้องเลือก “เปิดใช้บัญชี / กู้รหัสผ่าน” เพื่อตั้งรหัสใหม่' : ' หลังจากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว'}
+      </p>
       <div className="form-actions">
         <button className="button secondary" type="button" onClick={() => void copyCode()}>
           {copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'}
         </button>
         <button className="button primary" type="button" onClick={onClose}>ปิด</button>
       </div>
+    </Dialog>
+  )
+}
+
+function PasswordResetDialog({
+  target,
+  actions,
+  onIssued,
+  onClose,
+}: {
+  target: PasswordResetTarget
+  actions: AppDataActions
+  onIssued: (result: PasswordResetCodeResult) => void
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await actions.resetSchoolAccountPassword({
+        username: target.username,
+        reason,
+      })
+      onIssued(result)
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : 'ไม่สามารถกู้บัญชีได้')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog title={`กู้บัญชี ${target.displayName}`} eyebrow="การดำเนินการด้านความปลอดภัย" onClose={onClose}>
+      <form className="stack-form password-reset-form" onSubmit={submit}>
+        <div className="account-recovery-summary">
+          <Icon name="shield" size={20} />
+          <div><span>ชื่อผู้ใช้</span><strong>{target.username}</strong></div>
+        </div>
+        <div className="warning-note">
+          <Icon name="alert" />
+          <span>เมื่อยืนยัน รหัสผ่านเดิมจะใช้ไม่ได้และบัญชีจะเข้าถึงข้อมูลไม่ได้จนกว่าจะตั้งรหัสผ่านใหม่</span>
+        </div>
+        <label>เหตุผลที่กู้บัญชี
+          <textarea
+            value={reason}
+            minLength={5}
+            maxLength={500}
+            required
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="เช่น ผู้ใช้แจ้งว่าลืมรหัสผ่านและยืนยันตัวตนกับฝ่ายปกครองแล้ว"
+          />
+          <small>บังคับกรอก 5–500 ตัวอักษร และจะถูกเก็บในประวัติการตรวจสอบ</small>
+        </label>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="form-actions">
+          <button className="button secondary" type="button" disabled={busy} onClick={onClose}>ยกเลิก</button>
+          <button className="button primary" type="submit" disabled={busy || reason.trim().length < 5}>
+            {busy ? 'กำลังยกเลิกรหัสเดิม…' : 'ยืนยันและออกรหัสกู้บัญชี'}
+          </button>
+        </div>
+      </form>
     </Dialog>
   )
 }
@@ -374,7 +449,8 @@ export function SchoolDirectoryPanel({
   const [showInactive, setShowInactive] = useState(false)
   const [editor, setEditor] = useState<EditorTarget | null>(null)
   const [classroomEditorOpen, setClassroomEditorOpen] = useState(false)
-  const [activation, setActivation] = useState<ActivationCodeResult | null>(null)
+  const [activation, setActivation] = useState<OneTimeCodeResult | null>(null)
+  const [passwordResetTarget, setPasswordResetTarget] = useState<PasswordResetTarget | null>(null)
   const [loading, setLoading] = useState(!initialSnapshot && Boolean(actions))
   const [busyUsername, setBusyUsername] = useState('')
   const [error, setError] = useState('')
@@ -522,6 +598,7 @@ export function SchoolDirectoryPanel({
               <div className="directory-record-status"><span className={`badge ${statusClass(student.status)}`}>{personStatusLabels[student.status]}</span>{student.activationRequired && student.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
               <div className="inline-actions">
                 {!readOnly && student.activationRequired && student.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(student.username)}>{busyUsername === student.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly && student.accountActive && !student.activationRequired ? <button className="button ghost compact" type="button" onClick={() => setPasswordResetTarget({ username: student.username, displayName: fullName(student) })}><Icon name="shield" size={16} /> กู้บัญชี</button> : null}
                 {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'student', person: student })}>แก้ไข</button> : null}
               </div>
             </article>
@@ -533,6 +610,7 @@ export function SchoolDirectoryPanel({
               <div className="directory-record-status"><span className={`badge ${statusClass(person.status)}`}>{personStatusLabels[person.status]}</span>{person.activationRequired && person.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
               <div className="inline-actions">
                 {!readOnly && person.activationRequired && person.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(person.username)}>{busyUsername === person.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly && person.accountActive && !person.activationRequired ? <button className="button ghost compact" type="button" onClick={() => setPasswordResetTarget({ username: person.username, displayName: fullName(person) })}><Icon name="shield" size={16} /> กู้บัญชี</button> : null}
                 {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'staff', person })}>แก้ไข</button> : null}
               </div>
             </article>
@@ -543,6 +621,16 @@ export function SchoolDirectoryPanel({
 
       {editor && actions ? <DirectoryEditor key={`${editor.kind}:${'person' in editor ? editor.person.id : 'new'}`} target={editor} snapshot={snapshot} actions={actions} onSaved={afterSaved} onClose={() => setEditor(null)} /> : null}
       {classroomEditorOpen && actions ? <ClassroomEditor snapshot={snapshot} actions={actions} onSaved={afterClassroomSaved} onClose={() => setClassroomEditorOpen(false)} /> : null}
+      {passwordResetTarget && actions ? <PasswordResetDialog
+        target={passwordResetTarget}
+        actions={actions}
+        onIssued={(result) => {
+          setPasswordResetTarget(null)
+          setActivation(result)
+          void load()
+        }}
+        onClose={() => setPasswordResetTarget(null)}
+      /> : null}
       {activation ? <ActivationDialog result={activation} onClose={() => setActivation(null)} /> : null}
     </div>
   )

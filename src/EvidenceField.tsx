@@ -14,6 +14,7 @@ interface EvidenceFieldProps {
   disabled: boolean
   onNoteChange: (note: string) => void
   onFilesChange: (files: File[]) => void
+  required?: boolean
 }
 
 export function EvidenceField({
@@ -22,6 +23,7 @@ export function EvidenceField({
   disabled,
   onNoteChange,
   onFilesChange,
+  required = false,
 }: EvidenceFieldProps) {
   const inputId = useId()
   const [fileError, setFileError] = useState('')
@@ -45,7 +47,7 @@ export function EvidenceField({
 
   return (
     <div className="evidence-field">
-      <label>หลักฐานประกอบ
+      <label>หลักฐานประกอบ {required ? '' : '(ไม่บังคับ)'}
         <textarea
           disabled={disabled}
           value={note}
@@ -82,7 +84,7 @@ export function EvidenceField({
         </div>
       ) : null}
       {fileError ? <p className="form-error" role="alert">{fileError}</p> : null}
-      <small className="field-caption">ต้องมีคำอธิบายอย่างน้อย 5 ตัวอักษร หรือแนบไฟล์อย่างน้อย 1 ไฟล์</small>
+      <small className="field-caption">{required ? 'ต้องมีคำอธิบายอย่างน้อย 5 ตัวอักษร หรือแนบไฟล์อย่างน้อย 1 ไฟล์' : 'หากมี สามารถพิมพ์คำอธิบายหรือแนบไฟล์อย่างใดอย่างหนึ่งได้'}</small>
     </div>
   )
 }

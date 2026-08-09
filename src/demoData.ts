@@ -149,7 +149,7 @@ export function createDemoState(): DemoState {
         code: 'P2569-001',
         category: 'เกณฑ์การเพิ่มคะแนนความประพฤติ',
         title: 'เก็บสิ่งของหรือเงินส่งคืนเจ้าของ',
-        description: 'ต้องมีหลักฐานประกอบและผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
+        description: 'สามารถแนบหลักฐานประกอบได้ และต้องผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
         defaultPoints: 5,
         maxPoints: 5,
         discretionary: false,
@@ -160,7 +160,7 @@ export function createDemoState(): DemoState {
         code: 'P2569-007',
         category: 'เกณฑ์การเพิ่มคะแนนความประพฤติ',
         title: 'อุทิศตนและเสียสละช่วยงานโรงเรียนหรืองานครูจนเป็นที่ยอมรับ',
-        description: 'ต้องมีหลักฐานประกอบและผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
+        description: 'สามารถแนบหลักฐานประกอบได้ และต้องผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
         defaultPoints: 10,
         maxPoints: 10,
         discretionary: false,
@@ -171,7 +171,7 @@ export function createDemoState(): DemoState {
         code: 'P2569-016',
         category: 'เกณฑ์การเพิ่มคะแนนความประพฤติ',
         title: 'สร้างชื่อเสียงที่ดีด้านต่าง ๆ ให้โรงเรียนจนเป็นที่ยอมรับและศรัทธาจากสังคม',
-        description: 'ต้องมีหลักฐานประกอบและผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
+        description: 'สามารถแนบหลักฐานประกอบได้ และต้องผ่านการอนุมัติของผู้ดูแลระบบก่อนเพิ่มคะแนน',
         defaultPoints: 25,
         maxPoints: 25,
         discretionary: false,
@@ -252,6 +252,21 @@ export function createDemoState(): DemoState {
         actorId: 'acc-teacher-01',
       },
     ],
+    deductionRequests: [
+      {
+        id: 'deduction-request-demo-01',
+        batchId: 'deduction-batch-demo-01',
+        studentId: 'student-02',
+        teacherId: 'teacher-01',
+        ruleId: 'rule-bullying',
+        ruleTitle: 'กลั่นแกล้งผู้อื่น',
+        requestedPoints: 15,
+        occurredAt: daysAgo(0, 10),
+        internalNote: 'ครูเวรพบเหตุบริเวณหน้าอาคารเรียน',
+        status: 'pending',
+        createdAt: daysAgo(0, 10),
+      },
+    ],
     additionRequests: [
       {
         id: 'request-demo-01',
@@ -268,7 +283,16 @@ export function createDemoState(): DemoState {
         createdAt: daysAgo(0, 9),
       },
     ],
-    appeals: [],
+    appeals: [
+      {
+        id: 'appeal-demo-01',
+        transactionId: 'tx-student-01-a',
+        studentId: 'student-01',
+        statement: 'วันดังกล่าวได้รับอนุญาตจากครูเวรให้เปลี่ยนรองเท้าชั่วคราว และได้แก้ไขเครื่องแต่งกายแล้วครับ',
+        status: 'submitted',
+        createdAt: daysAgo(0, 10),
+      },
+    ],
     seriousCases: [
       {
         id: 'case-demo-01',
@@ -282,6 +306,15 @@ export function createDemoState(): DemoState {
         createdAt: daysAgo(5, 11),
         internalNote: 'ข้อมูลตัวอย่าง — นัดหมายทีมดูแลช่วยเหลือนักเรียน',
         followUpNote: 'ครูที่ปรึกษารวบรวมข้อมูลเบื้องต้นแล้ว',
+        guardianContactAttempts: [
+          {
+            id: 'contact-attempt-demo-01',
+            channel: 'phone',
+            outcome: 'unanswered',
+            note: 'โทรหาผู้ปกครองหลักแล้ว แต่ไม่มีผู้รับสาย',
+            createdAt: daysAgo(2, 10),
+          },
+        ],
       },
     ],
   }

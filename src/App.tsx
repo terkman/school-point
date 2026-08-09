@@ -22,10 +22,25 @@ import {
 } from './storage'
 import { dataMode, getSupabaseClient, usernameToInternalEmail } from './supabaseClient'
 import { createSupabaseActions, getSessionUsername, loadSupabaseState } from './supabaseData'
+import { brand } from './brand'
+import { routeAfterRoleChange } from './adminRoute'
+
+function replaceBrowserRoute(nextHref: string) {
+  if (typeof window === 'undefined') return
+  const currentHref = `${window.location.pathname}${window.location.search}`
+  if (currentHref !== nextHref) window.history.replaceState({}, '', nextHref)
+}
+
+function alignBrowserRouteWithRole(role: Account['role']) {
+  if (typeof window === 'undefined') return
+  const nextHref = routeAfterRoleChange(window.location.pathname, role)
+  if (nextHref) replaceBrowserRoute(nextHref)
+}
 
 function DemoApp() {
   const [state, setState] = useState<DemoState>(loadDemoState)
   const [session, setSession] = useState(loadSession)
+  const restoredSessionRoutePendingRef = useRef(session !== null)
 
   useEffect(() => {
     saveDemoState(state)
@@ -33,13 +48,21 @@ function DemoApp() {
 
   const account = session ? state.accounts.find((item) => item.id === session.accountId) : undefined
 
+  useEffect(() => {
+    if (!restoredSessionRoutePendingRef.current || !account) return
+    alignBrowserRouteWithRole(account.role)
+    restoredSessionRoutePendingRef.current = false
+  }, [account])
+
   function login(nextAccount: Account) {
     const nextSession = { accountId: nextAccount.id, role: nextAccount.role }
+    alignBrowserRouteWithRole(nextAccount.role)
     saveSession(nextSession)
     setSession(nextSession)
   }
 
   function logout() {
+    replaceBrowserRoute('/')
     clearSession()
     setSession(null)
   }
@@ -85,7 +108,7 @@ export function StatusPage({
   return (
     <main className="status-page">
       <section className="status-card" aria-live="polite">
-        <div className="brand-mark">SP</div>
+        <div className="brand-mark">{brand.shortMark}</div>
         <h1>{title}</h1>
         <p>{detail}</p>
         {action || secondaryAction ? (
@@ -169,6 +192,8 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   const refresh = useCallback(async () => {
     if (!session?.user || activationRequired !== false) return
     const nextState = await loadSupabaseState(client, session.user)
+    const nextAccount = nextState.accounts[0]
+    if (nextAccount) alignBrowserRouteWithRole(nextAccount.role)
     setState(nextState)
     setLoadError('')
   }, [activationRequired, client, session?.user])
@@ -184,7 +209,11 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     setLoadError('')
     void loadSupabaseState(client, session.user)
       .then((nextState) => {
-        if (active) setState(nextState)
+        if (active) {
+          const nextAccount = nextState.accounts[0]
+          if (nextAccount) alignBrowserRouteWithRole(nextAccount.role)
+          setState(nextState)
+        }
       })
       .catch((error: unknown) => {
         if (active) setLoadError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลได้')
@@ -230,6 +259,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
       setLoadError(error.message)
       return
     }
+    replaceBrowserRoute('/')
     setSession(null)
     setState(null)
   }

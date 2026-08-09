@@ -52,7 +52,7 @@ describe('admin teacher classroom assignments', () => {
 })
 
 describe('admin serious-case workflow', () => {
-  it('renders actionable guardian contact, progress, and close controls', () => {
+  it('renders the case queue, channel choices, reminder semantics, and close guard', () => {
     const demo = createDemoState()
     const account = demo.accounts.find((item) => item.role === 'admin')
     if (!account) throw new Error('Admin demo account is missing')
@@ -65,16 +65,21 @@ describe('admin serious-case workflow', () => {
       onLogout: () => undefined,
     }))
 
-    expect(markup).toContain('คิวกรณีร้ายแรง')
-    expect(markup).toContain('ดูข้อมูลติดต่อผู้ปกครอง')
-    expect(markup).toContain('บันทึกว่าแจ้งผู้ปกครองแล้ว')
+    expect(markup).toContain('เคสที่ต้องติดตาม')
+    expect(markup).toContain('ดูข้อมูลติดต่อ')
+    expect(markup).toContain('โทรศัพท์')
+    expect(markup).toContain('LINE')
+    expect(markup).toContain('Messenger')
+    expect(markup).toContain('ตัวเลือกสุดท้าย')
+    expect(markup).toContain('เตือนอีกครั้งใน 1 วัน')
+    expect(markup).toContain('บันทึกผลการติดต่อ')
     expect(markup).toContain('บันทึกความคืบหน้า')
     expect(markup).toContain('แจ้งผู้ปกครองก่อนปิดเคส')
   })
 })
 
-describe('admin point-addition approvals', () => {
-  it('opens an actionable review dialog with evidence and both decisions', () => {
+describe('admin score approvals', () => {
+  it('renders separate deduction, addition, and appeal queues', () => {
     const demo = createDemoState()
     const account = demo.accounts.find((item) => item.role === 'admin')
     if (!account) throw new Error('Admin demo account is missing')
@@ -87,24 +92,23 @@ describe('admin point-addition approvals', () => {
       onLogout: () => undefined,
     }))
 
-    expect(markup).toContain('role="dialog"')
-    expect(markup).toContain('aria-modal="true"')
-    expect(markup).toContain('ตรวจสอบหลักฐานก่อนตัดสินใจ')
-    expect(markup).toContain('ปฏิเสธคำขอ')
-    expect(markup).toContain('อนุมัติ +5 คะแนน')
-    expect(markup).toContain('ระบุเหตุผลอย่างน้อย 5 ตัวอักษร')
-    expect(markup).toContain('ปิดรายละเอียดคำขอเพิ่มคะแนน')
+    expect(markup).toContain('รอการพิจารณา')
+    expect(markup).toContain('3 งานที่ต้องตรวจ')
+    expect(markup).toContain('role="tablist"')
+    expect(markup).toContain('ขอตัดคะแนน')
+    expect(markup).toContain('ขอเพิ่มคะแนน')
+    expect(markup).toContain('คำอุทธรณ์')
+    expect(markup).toContain('กลั่นแกล้งผู้อื่น')
+    expect(markup).toContain('-15')
   })
 })
 
 describe('admin appeal dashboard', () => {
-  it('shows pending appeals in the overview with the student, reason, and requested restoration', () => {
+  it('summarizes pending appeals in the Today review queue', () => {
     const demo = createDemoState()
     const account = demo.accounts.find((item) => item.role === 'admin')
     const source = demo.transactions.find((item) => item.kind === 'deduction')
     if (!account || !source) throw new Error('Admin appeal demo fixtures are missing')
-    const student = demo.students.find((item) => item.id === source.studentId)
-    if (!student) throw new Error('Admin appeal student fixture is missing')
     demo.appeals = [{
       id: 'appeal-dashboard-test',
       transactionId: source.id,
@@ -122,10 +126,10 @@ describe('admin appeal dashboard', () => {
       onLogout: () => undefined,
     }))
 
-    expect(markup).toContain('คำอุทธรณ์ล่าสุด')
-    expect(markup).toContain('ขอให้ตรวจสอบหลักฐานการเข้าเรียนอีกครั้ง')
-    expect(markup).toContain(student.name)
-    expect(markup).toContain(`ขอคืน ${Math.abs(source.appliedDelta)} คะแนน`)
-    expect(markup).toContain('ตรวจสอบคำอุทธรณ์')
+    expect(markup).toContain('ภาพรวม</span>วันนี้')
+    expect(markup).toContain('งานรอตรวจ')
+    expect(markup).toContain('คำอุทธรณ์')
+    expect(markup).toContain('รอพิจารณา')
+    expect(markup).toContain('เปิดศูนย์ตรวจสอบ')
   })
 })

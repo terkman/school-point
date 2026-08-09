@@ -92,7 +92,7 @@ describe('Supabase redacted student history', () => {
     expect(result).toEqual({ ledgerRows: scoreRows, incidentRows })
     expect(rpc.mock.calls).toEqual([
       ['get_my_score_history'],
-      ['get_my_incident_history'],
+      ['get_my_incident_history_v2'],
     ])
     expect(scoreBuilder.order.mock.calls).toEqual([
       ['created_at', { ascending: false }],
@@ -222,15 +222,46 @@ describe('Supabase point-addition reviews', () => {
     await actions.reviewPointAddition({
       requestId: '401',
       approve: true,
+      approvedPoints: 7,
       note: 'ตรวจสอบหลักฐานครบถ้วนแล้ว',
     })
 
-    expect(rpc).toHaveBeenCalledWith('review_point_addition', {
+    expect(rpc).toHaveBeenCalledWith('review_point_addition_v2', {
       p_request_id: '401',
       p_approve: true,
+      p_approved_points: 7,
       p_review_note: 'ตรวจสอบหลักฐานครบถ้วนแล้ว',
     })
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends a partial appeal result and can reopen the final decision with a reason', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { ok: true }, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await actions.reviewAppeal({
+      appealId: '77',
+      restoredPoints: 4,
+      note: 'คืนคะแนนบางส่วนตามข้อเท็จจริงที่ตรวจสอบได้',
+    })
+    await actions.reopenAppeal({
+      appealId: '77',
+      reason: '  ได้รับเอกสารเพิ่มเติมจากนักเรียน  ',
+    })
+
+    expect(rpc.mock.calls).toEqual([
+      ['review_appeal_v2', {
+        p_appeal_id: '77',
+        p_restored_points: 4,
+        p_public_explanation: 'คืนคะแนนบางส่วนตามข้อเท็จจริงที่ตรวจสอบได้',
+      }],
+      ['reopen_appeal_v2', {
+        p_appeal_id: '77',
+        p_reason: 'ได้รับเอกสารเพิ่มเติมจากนักเรียน',
+      }],
+    ])
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -287,6 +318,44 @@ describe('Supabase score mutations', () => {
       }],
     ])
     expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a structured unanswered phone attempt and keeps the reminder open', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        ok: true,
+        attemptId: 81,
+        taskId: 18,
+        status: 'pending',
+        closesNotification: false,
+        attemptedAt: '2026-08-08T03:00:00.000Z',
+        nextReminderAt: '2026-08-09T03:00:00.000Z',
+      },
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await expect(actions.recordGuardianContactAttempt({
+      taskId: '18',
+      channel: 'phone',
+      outcome: 'unanswered',
+      note: '  โทรเวลา 10:00 น.  ',
+    })).resolves.toMatchObject({
+      attemptId: '81',
+      status: 'pending',
+      closesNotification: false,
+      nextReminderAt: '2026-08-09T03:00:00.000Z',
+    })
+
+    expect(rpc).toHaveBeenCalledWith('record_guardian_contact_attempt_v2', {
+      p_task_id: '18',
+      p_channel: 'phone',
+      p_outcome: 'unanswered',
+      p_note: 'โทรเวลา 10:00 น.',
+      p_evidence_note: null,
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
   it('replaces a teacher classroom access set with one admin RPC and refreshes once', async () => {
@@ -377,7 +446,7 @@ describe('Supabase score mutations', () => {
       evidenceNote: '  มีภาพถ่ายและครูผู้รับผิดชอบยืนยัน  ',
     })
 
-    expect(rpc).toHaveBeenCalledWith('request_point_addition_detailed', {
+    expect(rpc).toHaveBeenCalledWith('request_point_addition_v2', {
       p_client_request_id: '7f4ee0c0-9032-465e-a6b7-05d211232621',
       p_student_id: '12',
       p_positive_rule_id: '17',
@@ -430,7 +499,7 @@ describe('Supabase score mutations', () => {
         expect.objectContaining({ studentId: '13', requestId: '72' }),
       ],
     })
-    expect(rpc).toHaveBeenCalledWith('request_point_additions_bulk', {
+    expect(rpc).toHaveBeenCalledWith('request_point_additions_bulk_v2', {
       p_client_request_id: '98d2826b-861c-4273-90fd-c7a357cb87ea',
       p_scope: 'selected',
       p_student_ids: ['12', '13'],

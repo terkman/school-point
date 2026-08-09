@@ -1,5 +1,14 @@
-import type { GuardianContact } from './domain'
+import type {
+  GuardianContact,
+  GuardianContactChannel,
+  GuardianContactOutcome,
+} from './domain'
 import type { EvidenceAttachment } from './evidence'
+import type {
+  PaperDocumentEventType,
+  PaperDocumentStatus,
+  PaperDocumentType,
+} from './adminDomain'
 import type { SchoolImportPreview, SchoolImportResult } from './schoolImport'
 import type {
   ActivationCodeResult,
@@ -7,6 +16,8 @@ import type {
   CreateSchoolClassroomResult,
   CreateSchoolPersonInput,
   CreateSchoolPersonResult,
+  PasswordResetCodeResult,
+  PasswordResetInput,
   SchoolDirectorySnapshot,
   UpdateSchoolStaffInput,
   UpdateSchoolStudentInput,
@@ -48,6 +59,24 @@ export interface RecordDeductionsResult {
   alreadyAtZeroCount: number
   guardianTaskCount: number
   results: DeductionStudentResult[]
+}
+
+export interface RequestDeductionsResult {
+  ok: boolean
+  replayed: boolean
+  batchId: string
+  scope: DeductionScope
+  classroomId?: string
+  targetCount: number
+  requestedPointsEach: number
+  requests: Array<{ studentId: string; requestId: string; status: 'pending' }>
+}
+
+export interface ReviewDeductionInput {
+  requestId: string
+  approve: boolean
+  approvedPoints: number
+  note?: string
 }
 
 export interface RequestPointAdditionInput {
@@ -97,13 +126,19 @@ export interface SubmitAppealInput {
 export interface ReviewPointAdditionInput {
   requestId: string
   approve: boolean
+  approvedPoints: number
   note?: string
 }
 
 export interface ReviewAppealInput {
   appealId: string
-  accept: boolean
+  restoredPoints: number
   note: string
+}
+
+export interface ReopenAppealInput {
+  appealId: string
+  reason: string
 }
 
 export interface AdminAddPointsInput {
@@ -178,23 +213,125 @@ export interface CompleteGuardianContactInput {
   note: string
 }
 
+export interface RecordGuardianContactAttemptInput {
+  taskId: string
+  channel: GuardianContactChannel
+  outcome: GuardianContactOutcome
+  note?: string
+  evidenceNote?: string
+}
+
+export interface RecordGuardianContactAttemptResult {
+  ok: boolean
+  attemptId: string
+  taskId: string
+  status: 'pending' | 'completed'
+  closesNotification: boolean
+  attemptedAt: string
+  nextReminderAt?: string
+}
+
+export interface PaperDocumentSnapshot {
+  student: {
+    id: string
+    code: string
+    name: string
+    classroomName: string
+    gradeLevel?: string
+    roomNumber?: string
+  }
+  term: {
+    id: string
+    schoolYear: number
+    semester: number
+    name: string
+  }
+  score: number
+  transactions: Array<{
+    id: string
+    occurredAt: string
+    reason: string
+    appliedDelta: number
+    scoreBefore: number
+    scoreAfter: number
+  }>
+  incident?: {
+    id: string
+    occurredAt: string
+    reason: string
+    appliedPoints: number
+    appealDeadline: string
+  }
+  appeal?: {
+    id: string
+    incidentId: string
+    status: 'submitted' | 'reviewing' | 'accepted' | 'rejected'
+    statement: string
+    restoredPoints: number
+    publicExplanation?: string
+    createdAt: string
+    decidedAt?: string
+  }
+}
+
+export interface PaperDocumentRecord {
+  id: string
+  documentNumber: string
+  documentType: PaperDocumentType
+  status: PaperDocumentStatus
+  studentId: string
+  termId: string
+  incidentId?: string
+  appealId?: string
+  issuedAt: string
+  snapshot: PaperDocumentSnapshot
+}
+
+export interface IssuePaperDocumentInput {
+  documentType: PaperDocumentType
+  studentId: string
+  termId: string
+  incidentId?: string
+  appealId?: string
+}
+
+export interface RecordPaperDocumentEventInput {
+  documentId: string
+  eventType: PaperDocumentEventType
+  note?: string
+}
+
+export interface SubmitPaperAppealInput {
+  documentId: string
+  reason: string
+  receivedAt: string
+}
+
 export interface AppDataActions {
   uploadEvidenceFiles: (files: File[]) => Promise<EvidenceAttachment[]>
   createEvidenceUrl: (attachment: EvidenceAttachment) => Promise<string>
   recordDeductions: (input: RecordDeductionsInput) => Promise<RecordDeductionsResult>
+  requestDeductions: (input: RecordDeductionsInput) => Promise<RequestDeductionsResult>
+  reviewDeduction: (input: ReviewDeductionInput) => Promise<void>
   requestPointAddition: (input: RequestPointAdditionInput) => Promise<void>
   requestPointAdditions: (input: RequestPointAdditionsInput) => Promise<RequestPointAdditionsResult>
   submitAppeal: (input: SubmitAppealInput) => Promise<void>
   reviewPointAddition: (input: ReviewPointAdditionInput) => Promise<void>
   reviewAppeal: (input: ReviewAppealInput) => Promise<void>
+  reopenAppeal: (input: ReopenAppealInput) => Promise<void>
   adminAddPoints: (input: AdminAddPointsInput) => Promise<AdminAddPointsResult>
   adminAddPointsBulk: (input: AdminAddPointsBulkInput) => Promise<AdminAddPointsBulkResult>
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
   updateTeacherClassrooms: (input: UpdateTeacherClassroomsInput) => Promise<void>
   getGuardianContacts: (taskId: string) => Promise<GuardianContact[]>
+  recordGuardianContactAttempt: (input: RecordGuardianContactAttemptInput) => Promise<RecordGuardianContactAttemptResult>
   completeGuardianContact: (input: CompleteGuardianContactInput) => Promise<void>
   updateFollowUpCase: (input: UpdateFollowUpCaseInput) => Promise<void>
+  getPaperDocuments?: (termId: string) => Promise<PaperDocumentRecord[]>
+  issuePaperDocument?: (input: IssuePaperDocumentInput) => Promise<PaperDocumentRecord>
+  recordPaperDocumentEvent?: (input: RecordPaperDocumentEventInput) => Promise<PaperDocumentRecord>
+  submitPaperAppeal?: (input: SubmitPaperAppealInput) => Promise<void>
   setMyAvatarPreset: (preset: string) => Promise<void>
   uploadMyAvatar: (file: File) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
@@ -204,6 +341,7 @@ export interface AppDataActions {
   updateSchoolStudent: (input: UpdateSchoolStudentInput) => Promise<void>
   updateSchoolStaff: (input: UpdateSchoolStaffInput) => Promise<void>
   issueActivationCode: (username: string) => Promise<ActivationCodeResult>
+  resetSchoolAccountPassword: (input: PasswordResetInput) => Promise<PasswordResetCodeResult>
   previewSchoolImport: (file: File) => Promise<SchoolImportPreview>
   applySchoolImport: (file: File, fingerprint: string) => Promise<SchoolImportResult>
 }

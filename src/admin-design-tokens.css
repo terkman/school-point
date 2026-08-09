@@ -1,0 +1,25 @@
+:root {
+  --admin-navy-header: #062b66;
+  --admin-navy-text: #102a56;
+  --admin-teal-primary: #078b8e;
+  --admin-blue-workflow: #1769d2;
+  --admin-purple-appeal: #6d35d7;
+  --admin-amber-warning: #d97706;
+  --admin-red-critical: #dc2626;
+  --admin-surface: #ffffff;
+  --admin-selection: #eff6ff;
+  --admin-border: #d7e0ed;
+  --admin-muted-text: #60708c;
+  --admin-radius-sm: 6px;
+  --admin-radius-md: 8px;
+  --admin-radius-lg: 10px;
+  --admin-control-height: 44px;
+  --admin-space-1: 4px;
+  --admin-space-2: 8px;
+  --admin-space-3: 12px;
+  --admin-space-4: 16px;
+  --admin-space-5: 20px;
+  --admin-space-6: 24px;
+  --admin-space-8: 32px;
+  --admin-space-10: 40px;
+}

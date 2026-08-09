@@ -95,6 +95,24 @@ export interface AdditionRequest {
   createdAt: string
   decidedAt?: string
   decisionNote?: string
+  approvedPoints?: number
+}
+
+export interface DeductionRequest {
+  id: string
+  batchId: string
+  studentId: string
+  teacherId: string
+  ruleId: string
+  ruleTitle: string
+  requestedPoints: number
+  approvedPoints?: number
+  occurredAt: string
+  internalNote: string
+  status: RequestStatus
+  createdAt: string
+  decidedAt?: string
+  decisionNote?: string
 }
 
 export interface Appeal {
@@ -103,6 +121,28 @@ export interface Appeal {
   studentId: string
   statement: string
   status: 'submitted' | 'reviewing' | 'accepted' | 'rejected'
+  createdAt: string
+  restoredPoints?: number
+  decisionNote?: string
+  decidedAt?: string
+  reopenReason?: string
+  reviewVersion?: number
+}
+
+export type GuardianContactChannel = 'phone' | 'line' | 'messenger' | 'sms'
+export type GuardianContactOutcome =
+  | 'answered'
+  | 'unanswered'
+  | 'sent_waiting'
+  | 'read_or_replied'
+  | 'sent'
+
+export interface GuardianContactAttempt {
+  id: string
+  channel: GuardianContactChannel
+  outcome: GuardianContactOutcome
+  note?: string
+  evidenceNote?: string
   createdAt: string
 }
 
@@ -117,10 +157,12 @@ export interface SeriousCase {
   guardianTaskId?: string
   guardianContactNote?: string
   guardianContactCompletedAt?: string
+  guardianNextReminderAt?: string
   createdAt: string
   internalNote: string
   followUpNote?: string
   managedAt?: string
+  guardianContactAttempts?: GuardianContactAttempt[]
 }
 
 export interface GuardianContact {
@@ -147,6 +189,7 @@ export interface DemoState {
   rules: BehaviorRule[]
   positiveRules: PositiveBehaviorRule[]
   transactions: ScoreTransaction[]
+  deductionRequests: DeductionRequest[]
   additionRequests: AdditionRequest[]
   appeals: Appeal[]
   seriousCases: SeriousCase[]
