@@ -35,7 +35,10 @@ jobs:
       - name: Test
         run: npm test
       - name: Build GitHub Pages site
-        run: npm run build
+        run: |
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_ANON_KEY"
+          npm run build
         env:
           GITHUB_PAGES: 'true'
           VITE_DATA_MODE: supabase
