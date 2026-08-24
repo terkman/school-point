@@ -24,17 +24,13 @@ import { dataMode, getSupabaseClient, usernameToInternalEmail } from './supabase
 import { createSupabaseActions, getSessionUsername, loadSupabaseState } from './supabaseData'
 import { brand } from './brand'
 import { routeAfterRoleChange } from './adminRoute'
-
-function replaceBrowserRoute(nextHref: string) {
-  if (typeof window === 'undefined') return
-  const currentHref = `${window.location.pathname}${window.location.search}`
-  if (currentHref !== nextHref) window.history.replaceState({}, '', nextHref)
-}
+import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
 
 function alignBrowserRouteWithRole(role: Account['role']) {
   if (typeof window === 'undefined') return
-  const nextHref = routeAfterRoleChange(window.location.pathname, role)
-  if (nextHref) replaceBrowserRoute(nextHref)
+  const currentRoute = currentLogicalBrowserRoute()
+  const nextHref = routeAfterRoleChange(currentRoute.pathname, role)
+  if (nextHref) replaceLogicalBrowserRoute(nextHref)
 }
 
 function DemoApp() {
@@ -62,7 +58,7 @@ function DemoApp() {
   }
 
   function logout() {
-    replaceBrowserRoute('/')
+    replaceLogicalBrowserRoute('/')
     clearSession()
     setSession(null)
   }
@@ -259,7 +255,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
       setLoadError(error.message)
       return
     }
-    replaceBrowserRoute('/')
+    replaceLogicalBrowserRoute('/')
     setSession(null)
     setState(null)
   }

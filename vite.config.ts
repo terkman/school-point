@@ -8,8 +8,10 @@ export default defineConfig(async ({ mode }) => {
   process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs'
   process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry'
 
+  const githubPagesBuild = process.env.GITHUB_PAGES === 'true'
+
   const workerPlugins =
-    mode === 'test'
+    mode === 'test' || githubPagesBuild
       ? []
       : (await import('@cloudflare/vite-plugin')).cloudflare({
           viteEnvironment: { name: 'server' },
@@ -25,6 +27,7 @@ export default defineConfig(async ({ mode }) => {
         })
 
   return {
+    base: githubPagesBuild ? '/school-point/' : '/',
     plugins: [
       react(),
       sites(),

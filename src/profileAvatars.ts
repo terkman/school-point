@@ -1,3 +1,5 @@
+import { publicAssetUrl } from './browserRoute'
+
 export const PROFILE_AVATAR_BUCKET = 'student-profile-images'
 export const PROFILE_AVATAR_OUTPUT_BYTES = 2 * 1024 * 1024
 export const PROFILE_AVATAR_INPUT_BYTES = 10 * 1024 * 1024
@@ -37,13 +39,13 @@ export const PROFILE_AVATARS: ProfileAvatarOption[] = [
     id: `student-boy-${index + 1}`,
     label: `ตัวละครชายแบบที่ ${index + 1}`,
     group: 'boy',
-    src: `/avatars/student-boy-${index + 1}.webp?v=${PROFILE_AVATAR_ASSET_VERSION}`,
+    src: publicAssetUrl(`/avatars/student-boy-${index + 1}.webp?v=${PROFILE_AVATAR_ASSET_VERSION}`),
   })),
   ...Array.from({ length: 5 }, (_, index): ProfileAvatarOption => ({
     id: `student-girl-${index + 1}`,
     label: `ตัวละครหญิงแบบที่ ${index + 1}`,
     group: 'girl',
-    src: `/avatars/student-girl-${index + 1}.webp?v=${PROFILE_AVATAR_ASSET_VERSION}`,
+    src: publicAssetUrl(`/avatars/student-girl-${index + 1}.webp?v=${PROFILE_AVATAR_ASSET_VERSION}`),
   })),
 ]
 
