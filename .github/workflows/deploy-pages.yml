@@ -30,6 +30,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Prepare ignored test directories
+        run: mkdir -p private-data
       - name: Test
         run: npm test
       - name: Build GitHub Pages site
