@@ -1,4 +1,4 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.110.2'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.110.2'
 import {
   isActiveDirectoryAdmin,
   tokenHasPasswordAuthentication,
@@ -21,6 +21,7 @@ const roomNumberPattern = /^[0-9A-Za-zก-๙._-]+$/
 const defaultAuthEmailDomain = 'accounts.school-point.invalid'
 
 type JsonRecord = Record<string, unknown>
+type UntypedSupabaseClient = SupabaseClient<any, 'public', 'public', any, any>
 
 function response(status: number, body: JsonRecord) {
   return new Response(JSON.stringify(body), { status, headers: corsHeaders })
@@ -95,7 +96,7 @@ function isoDate(value: unknown): string | null {
 }
 
 async function generateActivationCode(
-  serviceClient: ReturnType<typeof createClient>,
+  serviceClient: UntypedSupabaseClient,
   username: string,
   authDomain: string,
 ) {

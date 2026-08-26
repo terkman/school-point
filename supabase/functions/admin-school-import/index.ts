@@ -1,5 +1,5 @@
 import ExcelJS from 'npm:exceljs@4.4.0'
-import { createClient } from 'npm:@supabase/supabase-js@2.110.2'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.110.2'
 import {
   isActiveDirectoryAdmin,
   tokenHasPasswordAuthentication,
@@ -22,6 +22,7 @@ const gradeLevels = new Set(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3
 const requiredSheets = ['ห้องเรียน', 'นักเรียน', 'บุคลากร', 'ห้องที่ครูรับผิดชอบ', 'ผู้ปกครอง'] as const
 
 type JsonRecord = Record<string, unknown>
+type UntypedSupabaseClient = SupabaseClient<any, 'public', 'public', any, any>
 type Severity = 'error' | 'warning'
 
 interface ImportIssue {
@@ -668,7 +669,7 @@ function normalizeWorkbook(
   }
 }
 
-async function listAllUsers(client: ReturnType<typeof createClient>) {
+async function listAllUsers(client: UntypedSupabaseClient) {
   const users: Array<{ id: string; email?: string }> = []
   for (let page = 1; ; page += 1) {
     const { data, error } = await client.auth.admin.listUsers({ page, perPage: 1000 })
@@ -679,7 +680,7 @@ async function listAllUsers(client: ReturnType<typeof createClient>) {
   return users
 }
 
-async function listProfileIds(client: ReturnType<typeof createClient>) {
+async function listProfileIds(client: UntypedSupabaseClient) {
   const ids = new Set<string>()
   for (let from = 0; ; from += 1000) {
     const { data, error } = await client.from('profiles').select('user_id').range(from, from + 999)
@@ -691,7 +692,7 @@ async function listProfileIds(client: ReturnType<typeof createClient>) {
 }
 
 async function inspectAccounts(
-  serviceClient: ReturnType<typeof createClient>,
+  serviceClient: UntypedSupabaseClient,
   accounts: Array<{ username: string; role: string }>,
   issues: ImportIssue[],
   authDomain: string,
@@ -723,7 +724,7 @@ async function assertPublicSignupDisabled(projectUrl: string, apiKey: string) {
 }
 
 async function provisionAccounts(
-  serviceClient: ReturnType<typeof createClient>,
+  serviceClient: UntypedSupabaseClient,
   accounts: Array<{ username: string; role: string }>,
   actorUserId: string,
   authDomain: string,
@@ -777,7 +778,7 @@ async function provisionAccounts(
 }
 
 async function loadContext(
-  userClient: ReturnType<typeof createClient>,
+  userClient: UntypedSupabaseClient,
 ): Promise<ImportContext> {
   const { data: snapshotData, error: snapshotError } = await userClient.rpc('school_directory_snapshot')
   if (snapshotError || !snapshotData) throw new Error('โหลดข้อมูลปัจจุบันสำหรับเปรียบเทียบไม่สำเร็จ')
@@ -801,14 +802,15 @@ async function loadContext(
 async function parseAndValidate(
   file: File,
   context: ImportContext,
-  serviceClient: ReturnType<typeof createClient>,
+  serviceClient: UntypedSupabaseClient,
   actorUserId: string,
   authDomain: string,
 ) {
   const issues: ImportIssue[] = []
   const workbook = new ExcelJS.Workbook()
   try {
-    await workbook.xlsx.load(new Uint8Array(await file.arrayBuffer()))
+    const workbookBytes = new Uint8Array(await file.arrayBuffer())
+    await workbook.xlsx.load(workbookBytes as unknown as Parameters<typeof workbook.xlsx.load>[0])
   } catch {
     throw new Error('เปิดไฟล์ Excel ไม่สำเร็จ กรุณาใช้แบบฟอร์ม .xlsx ที่ดาวน์โหลดจากระบบ')
   }
