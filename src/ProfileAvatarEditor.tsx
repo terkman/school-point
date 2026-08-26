@@ -5,6 +5,7 @@ import {
   PROFILE_AVATAR_SIZE,
   type ProfileAvatarCrop,
 } from './profileAvatars'
+import { useDialogAccessibility } from './useDialogAccessibility'
 
 interface ProfileAvatarEditorProps {
   file: File
@@ -23,6 +24,7 @@ export function ProfileAvatarEditor({
   onCancel,
   onConfirm,
 }: ProfileAvatarEditorProps) {
+  const dialogRef = useDialogAccessibility({ onClose: onCancel, busy })
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null)
   const [previewError, setPreviewError] = useState('')
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -65,14 +67,6 @@ export function ProfileAvatarEditor({
     drawProfileAvatar(context, bitmap, bitmap.width, bitmap.height, crop)
   }, [bitmap, crop])
 
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busy) onCancel()
-    }
-    document.addEventListener('keydown', handleEscape)
-    return () => document.removeEventListener('keydown', handleEscape)
-  }, [busy, onCancel])
-
   function updateCrop(next: Partial<ProfileAvatarCrop>) {
     onCropChange({ ...crop, ...next })
   }
@@ -80,6 +74,8 @@ export function ProfileAvatarEditor({
   return (
     <div className="avatar-editor-backdrop">
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="avatar-editor-dialog"
         role="dialog"
         aria-modal="true"
@@ -97,6 +93,7 @@ export function ProfileAvatarEditor({
             aria-label="ปิดหน้าปรับรูป"
             disabled={busy}
             onClick={onCancel}
+            data-dialog-initial-focus
           >
             ×
           </button>

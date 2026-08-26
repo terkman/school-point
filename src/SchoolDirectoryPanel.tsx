@@ -17,6 +17,7 @@ import {
   type StaffRole,
 } from './schoolDirectory'
 import { EmptyState, Icon } from './ui'
+import { useDialogAccessibility } from './useDialogAccessibility'
 
 type DirectorySection = 'students' | 'staff' | 'classrooms' | 'import'
 type EditorTarget =
@@ -55,21 +56,24 @@ function Dialog({
   title,
   eyebrow,
   onClose,
+  busy = false,
   children,
 }: {
   title: string
   eyebrow: string
   onClose: () => void
+  busy?: boolean
   children: ReactNode
 }) {
+  const dialogRef = useDialogAccessibility({ onClose, busy })
   return (
     <div className="directory-dialog-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose()
+      if (!busy && event.target === event.currentTarget) onClose()
     }}>
-      <section className="panel directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directory-dialog-title">
+      <section ref={dialogRef} tabIndex={-1} className="panel directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directory-dialog-title">
         <div className="section-heading">
           <div><p className="eyebrow">{eyebrow}</p><h2 id="directory-dialog-title">{title}</h2></div>
-          <button className="score-rules-dialog-close" type="button" onClick={onClose} aria-label="ปิดหน้าต่าง">×</button>
+          <button className="score-rules-dialog-close" type="button" disabled={busy} onClick={onClose} aria-label="ปิดหน้าต่าง" data-dialog-initial-focus>×</button>
         </div>
         {children}
       </section>
@@ -150,7 +154,7 @@ function PasswordResetDialog({
   }
 
   return (
-    <Dialog title={`กู้บัญชี ${target.displayName}`} eyebrow="การดำเนินการด้านความปลอดภัย" onClose={onClose}>
+    <Dialog title={`กู้บัญชี ${target.displayName}`} eyebrow="การดำเนินการด้านความปลอดภัย" onClose={onClose} busy={busy}>
       <form className="stack-form password-reset-form" onSubmit={submit}>
         <div className="account-recovery-summary">
           <Icon name="shield" size={20} />
@@ -239,19 +243,11 @@ function DirectoryEditor({
           title,
           givenName,
           familyName,
-          ...(isStudent ? { classroomId, birthDate } : { role }),
-        })
-        if (!isStudent && role === 'teacher' && classroomIds.size) {
-          await actions.updateSchoolStaff({
-            teacherId: result.id,
-            title,
-            givenName,
-            familyName,
-            status: 'active',
+          ...(isStudent ? { classroomId, birthDate } : {
             role,
-            classroomIds: [...classroomIds],
-          })
-        }
+            classroomIds: role === 'teacher' ? [...classroomIds] : [],
+          }),
+        })
         await onSaved(result)
         return
       }
@@ -289,6 +285,7 @@ function DirectoryEditor({
       eyebrow={isNew ? 'เพิ่มเข้าสู่ระบบ' : 'แก้ไขและเก็บประวัติ'}
       title={isNew ? `เพิ่ม${isStudent ? 'นักเรียน' : 'บุคลากร'}ใหม่` : fullName(person!)}
       onClose={onClose}
+      busy={busy}
     >
       <form className="stack-form directory-editor-form" onSubmit={submit}>
         {isNew ? (
@@ -402,7 +399,7 @@ function ClassroomEditor({
   }
 
   return (
-    <Dialog title="เพิ่มชั้นและห้องเรียน" eyebrow={snapshot.termLabel || 'ภาคเรียนปัจจุบัน'} onClose={onClose}>
+    <Dialog title="เพิ่มชั้นและห้องเรียน" eyebrow={snapshot.termLabel || 'ภาคเรียนปัจจุบัน'} onClose={onClose} busy={busy}>
       <form className="stack-form directory-editor-form" onSubmit={submit}>
         <div className="date-field-grid">
           <label>ระดับชั้น

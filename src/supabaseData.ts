@@ -9,6 +9,7 @@ import type {
   RecordDeductionsResult,
   RequestDeductionsResult,
   RequestPointAdditionsResult,
+  MutationSyncWarning,
 } from './dataActions'
 import type {
   Account,
@@ -319,6 +320,13 @@ function ledgerKind(entryType: string, appliedDelta: number): ScoreTransaction['
   return 'addition'
 }
 
+export function ledgerAdditionSource(entryType: string): ScoreTransaction['additionSource'] {
+  if (entryType === 'admin_addition') return 'admin_direct'
+  if (entryType === 'teacher_request_approved') return 'teacher_request'
+  if (entryType === 'appeal_reversal' || entryType === 'appeal_adjustment') return 'appeal'
+  return undefined
+}
+
 function profileAccount(profile: ProfileRow, user: User, username: string, avatarUrl?: string): Account {
   return {
     id: user.id,
@@ -366,6 +374,20 @@ function snapshotText(snapshot: Record<string, unknown> | null, ...keys: string[
   return undefined
 }
 
+function syncWarningFrom(value: Record<string, unknown>): MutationSyncWarning | undefined {
+  const warning = value.syncWarning
+  if (!warning || typeof warning !== 'object') return undefined
+  const row = warning as Record<string, unknown>
+  return row.code === 'refresh_failed' && typeof row.message === 'string'
+    ? { code: 'refresh_failed', message: row.message }
+    : undefined
+}
+
+function syncWarningProperty(value: Record<string, unknown>) {
+  const syncWarning = syncWarningFrom(value)
+  return syncWarning ? { syncWarning } : {}
+}
+
 function normalizeRecordDeductionsResult(value: unknown): RecordDeductionsResult {
   if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปการตัดคะแนนกลับมา')
   const row = value as Record<string, unknown>
@@ -397,6 +419,7 @@ function normalizeRecordDeductionsResult(value: unknown): RecordDeductionsResult
         balanceAfter: numberValue(item.balanceAfter),
       }
     }),
+    ...syncWarningProperty(row),
   }
 }
 
@@ -422,6 +445,7 @@ function normalizeRequestDeductionsResult(value: unknown): RequestDeductionsResu
         status: 'pending' as const,
       }
     }),
+    ...syncWarningProperty(row),
   }
 }
 
@@ -438,6 +462,7 @@ function normalizeAdminAddPointsResult(value: unknown): AdminAddPointsResult {
     appliedPoints: numberValue(row.appliedPoints),
     balanceBefore: numberValue(row.balanceBefore),
     balanceAfter: numberValue(row.balanceAfter),
+    ...syncWarningProperty(row),
   }
   if (!result.ok || !result.ledgerId || !result.studentId || [result.requestedPoints, result.appliedPoints, result.balanceBefore, result.balanceAfter].some((item) => !Number.isFinite(item))) {
     throw new Error('รูปแบบผลสรุปการเพิ่มคะแนนไม่ถูกต้อง')
@@ -467,6 +492,7 @@ function normalizeRequestPointAdditionsResult(value: unknown): RequestPointAddit
         status: 'pending' as const,
       }
     }),
+    ...syncWarningProperty(row),
   }
   if (!result.ok || !result.batchId || !result.classroomId || !Number.isFinite(result.targetCount)
     || result.requests.length !== result.targetCount
@@ -493,6 +519,7 @@ function normalizeAdminAddPointsBulkResult(value: unknown): AdminAddPointsBulkRe
     requestedPointsEach: Number(row.requestedPointsEach),
     totalAppliedPoints: Number(row.totalAppliedPoints),
     results,
+    ...syncWarningProperty(row),
   }
   if (!result.ok || !result.batchId || !result.classroomId || !Number.isFinite(result.targetCount)
     || !Number.isFinite(result.totalAppliedPoints) || results.length !== result.targetCount) {
@@ -520,6 +547,7 @@ function normalizeGuardianContactAttemptResult(value: unknown): RecordGuardianCo
     closesNotification: row.closesNotification,
     attemptedAt: row.attemptedAt,
     nextReminderAt: typeof row.nextReminderAt === 'string' ? row.nextReminderAt : undefined,
+    ...syncWarningProperty(row),
   }
 }
 
@@ -764,6 +792,7 @@ async function loadStudentState(
       actorId: '',
       incidentId,
       appealDeadline: incident?.appeal_deadline,
+      additionSource: ledgerAdditionSource(row.entry_type),
     }
   })
   const transactionByIncident = new Map(
@@ -1007,13 +1036,7 @@ async function loadStaffState(
       activityOccurredAt: row.activity_occurred_at ?? undefined,
       evidenceNote: row.evidence_note ?? undefined,
       internalReason: row.internal_reason ?? undefined,
-      additionSource: row.entry_type === 'admin_addition'
-        ? 'admin_direct'
-        : row.entry_type === 'teacher_request_approved'
-          ? 'teacher_request'
-          : row.entry_type === 'appeal_reversal' || row.entry_type === 'appeal_adjustment'
-            ? 'appeal'
-            : undefined,
+      additionSource: ledgerAdditionSource(row.entry_type),
     }
   })
   const transactionByIncident = new Map(
@@ -1228,10 +1251,36 @@ function assertSafeEvidencePath(path: string): void {
   }
 }
 
-export function createSupabaseActions(client: SupabaseClient, refresh: () => Promise<void>): AppDataActions {
+export function createSupabaseActions(
+  client: SupabaseClient,
+  refresh: () => Promise<void>,
+  onSyncWarning?: (warning: MutationSyncWarning) => void,
+): AppDataActions {
+  const refreshAfterMutation = async (): Promise<MutationSyncWarning | undefined> => {
+    try {
+      await refresh()
+      return undefined
+    } catch (error) {
+      const warning: MutationSyncWarning = {
+        code: 'refresh_failed',
+        message: error instanceof Error ? error.message : 'บันทึกสำเร็จ แต่โหลดข้อมูลล่าสุดไม่สำเร็จ',
+      }
+      onSyncWarning?.(warning)
+      return warning
+    }
+  }
   const mutate = async <T>(name: string, parameters: Record<string, unknown>): Promise<T> => {
     const result = await runRpc<T>(client, name, parameters)
-    await refresh()
+    const warning = await refreshAfterMutation()
+    if (warning) {
+      // The RPC already succeeded. Keep that outcome distinct from a stale UI
+      // snapshot so callers never present a completed write as a failed write.
+      if (result && typeof result === 'object') {
+        Object.assign(result, {
+          syncWarning: warning,
+        })
+      }
+    }
     return result
   }
   return {
@@ -1402,15 +1451,19 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         isPrimary: row.is_primary,
       }))
     },
-    recordGuardianContactAttempt: async (input) => normalizeGuardianContactAttemptResult(
-      await mutate<unknown>('record_guardian_contact_attempt_v2', {
-        p_task_id: input.taskId,
-        p_channel: input.channel,
-        p_outcome: input.outcome,
-        p_note: input.note?.trim() || null,
-        p_evidence_note: input.evidenceNote?.trim() || null,
-      }),
-    ),
+    recordGuardianContactAttempt: async (input) => {
+      const clientRequestId = input.clientRequestId ?? globalThis.crypto.randomUUID()
+      return normalizeGuardianContactAttemptResult(
+        await mutate<unknown>('record_guardian_contact_attempt_v3', {
+          p_client_request_id: clientRequestId,
+          p_task_id: input.taskId,
+          p_channel: input.channel,
+          p_outcome: input.outcome,
+          p_note: input.note?.trim() || null,
+          p_evidence_note: input.evidenceNote?.trim() || null,
+        }),
+      )
+    },
     completeGuardianContact: (input) => mutate<void>('complete_guardian_contact_task', {
       p_task_id: input.taskId,
       p_note: input.note.trim(),
@@ -1454,7 +1507,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       if (result.previousPath) {
         await client.storage.from(PROFILE_AVATAR_BUCKET).remove([result.previousPath])
       }
-      await refresh()
+      await refreshAfterMutation()
     },
     uploadMyAvatar: async (file) => {
       if (file.type !== 'image/webp') throw new Error('รูปโปรไฟล์ต้องเป็นไฟล์ WEBP ที่ระบบเตรียมไว้')
@@ -1474,7 +1527,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         p_preset: null,
         p_avatar_path: path,
       })
-      await refresh()
+      await refreshAfterMutation()
     },
     activateTerm: (termId) => mutate<void>('admin_activate_term', { p_term_id: termId }),
     getSchoolDirectory: async () => normalizeDirectorySnapshot(
@@ -1485,7 +1538,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         action: 'create-classroom',
         input,
       })
-      await refresh()
+      await refreshAfterMutation()
       return classroom
     },
     createSchoolPerson: async (input) => {
@@ -1493,16 +1546,16 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
         action: 'create-person',
         input,
       })
-      await refresh()
+      await refreshAfterMutation()
       return result
     },
     updateSchoolStudent: async (input) => {
       await invokeAdminDirectory<void>(client, { action: 'update-student', input })
-      await refresh()
+      await refreshAfterMutation()
     },
     updateSchoolStaff: async (input) => {
       await invokeAdminDirectory<void>(client, { action: 'update-staff', input })
-      await refresh()
+      await refreshAfterMutation()
     },
     issueActivationCode: (username) => invokeAdminDirectory<ActivationCodeResult>(client, {
       action: 'issue-activation',
@@ -1519,7 +1572,7 @@ export function createSupabaseActions(client: SupabaseClient, refresh: () => Pro
       const result = normalizeSchoolImportResult(
         await invokeAdminSchoolImport<unknown>(client, file, 'apply', fingerprint),
       )
-      await refresh()
+      await refreshAfterMutation()
       return result
     },
   }

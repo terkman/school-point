@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { BehaviorRule, PositiveBehaviorRule } from './domain'
 import { Icon, StatusBadge } from './ui'
+import { useDialogAccessibility } from './useDialogAccessibility'
 
 export type ScoreRulesDialogTab = 'deduction' | 'addition'
 
@@ -102,6 +103,7 @@ export function ScoreRulesDialog({
   positiveRules,
   onClose,
 }: ScoreRulesDialogProps) {
+  const dialogRef = useDialogAccessibility({ onClose })
   const [tab, setTab] = useState<ScoreRulesDialogTab>(initialTab)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase('th-TH')
@@ -127,19 +129,6 @@ export function ScoreRulesDialog({
   )
   const visibleCount = tab === 'deduction' ? filteredDeductionRules.length : filteredPositiveRules.length
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [onClose])
-
   function changeTab(nextTab: ScoreRulesDialogTab) {
     setTab(nextTab)
     setQuery('')
@@ -154,6 +143,8 @@ export function ScoreRulesDialog({
       }}
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="score-rules-dialog"
         role="dialog"
         aria-modal="true"
@@ -169,7 +160,7 @@ export function ScoreRulesDialog({
             className="score-rules-dialog-close"
             onClick={onClose}
             aria-label="ปิดหน้าต่างระเบียบ"
-            autoFocus
+            data-dialog-initial-focus
           >
             ×
           </button>

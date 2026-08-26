@@ -23,6 +23,16 @@ import type {
   UpdateSchoolStudentInput,
 } from './schoolDirectory'
 
+/** A write completed on the server, but the follow-up screen refresh did not. */
+export interface MutationSyncWarning {
+  code: 'refresh_failed'
+  message: string
+}
+
+export type MutationResult<T extends object> = T & {
+  syncWarning?: MutationSyncWarning
+}
+
 export type DeductionScope = 'single' | 'selected' | 'classroom'
 
 export interface RecordDeductionsInput {
@@ -59,6 +69,7 @@ export interface RecordDeductionsResult {
   alreadyAtZeroCount: number
   guardianTaskCount: number
   results: DeductionStudentResult[]
+  syncWarning?: MutationSyncWarning
 }
 
 export interface RequestDeductionsResult {
@@ -70,6 +81,7 @@ export interface RequestDeductionsResult {
   targetCount: number
   requestedPointsEach: number
   requests: Array<{ studentId: string; requestId: string; status: 'pending' }>
+  syncWarning?: MutationSyncWarning
 }
 
 export interface ReviewDeductionInput {
@@ -116,6 +128,7 @@ export interface RequestPointAdditionsResult {
   targetCount: number
   requestedPointsEach: number
   requests: AdditionRequestStudentResult[]
+  syncWarning?: MutationSyncWarning
 }
 
 export interface SubmitAppealInput {
@@ -161,6 +174,7 @@ export interface AdminAddPointsResult {
   appliedPoints: number
   balanceBefore: number
   balanceAfter: number
+  syncWarning?: MutationSyncWarning
 }
 
 export interface AdminAddPointsBulkInput {
@@ -188,6 +202,7 @@ export interface AdminAddPointsBulkResult {
   requestedPointsEach: number
   totalAppliedPoints: number
   results: AdminAdditionStudentResult[]
+  syncWarning?: MutationSyncWarning
 }
 
 export interface UpdateTermScheduleInput {
@@ -214,6 +229,11 @@ export interface CompleteGuardianContactInput {
 }
 
 export interface RecordGuardianContactAttemptInput {
+  /**
+   * Stable across retries of the same submitted contact attempt. Callers that
+   * do not supply one receive a fresh ID for this action invocation.
+   */
+  clientRequestId?: string
   taskId: string
   channel: GuardianContactChannel
   outcome: GuardianContactOutcome
@@ -229,6 +249,7 @@ export interface RecordGuardianContactAttemptResult {
   closesNotification: boolean
   attemptedAt: string
   nextReminderAt?: string
+  syncWarning?: MutationSyncWarning
 }
 
 export interface PaperDocumentSnapshot {

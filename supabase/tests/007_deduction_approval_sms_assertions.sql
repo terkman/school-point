@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_definition text;
@@ -114,3 +116,6 @@ begin
   end if;
 end;
 $$;
+
+select pass('deduction approval and SMS assertions completed');
+select * from finish();

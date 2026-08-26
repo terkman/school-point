@@ -13,17 +13,21 @@ interface AdminTodayProps {
   onOpenCases: () => void
 }
 
-const reminderWindowMs = 24 * 60 * 60 * 1000
-
 function todayLabel(): string {
   return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long' }).format(new Date())
 }
 
-function followUpLabel(createdAt: string): { label: string; overdue: boolean } {
-  const dueAt = new Date(createdAt).getTime() + reminderWindowMs
-  const overdue = Number.isFinite(dueAt) && dueAt <= Date.now()
+export function isGuardianReminderDue(guardianNextReminderAt?: string, now = Date.now()): boolean {
+  const dueAt = guardianNextReminderAt ? new Date(guardianNextReminderAt).getTime() : Number.NaN
+  return Number.isFinite(dueAt) && dueAt <= now
+}
+
+export function guardianFollowUpLabel(guardianNextReminderAt?: string, now = Date.now()): { label: string; overdue: boolean } {
+  const dueAt = guardianNextReminderAt ? new Date(guardianNextReminderAt).getTime() : Number.NaN
+  if (!Number.isFinite(dueAt)) return { label: 'ยังไม่กำหนดเวลาติดตาม', overdue: false }
+  const overdue = dueAt <= now
   if (overdue) return { label: 'ครบกำหนดติดตาม', overdue: true }
-  const hoursLeft = Math.max(1, Math.ceil((dueAt - Date.now()) / (60 * 60 * 1000)))
+  const hoursLeft = Math.max(1, Math.ceil((dueAt - now) / (60 * 60 * 1000)))
   return { label: `เหลือ ${hoursLeft} ชม.`, overdue: false }
 }
 
@@ -38,6 +42,7 @@ export function AdminToday({
   onOpenCases,
 }: AdminTodayProps) {
   const pendingGuardianCases = openCases.filter((item) => item.guardianContactStatus === 'pending')
+  const dueGuardianCases = pendingGuardianCases.filter((item) => isGuardianReminderDue(item.guardianNextReminderAt))
   const reviewCount = pendingDeductions.length + pendingAdditions.length + openAppeals.length
   const recentTransactions = state.transactions.slice(0, 5)
 
@@ -58,7 +63,7 @@ export function AdminToday({
       <section className="today-status-strip" aria-label="สรุปงานวันนี้">
         <button type="button" className="urgent" onClick={onOpenCases}>
           <Icon name="calendar" />
-          <span><small>ต้องติดตามวันนี้</small><strong>{openCases.length}</strong></span>
+          <span><small>ต้องติดตามวันนี้</small><strong>{dueGuardianCases.length}</strong></span>
           <Icon name="chevronRight" size={18} />
         </button>
         <button type="button" onClick={onOpenCases}>
@@ -79,11 +84,11 @@ export function AdminToday({
             <h2>ต้องติดตามวันนี้</h2>
             <button type="button" onClick={onOpenCases}>ดูเคสทั้งหมด <Icon name="chevronRight" size={16} /></button>
           </div>
-          {openCases.length ? (
+          {dueGuardianCases.length ? (
             <div className="today-followup-list">
-              {openCases.slice(0, 3).map((item) => {
+              {dueGuardianCases.slice(0, 3).map((item) => {
                 const student = state.students.find((entry) => entry.id === item.studentId)
-                const due = followUpLabel(item.createdAt)
+                const due = guardianFollowUpLabel(item.guardianNextReminderAt)
                 return (
                   <article key={item.id} className={due.overdue ? 'overdue' : ''}>
                     <span className="followup-clock"><Icon name="history" /></span>
@@ -97,7 +102,7 @@ export function AdminToday({
                 )
               })}
             </div>
-          ) : <EmptyState title="ไม่มีเคสที่ต้องติดตาม" detail="เคสร้ายแรงที่ยังไม่เสร็จจะแสดงที่นี่" />}
+          ) : <EmptyState title="ไม่มีเคสที่ต้องติดตามวันนี้" detail="เคสที่รอแจ้งผู้ปกครองจะแสดงเมื่อถึงเวลานัดเตือน" />}
         </section>
 
         <section className="today-section today-review-queue">

@@ -48,6 +48,13 @@ export interface SchoolImportResult {
   fingerprint: string
   counts: SchoolImportCounts
   provisioning: SchoolImportProvisioningResult
+  completion: 'complete' | 'partial'
+  incomplete: boolean
+  retry: {
+    supported: boolean
+    batchId: string
+    action: 'preview-and-apply-the-same-file' | 'none'
+  }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -106,6 +113,11 @@ export function normalizeSchoolImportResult(value: unknown): SchoolImportResult 
   const row = record(value)
   const provisioning = record(row.provisioning)
   const failures = Array.isArray(provisioning.failures) ? provisioning.failures : []
+  const retry = row.retry && typeof row.retry === 'object'
+    ? row.retry as Record<string, unknown>
+    : {}
+  const failed = count(provisioning.failed)
+  const incomplete = row.incomplete === true || row.completion === 'partial' || failed > 0
   return {
     alreadyApplied: row.alreadyApplied === true,
     batchId: String(row.batchId ?? ''),
@@ -116,7 +128,7 @@ export function normalizeSchoolImportResult(value: unknown): SchoolImportResult 
       created: count(provisioning.created),
       existing: count(provisioning.existing),
       linked: count(provisioning.linked),
-      failed: count(provisioning.failed),
+      failed,
       failures: failures.map((item) => {
         const failure = record(item)
         return {
@@ -124,6 +136,13 @@ export function normalizeSchoolImportResult(value: unknown): SchoolImportResult 
           message: String(failure.message ?? 'สร้างบัญชีไม่สำเร็จ'),
         }
       }),
+    },
+    completion: incomplete ? 'partial' : 'complete',
+    incomplete,
+    retry: {
+      supported: incomplete && retry.supported !== false,
+      batchId: String(retry.batchId ?? row.batchId ?? ''),
+      action: incomplete ? 'preview-and-apply-the-same-file' : 'none',
     },
   }
 }

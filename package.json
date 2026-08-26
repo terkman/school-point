@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run && node scripts/import-school-data.node-tests.mjs",
     "test:import": "node scripts/import-school-data.node-tests.mjs",
+    "validate:release": "node scripts/validate-release-consistency.mjs",
+    "validate:supabase": "node scripts/validate-supabase-runtime.mjs",
     "supabase:import": "node scripts/apply-supabase-import.mjs",
     "supabase:import:sql": "node scripts/generate-supabase-import-sql.mjs",
     "supabase:activation": "node scripts/issue-supabase-activation.mjs",

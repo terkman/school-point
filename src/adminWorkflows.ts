@@ -1,7 +1,22 @@
-import type { GuardianContactChannel, GuardianContactOutcome } from './domain'
+import type { DemoState, GuardianContactChannel, GuardianContactOutcome } from './domain'
 
 export const MIN_REVIEW_NOTE_LENGTH = 5
 export const GUARDIAN_REMINDER_HOURS = 24
+
+export function calculateAppealAdjustment(previousRestoredPoints: number | undefined, nextRestoredPoints: number): number {
+  return nextRestoredPoints - (previousRestoredPoints ?? 0)
+}
+
+export function resolveOpenCaseSelection(
+  openCases: DemoState['seriousCases'],
+  selectedId: string,
+): string {
+  return openCases.some((item) => item.id === selectedId) ? selectedId : (openCases[0]?.id ?? '')
+}
+
+export function isCurrentGuardianContactsRequest(currentRequestId: number, requestId: number): boolean {
+  return currentRequestId === requestId
+}
 
 export function additionDecisionNeedsReason(approve: boolean, requestedPoints: number, approvedPoints: number): boolean {
   return !approve || requestedPoints !== approvedPoints

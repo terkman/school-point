@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   formatThaiDate,
   type DemoState,
@@ -10,10 +10,13 @@ import {
   guardianOutcomeClosesNotification,
   guardianOutcomeLabel,
   guardianReminderDueAt,
+  isCurrentGuardianContactsRequest,
+  resolveOpenCaseSelection,
 } from './adminWorkflows'
 import { EmptyState, Icon, StatusBadge } from './ui'
 
 export interface GuardianAttemptInput {
+  clientRequestId?: string
   channel: GuardianContactChannel
   outcome: GuardianContactOutcome
   note: string
@@ -66,6 +69,8 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
   const [evidenceNote, setEvidenceNote] = useState('')
   const [caseNote, setCaseNote] = useState('')
   const [error, setError] = useState('')
+  const contactsRequestRef = useRef(0)
+  const guardianAttemptRequestRef = useRef('')
   const studentById = useMemo(() => new Map(state.students.map((item) => [item.id, item])), [state.students])
   const transactionById = useMemo(() => new Map(state.transactions.map((item) => [item.id, item])), [state.transactions])
   const selectedCase = openCases.find((item) => item.id === selectedId) ?? openCases[0]
@@ -82,8 +87,25 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
 
   const caseCountLabel = `${openCases.length} เคสที่ต้องติดตาม`
 
+  useEffect(() => {
+    const nextId = resolveOpenCaseSelection(openCases, selectedId)
+    if (nextId !== selectedId) setSelectedId(nextId)
+    contactsRequestRef.current += 1
+    guardianAttemptRequestRef.current = ''
+    setContacts([])
+    setContactsLoading(false)
+    setChannel('phone')
+    setOutcome('unanswered')
+    setContactNote('')
+    setEvidenceNote('')
+    setCaseNote(selectedCase?.followUpNote ?? '')
+    setError('')
+  }, [selectedCase?.id, selectedId])
+
   function selectCase(caseId: string) {
     const next = openCases.find((item) => item.id === caseId)
+    contactsRequestRef.current += 1
+    guardianAttemptRequestRef.current = ''
     setSelectedId(caseId)
     setContacts([])
     setChannel('phone')
@@ -95,6 +117,7 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
   }
 
   function chooseChannel(next: GuardianContactChannel) {
+    guardianAttemptRequestRef.current = ''
     setChannel(next)
     setOutcome(initialOutcome(next))
     setError('')
@@ -102,27 +125,37 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
 
   async function loadContacts() {
     if (!selectedCase?.guardianTaskId || contactsLoading) return
+    const taskId = selectedCase.guardianTaskId
+    const requestId = contactsRequestRef.current + 1
+    contactsRequestRef.current = requestId
     setContactsLoading(true)
     setError('')
     try {
-      setContacts(await onLoadGuardianContacts(selectedCase.guardianTaskId))
+      const nextContacts = await onLoadGuardianContacts(taskId)
+      if (isCurrentGuardianContactsRequest(contactsRequestRef.current, requestId)) setContacts(nextContacts)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'ไม่สามารถโหลดข้อมูลติดต่อผู้ปกครองได้')
+      if (isCurrentGuardianContactsRequest(contactsRequestRef.current, requestId)) {
+        setError(loadError instanceof Error ? loadError.message : 'ไม่สามารถโหลดข้อมูลติดต่อผู้ปกครองได้')
+      }
     } finally {
-      setContactsLoading(false)
+      if (isCurrentGuardianContactsRequest(contactsRequestRef.current, requestId)) setContactsLoading(false)
     }
   }
 
   async function saveAttempt() {
     if (!selectedCase || busy) return
     setError('')
+    const clientRequestId = guardianAttemptRequestRef.current || globalThis.crypto.randomUUID()
+    guardianAttemptRequestRef.current = clientRequestId
     try {
       await onRecordGuardianAttempt(selectedCase.id, {
+        clientRequestId,
         channel,
         outcome,
         note: contactNote.trim(),
         evidenceNote: evidenceNote.trim(),
       })
+      guardianAttemptRequestRef.current = ''
       setContactNote('')
       setEvidenceNote('')
     } catch (saveError) {
@@ -201,10 +234,10 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
               </div>
               <fieldset className="contact-outcome-grid">
                 <legend>ผลการติดต่อ</legend>
-                {outcomeOptions(channel).map((option) => <label className={outcome === option.value ? 'selected' : ''} key={option.value}><input type="radio" name="guardian-outcome" checked={outcome === option.value} onChange={() => { setOutcome(option.value); setError('') }} /><span><strong>{option.label}</strong><small>{option.detail}</small></span></label>)}
+                {outcomeOptions(channel).map((option) => <label className={outcome === option.value ? 'selected' : ''} key={option.value}><input type="radio" name="guardian-outcome" checked={outcome === option.value} onChange={() => { guardianAttemptRequestRef.current = ''; setOutcome(option.value); setError('') }} /><span><strong>{option.label}</strong><small>{option.detail}</small></span></label>)}
               </fieldset>
-              <label className="phase2-note-field">บันทึกเพิ่มเติม <small>ไม่บังคับ</small><textarea value={contactNote} maxLength={2000} placeholder="เช่น โทรหามารดาเวลา 10:20 น." onChange={(event) => { setContactNote(event.target.value); setError('') }} /></label>
-              <label className="phase2-note-field compact">หลักฐานการแจ้ง <small>ไม่บังคับ</small><input value={evidenceNote} maxLength={500} placeholder="เลขอ้างอิง รูปหลักฐาน หรือรายละเอียดอื่น" onChange={(event) => { setEvidenceNote(event.target.value); setError('') }} /></label>
+              <label className="phase2-note-field">บันทึกเพิ่มเติม <small>ไม่บังคับ</small><textarea value={contactNote} maxLength={2000} placeholder="เช่น โทรหามารดาเวลา 10:20 น." onChange={(event) => { guardianAttemptRequestRef.current = ''; setContactNote(event.target.value); setError('') }} /></label>
+              <label className="phase2-note-field compact">หลักฐานการแจ้ง <small>ไม่บังคับ</small><input value={evidenceNote} maxLength={500} placeholder="เลขอ้างอิง รูปหลักฐาน หรือรายละเอียดอื่น" onChange={(event) => { guardianAttemptRequestRef.current = ''; setEvidenceNote(event.target.value); setError('') }} /></label>
               <div className={closesNotification ? 'contact-result-hint closes' : 'contact-result-hint waiting'}><Icon name={closesNotification ? 'check' : 'calendar'} size={18} /><span>{closesNotification ? 'เมื่อบันทึก จะถือว่าแจ้งผู้ปกครองสำเร็จ' : 'เมื่อบันทึก เคสยังอยู่ในคิวและจะแจ้งเตือนอีกครั้งใน 1 วัน'}</span></div>
               <button className="button primary full" type="button" disabled={busy} onClick={() => void saveAttempt()}>{busyAction === 'case-guardian' ? 'กำลังบันทึก…' : 'บันทึกผลการติดต่อ'}</button>
             </section>

@@ -1,5 +1,7 @@
 begin;
 
+select plan(1);
+
 do $$
 declare
   v_definition text;
@@ -31,5 +33,8 @@ begin
   end if;
 end;
 $$;
+
+select pass('guardian confirmation assertions completed');
+select * from finish();
 
 rollback;

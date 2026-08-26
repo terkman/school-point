@@ -14,6 +14,7 @@ import { ProfileAvatar } from './ProfileAvatar'
 import { ProfileAvatarEditor } from './ProfileAvatarEditor'
 import {
   DEFAULT_PROFILE_AVATAR_CROP,
+  profileAvatarFileToDataUrl,
   prepareProfileAvatar,
   PROFILE_AVATARS,
   type ProfileAvatarCrop,
@@ -21,6 +22,7 @@ import {
   validateProfileAvatarFile,
 } from './profileAvatars'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
+import { HISTORY_PAGE_SIZE, INITIAL_HISTORY_LIMIT, visibleHistory } from './historyPagination'
 
 type StudentTab = 'overview' | 'history' | 'appeals' | 'profile'
 
@@ -40,7 +42,7 @@ interface StudentDashboardProps {
   initialTab?: StudentTab
 }
 
-function TransactionRow({
+export function TransactionRow({
   transaction,
   state,
   onAppeal,
@@ -52,6 +54,8 @@ function TransactionRow({
   const rule = state.rules.find((item) => item.id === transaction.ruleId)
   const existingAppeal = state.appeals.find((item) => item.transactionId === transaction.id)
   const eligible = transaction.kind === 'deduction'
+    && transaction.additionSource !== 'appeal'
+    && !transaction.sourceAppealId
     && (transaction.appealDeadline ? canAppealUntil(transaction.appealDeadline) : canAppeal(transaction.occurredAt))
     && !existingAppeal
   return (
@@ -68,15 +72,21 @@ function TransactionRow({
   )
 }
 
+export function StudentAppealError({ error }: { error: string }) {
+  return error ? <p className="form-error" role="alert">{error}</p> : null
+}
+
 export function StudentDashboard({ account, state, onChange, actions, onLogout, initialTab = 'overview' }: StudentDashboardProps) {
   const [tab, setTab] = useState<StudentTab>(initialTab)
   const [appealTarget, setAppealTarget] = useState<ScoreTransaction | null>(null)
   const [statement, setStatement] = useState('')
+  const [appealError, setAppealError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [busy, setBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null)
   const [avatarCrop, setAvatarCrop] = useState<ProfileAvatarCrop>({ ...DEFAULT_PROFILE_AVATAR_CROP })
+  const [historyLimit, setHistoryLimit] = useState(INITIAL_HISTORY_LIMIT)
   const student = state.students.find((item) => item.id === account.studentId)
   const transactions = useMemo(
     () => state.transactions
@@ -85,6 +95,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
     [state.transactions, student?.id],
   )
   const appeals = state.appeals.filter((item) => item.studentId === student?.id)
+  const visibleTransactions = visibleHistory(transactions, historyLimit)
 
   if (!student) return <p>ไม่พบข้อมูลนักเรียน</p>
   const currentStudent = student
@@ -97,19 +108,26 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   function openAppeal(transaction: ScoreTransaction) {
     setAppealTarget(transaction)
     setStatement('')
+    setAppealError('')
     navigateStudentTab('appeals')
   }
 
   async function submitAppeal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!appealTarget || !statement.trim()) return
+    setAppealError('')
     const appealOpen = appealTarget.appealDeadline
       ? canAppealUntil(appealTarget.appealDeadline)
       : canAppeal(appealTarget.occurredAt)
-    if (!appealOpen) return
+    if (!appealOpen) {
+      setAppealError('รายการนี้หมดเขตยื่นอุทธรณ์แล้ว')
+      return
+    }
     if (actions) {
       if (!appealTarget.incidentId) {
-        setAnnouncement('ไม่พบรหัสเหตุการณ์สำหรับยื่นอุทธรณ์ กรุณาติดต่อผู้ดูแลระบบ')
+        const message = 'ไม่พบรหัสเหตุการณ์สำหรับยื่นอุทธรณ์ กรุณาติดต่อผู้ดูแลระบบ'
+        setAppealError(message)
+        setAnnouncement(message)
         return
       }
       setBusy(true)
@@ -119,7 +137,9 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
         setAppealTarget(null)
         setStatement('')
       } catch (error) {
-        setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถส่งคำอุทธรณ์ได้')
+        const message = error instanceof Error ? error.message : 'ไม่สามารถส่งคำอุทธรณ์ได้'
+        setAppealError(message)
+        setAnnouncement(message)
       } finally {
         setBusy(false)
       }
@@ -202,10 +222,11 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
       if (actions) {
         await actions.uploadMyAvatar(preparedFile)
       } else {
+        const avatarUrl = await profileAvatarFileToDataUrl(preparedFile)
         updateDemoAvatar({
           avatarPreset: undefined,
           avatarPath: 'demo/profile.webp',
-          avatarUrl: URL.createObjectURL(preparedFile),
+          avatarUrl,
         })
       }
       setAnnouncement('อัปโหลดรูปโปรไฟล์เรียบร้อยแล้ว')
@@ -253,9 +274,10 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
           <div className="privacy-note"><Icon name="shield" /><span>เพื่อความเป็นส่วนตัว หน้านี้ไม่แสดงชื่อหรือข้อมูลของผู้บันทึกรายการ</span></div>
           <div className="table-wrap">
             <table className="transaction-table"><caption className="sr-only">ประวัติการเปลี่ยนแปลงคะแนนของนักเรียน</caption><thead><tr><th>รายการ</th><th>คะแนน</th><th>คะแนนรวม</th><th>ดำเนินการ</th></tr></thead>
-              <tbody>{transactions.map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
+              <tbody>{visibleTransactions.items.map((item) => <TransactionRow key={item.id} transaction={item} state={state} onAppeal={openAppeal} />)}</tbody>
             </table>
           </div>
+          {visibleTransactions.hasMore ? <div className="form-actions"><button type="button" className="button secondary" onClick={() => setHistoryLimit((current) => current + HISTORY_PAGE_SIZE)}>โหลดประวัติเพิ่ม</button></div> : null}
         </section>
       ) : null}
 
@@ -266,7 +288,8 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
             {appealTarget ? (
               <form className="stack-form" onSubmit={submitAppeal}>
                 <div className="selected-record"><strong>{state.rules.find((item) => item.id === appealTarget.ruleId)?.title ?? appealTarget.reason}</strong><span>ตัด {Math.abs(appealTarget.appliedDelta)} คะแนน • หมดเขต {formatThaiDate(appealTarget.appealDeadline ?? appealDeadline(appealTarget.occurredAt))}</span></div>
-                <label>เหตุผลการอุทธรณ์<textarea value={statement} onChange={(event) => setStatement(event.target.value)} required minLength={10} placeholder="อธิบายข้อเท็จจริงหรือข้อมูลที่ต้องการให้โรงเรียนพิจารณา" /></label>
+                <label>เหตุผลการอุทธรณ์<textarea value={statement} onChange={(event) => { setStatement(event.target.value); setAppealError('') }} required minLength={10} placeholder="อธิบายข้อเท็จจริงหรือข้อมูลที่ต้องการให้โรงเรียนพิจารณา" /></label>
+                <StudentAppealError error={appealError} />
                 <div className="form-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => setAppealTarget(null)}>ยกเลิก</button><button className="button primary" type="submit" disabled={busy}>{busy ? 'กำลังส่ง…' : 'ส่งคำอุทธรณ์'}</button></div>
               </form>
             ) : <EmptyState title="เลือกรายการจากประวัติคะแนน" detail="ปุ่มอุทธรณ์จะแสดงเฉพาะรายการตัดคะแนนที่ยังไม่เกิน 7 วัน" />}

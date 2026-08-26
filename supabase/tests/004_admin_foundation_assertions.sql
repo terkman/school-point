@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_table text;
@@ -31,6 +33,9 @@ begin
   end loop;
 end;
 $$;
+
+select pass('admin foundation assertions completed');
+select * from finish();
 
 do $$
 begin

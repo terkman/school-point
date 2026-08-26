@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
-import { createSupabaseActions, fetchAllPages, loadMyStudentHistory, selectAccessibleTerm } from './supabaseData'
+import { createSupabaseActions, fetchAllPages, ledgerAdditionSource, loadMyStudentHistory, selectAccessibleTerm } from './supabaseData'
 
 describe('Supabase term selection', () => {
   const plannedTerm = {
@@ -22,6 +22,14 @@ describe('Supabase term selection', () => {
   it('keeps planned terms unavailable to students and teachers', () => {
     expect(selectAccessibleTerm('student', null, plannedTerm)).toBeNull()
     expect(selectAccessibleTerm('teacher', null, plannedTerm)).toBeNull()
+  })
+})
+
+describe('score-history source metadata', () => {
+  it('marks both appeal ledger entry variants as non-appealable adjustments', () => {
+    expect(ledgerAdditionSource('appeal_reversal')).toBe('appeal')
+    expect(ledgerAdditionSource('appeal_adjustment')).toBe('appeal')
+    expect(ledgerAdditionSource('deduction')).toBeUndefined()
   })
 })
 
@@ -266,6 +274,43 @@ describe('Supabase point-addition reviews', () => {
 })
 
 describe('Supabase score mutations', () => {
+  it('keeps a successful write successful when the follow-up refresh fails', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        ok: true,
+        replayed: false,
+        ledgerId: 301,
+        studentId: 12,
+        requestedPoints: 5,
+        appliedPoints: 5,
+        balanceBefore: 80,
+        balanceAfter: 85,
+      },
+      error: null,
+    })
+    const refresh = vi.fn().mockRejectedValue(new Error('เครือข่ายขัดข้องระหว่างโหลดข้อมูลล่าสุด'))
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await expect(actions.adminAddPoints({
+      clientRequestId: '8503ea1e-62d0-4681-851e-891c368467a3',
+      studentId: '12',
+      positiveRuleId: '7',
+      points: 5,
+      activityOccurredAt: '2026-07-21T04:00:00.000Z',
+      reason: 'ทดสอบเหตุผล',
+      evidenceNote: 'ทดสอบหลักฐาน',
+      termId: '9',
+    })).resolves.toMatchObject({
+      ledgerId: '301',
+      syncWarning: {
+        code: 'refresh_failed',
+        message: 'เครือข่ายขัดข้องระหว่างโหลดข้อมูลล่าสุด',
+      },
+    })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('loads guardian contacts only for the selected task without refreshing school state', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: [{
@@ -320,7 +365,7 @@ describe('Supabase score mutations', () => {
     expect(refresh).toHaveBeenCalledTimes(2)
   })
 
-  it('records a structured unanswered phone attempt and keeps the reminder open', async () => {
+  it('records a structured unanswered phone attempt through the retry-safe v3 RPC', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {
         ok: true,
@@ -335,27 +380,87 @@ describe('Supabase score mutations', () => {
     })
     const refresh = vi.fn().mockResolvedValue(undefined)
     const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+    const randomUUID = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('d7d385f2-77ca-4e94-a571-2c2e32dad247')
 
-    await expect(actions.recordGuardianContactAttempt({
+    try {
+      await expect(actions.recordGuardianContactAttempt({
+        taskId: '18',
+        channel: 'phone',
+        outcome: 'unanswered',
+        note: '  โทรเวลา 10:00 น.  ',
+      })).resolves.toMatchObject({
+        attemptId: '81',
+        status: 'pending',
+        closesNotification: false,
+        nextReminderAt: '2026-08-09T03:00:00.000Z',
+      })
+
+      expect(randomUUID).toHaveBeenCalledTimes(1)
+      expect(rpc).toHaveBeenCalledWith('record_guardian_contact_attempt_v3', {
+        p_client_request_id: 'd7d385f2-77ca-4e94-a571-2c2e32dad247',
+        p_task_id: '18',
+        p_channel: 'phone',
+        p_outcome: 'unanswered',
+        p_note: 'โทรเวลา 10:00 น.',
+        p_evidence_note: null,
+      })
+      expect(refresh).toHaveBeenCalledTimes(1)
+    } finally {
+      randomUUID.mockRestore()
+    }
+  })
+
+  it('replays a closing guardian confirmation with the same request ID', async () => {
+    const reply = {
+      ok: true,
+      attemptId: 82,
+      taskId: 18,
+      status: 'completed',
+      closesNotification: true,
+      attemptedAt: '2026-08-08T03:00:00.000Z',
+      nextReminderAt: null,
+    }
+    const rpc = vi.fn().mockResolvedValue({ data: reply, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+    const input = {
+      clientRequestId: '4e0a8194-2f0f-49e2-8b71-d2e95e56708f',
       taskId: '18',
-      channel: 'phone',
-      outcome: 'unanswered',
-      note: '  โทรเวลา 10:00 น.  ',
-    })).resolves.toMatchObject({
-      attemptId: '81',
-      status: 'pending',
-      closesNotification: false,
-      nextReminderAt: '2026-08-09T03:00:00.000Z',
+      channel: 'line' as const,
+      outcome: 'read_or_replied' as const,
+      evidenceNote: 'ผู้ปกครองตอบรับทราบแล้ว',
+    }
+
+    await expect(actions.recordGuardianContactAttempt(input)).resolves.toMatchObject({
+      attemptId: '82',
+      status: 'completed',
+      closesNotification: true,
+    })
+    await expect(actions.recordGuardianContactAttempt(input)).resolves.toMatchObject({
+      attemptId: '82',
+      status: 'completed',
+      closesNotification: true,
     })
 
-    expect(rpc).toHaveBeenCalledWith('record_guardian_contact_attempt_v2', {
-      p_task_id: '18',
-      p_channel: 'phone',
-      p_outcome: 'unanswered',
-      p_note: 'โทรเวลา 10:00 น.',
-      p_evidence_note: null,
-    })
-    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(rpc.mock.calls).toEqual([
+      ['record_guardian_contact_attempt_v3', {
+        p_client_request_id: input.clientRequestId,
+        p_task_id: '18',
+        p_channel: 'line',
+        p_outcome: 'read_or_replied',
+        p_note: null,
+        p_evidence_note: 'ผู้ปกครองตอบรับทราบแล้ว',
+      }],
+      ['record_guardian_contact_attempt_v3', {
+        p_client_request_id: input.clientRequestId,
+        p_task_id: '18',
+        p_channel: 'line',
+        p_outcome: 'read_or_replied',
+        p_note: null,
+        p_evidence_note: 'ผู้ปกครองตอบรับทราบแล้ว',
+      }],
+    ])
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 
   it('replaces a teacher classroom access set with one admin RPC and refreshes once', async () => {

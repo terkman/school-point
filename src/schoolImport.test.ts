@@ -34,9 +34,42 @@ describe('school Excel import results', () => {
         failures: [],
         password: 'must-not-pass-through',
       },
+      completion: 'complete',
+      incomplete: false,
+      retry: { supported: false, batchId: '18', action: 'none' },
     })
 
     expect(result.provisioning).toEqual({ total: 4, created: 2, existing: 2, linked: 4, failed: 0, failures: [] })
     expect(result.provisioning).not.toHaveProperty('password')
+    expect(result).toMatchObject({ completion: 'complete', incomplete: false, retry: { supported: false } })
+  })
+
+  it('keeps a partial provisioning result explicit and retryable', () => {
+    const result = normalizeSchoolImportResult({
+      alreadyApplied: false,
+      batchId: '19',
+      fingerprint: 'c'.repeat(64),
+      counts: { classrooms: 1, students: 2, staff: 0, assignments: 0, guardians: 2 },
+      provisioning: {
+        total: 2,
+        created: 1,
+        existing: 0,
+        linked: 1,
+        failed: 1,
+        failures: [{ username: 'student-2', message: 'สร้างบัญชีไม่สำเร็จ' }],
+      },
+      completion: 'partial',
+      incomplete: true,
+      retry: { supported: true, batchId: '19', action: 'preview-and-apply-the-same-file' },
+    })
+
+    expect(result.completion).toBe('partial')
+    expect(result.incomplete).toBe(true)
+    expect(result.retry).toEqual({
+      supported: true,
+      batchId: '19',
+      action: 'preview-and-apply-the-same-file',
+    })
+    expect(result.provisioning.failed).toBe(1)
   })
 })

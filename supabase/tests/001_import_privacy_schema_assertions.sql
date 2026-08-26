@@ -5,6 +5,8 @@
 
 begin;
 
+select plan(1);
+
 do $$
 declare
   v_import_definition text;
@@ -12,6 +14,7 @@ declare
   v_bulk_definition text;
   v_addition_definition text;
   v_review_definition text;
+  v_review_v2_definition text;
   v_admin_addition_definition text;
   v_link_definition text;
   v_activation_definition text;
@@ -1329,24 +1332,32 @@ begin
   select pg_get_functiondef(
     'public.review_point_addition(bigint,boolean,text)'::regprocedure
   ) into v_review_definition;
-  if position('p_approve is null' in lower(v_review_definition)) = 0
-     or position('v_review_note is null or char_length(v_review_note) < 5' in lower(v_review_definition)) = 0
-     or position('for update' in lower(v_review_definition)) = 0
-     or position('v_request.positive_rule_id is null' in lower(v_review_definition)) = 0
-     or position('v_request.activity_occurred_at is null' in lower(v_review_definition)) = 0
-     or position('v_request.evidence_note' in lower(v_review_definition)) = 0
-     or position('term.status = ''active''' in lower(v_review_definition)) = 0
-     or position('enrollment.is_active' in lower(v_review_definition)) = 0
-     or position('student.status = ''active''' in lower(v_review_definition)) = 0
+  select pg_get_functiondef(
+    'public.review_point_addition_v2(bigint,boolean,smallint,text)'::regprocedure
+  ) into v_review_v2_definition;
+  if position('private.is_admin' in lower(v_review_definition)) = 0
+     or position('p_approve is null' in lower(v_review_definition)) = 0
+     or position('select request.requested_points' in lower(v_review_definition)) = 0
+     or position('if not found' in lower(v_review_definition)) = 0
+     or position('public.review_point_addition_v2' in lower(v_review_definition)) = 0
+     or position('p_approve is null' in lower(v_review_v2_definition)) = 0
+     or position('v_review_note is null or char_length(v_review_note) < 5' in lower(v_review_v2_definition)) = 0
+     or position('for update' in lower(v_review_v2_definition)) = 0
+     or position('v_request.positive_rule_id is null' in lower(v_review_v2_definition)) = 0
+     or position('v_request.activity_occurred_at is null' in lower(v_review_v2_definition)) = 0
+     or position('v_request.evidence_note' in lower(v_review_v2_definition)) = 0
+     or position('term.status = ''active''' in lower(v_review_v2_definition)) = 0
+     or position('enrollment.is_active' in lower(v_review_v2_definition)) = 0
+     or position('student.status = ''active''' in lower(v_review_v2_definition)) = 0
      or regexp_count(
-          lower(v_review_definition),
+          lower(v_review_v2_definition),
           'internal_reason,[[:space:]]+evidence_note,[[:space:]]+reason'
         ) = 0
      or regexp_count(
-          lower(v_review_definition),
-          'v_request\.reason,[[:space:]]+v_request\.evidence_note,[[:space:]]+v_request\.rule_snapshot[[:space:]]*->>[[:space:]]*''title_th'''
+          lower(v_review_v2_definition),
+          'v_request\.reason,[[:space:]]+v_request\.evidence_note,[[:space:]]+coalesce\([[:space:]]*v_request\.rule_snapshot[[:space:]]*->>[[:space:]]*''title_th'''
         ) = 0 then
-    raise exception 'addition review RPC is missing explicit decision, note, detail, lock, active-state, or snapshot-title privacy validation';
+    raise exception 'addition review compatibility or v2 RPC is missing delegation, explicit decision, note, detail, lock, active-state, or snapshot-title privacy validation';
   end if;
 
   select pg_get_functiondef(
@@ -1706,5 +1717,8 @@ begin
   end if;
 end;
 $$;
+
+select pass('import privacy schema assertions completed');
+select * from finish();
 
 rollback;

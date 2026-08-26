@@ -56,6 +56,7 @@ export interface CreateSchoolPersonInput {
   givenName: string
   familyName: string
   role?: StaffRole
+  classroomIds?: string[]
   classroomId?: string
   birthDate?: string
 }

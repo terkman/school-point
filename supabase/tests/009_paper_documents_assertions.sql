@@ -1,5 +1,7 @@
 begin;
 
+select plan(1);
+
 do $$
 begin
   if to_regclass('public.paper_documents') is null
@@ -30,7 +32,9 @@ begin
   ] loop
     if not exists (
       select 1 from pg_proc
-      where oid = v_function and prosecdef and proconfig @> array['search_path=']
+      where oid = v_function
+        and prosecdef
+        and 'search_path=""' = any(coalesce(proconfig, array[]::text[]))
     ) then
       raise exception 'paper RPC % must be SECURITY DEFINER with an empty search_path', v_function;
     end if;
@@ -79,5 +83,8 @@ begin
   end if;
 end
 $$;
+
+select pass('paper document assertions completed');
+select * from finish();
 
 rollback;

@@ -37,7 +37,7 @@ import type { AdminTab } from './adminRoute'
 import { AdminToday } from './AdminToday'
 import { AdminReviewCenter, type AdditionDecisionInput, type AppealDecisionInput, type DeductionDecisionInput } from './AdminReviewCenter'
 import { AdminCaseCenter, type GuardianAttemptInput } from './AdminCaseCenter'
-import { guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt } from './adminWorkflows'
+import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt } from './adminWorkflows'
 
 export type { AdminTab } from './adminRoute'
 
@@ -535,35 +535,38 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       return
     }
     const decidedAt = new Date().toISOString()
-    if (!input.accepted) {
-      onChange({
-        ...state,
-        appeals: state.appeals.map((item) => item.id === appealId ? { ...item, status: 'rejected', restoredPoints: 0, decisionNote: input.explanation, decidedAt } : item),
-      })
-      setAnnouncement('ปฏิเสธคำอุทธรณ์แล้ว ประวัติและคะแนนเดิมยังคงอยู่')
-      return
-    }
-    const change = applyScoreDelta(student.score, input.restoredPoints)
+    const nextRestoredPoints = input.accepted ? input.restoredPoints : 0
+    const priorRestoredPoints = appeal.restoredPoints ?? 0
+    const requestedDelta = calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints)
+    const change = applyScoreDelta(student.score, requestedDelta)
+    const accepted = nextRestoredPoints > 0
     onChange({
       ...state,
       students: state.students.map((item) => item.id === student.id ? { ...item, score: change.after } : item),
-      appeals: state.appeals.map((item) => item.id === appealId ? { ...item, status: 'accepted', restoredPoints: input.restoredPoints, decisionNote: input.explanation, decidedAt } : item),
-      transactions: [{
+      appeals: state.appeals.map((item) => item.id === appealId ? { ...item, status: accepted ? 'accepted' : 'rejected', restoredPoints: nextRestoredPoints, decisionNote: input.explanation, decidedAt, reviewVersion: (item.reviewVersion ?? 0) + 1 } : item),
+      transactions: change.appliedDelta === 0 ? state.transactions : [{
         id: createId('tx'),
         studentId: student.id,
         termId: state.term.id,
-        kind: 'addition',
-        requestedDelta: input.restoredPoints,
+        kind: change.appliedDelta < 0 ? 'deduction' : 'addition',
+        requestedDelta,
         appliedDelta: change.appliedDelta,
         scoreBefore: change.before,
         scoreAfter: change.after,
-        reason: `คืนคะแนนจากคำอุทธรณ์: ${source.reason}`,
+        reason: `ปรับคะแนนตามผลอุทธรณ์ ครั้งที่ ${(appeal.reviewVersion ?? 0) + 1}: ${source.reason}`,
         occurredAt: new Date().toISOString(),
         actorId: account.id,
         sourceAppealId: appeal.id,
+        additionSource: 'appeal',
       }, ...state.transactions],
     })
-    setAnnouncement(`อนุมัติคำอุทธรณ์แล้ว สร้างรายการคืน ${change.appliedDelta} คะแนน โดยไม่แก้ประวัติเดิม`)
+    if (accepted) {
+      setAnnouncement(`บันทึกผลอุทธรณ์แล้ว ปรับคะแนน ${change.appliedDelta >= 0 ? '+' : ''}${change.appliedDelta} คะแนน โดยไม่แก้ประวัติเดิม`)
+    } else {
+      setAnnouncement(change.appliedDelta < 0
+        ? `ปฏิเสธคำอุทธรณ์แล้ว ปรับคืนคะแนนเดิม ${Math.abs(change.appliedDelta)} คะแนน โดยไม่แก้ประวัติเดิม`
+        : 'ปฏิเสธคำอุทธรณ์แล้ว ประวัติและคะแนนเดิมยังคงอยู่')
+    }
   }
 
   async function reopenAppeal(appealId: string, reason: string) {
@@ -1003,6 +1006,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     try {
       if (actions) {
         await actions.recordGuardianContactAttempt({
+          clientRequestId: input.clientRequestId,
           taskId: selectedCase.guardianTaskId,
           channel: input.channel,
           outcome: input.outcome,

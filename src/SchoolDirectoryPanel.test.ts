@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SchoolDirectoryPanel } from './SchoolDirectoryPanel'
 import { classroomDisplayName, normalizeDirectorySnapshot } from './schoolDirectory'
@@ -86,5 +87,30 @@ describe('school directory administration', () => {
 
     expect(markup).toContain('นำเข้า Excel')
     expect(markup).toContain('กู้บัญชี')
+  })
+
+  it('submits new teacher classroom selections in the create operation only', () => {
+    const panelSource = readFileSync(new URL('./SchoolDirectoryPanel.tsx', import.meta.url), 'utf8')
+    const createBlockStart = panelSource.indexOf('const result = await actions.createSchoolPerson({')
+    const createBlockEnd = panelSource.indexOf('await onSaved(result)', createBlockStart)
+    const createBlock = panelSource.slice(createBlockStart, createBlockEnd)
+
+    expect(createBlockStart).toBeGreaterThan(-1)
+    expect(createBlock).toMatch(/classroomIds: role === 'teacher' \? \[\.\.\.classroomIds\] : \[\]/)
+    expect(createBlock).not.toContain('updateSchoolStaff')
+  })
+
+  it('routes atomic creation to the versioned RPC while retaining Auth cleanup on failure', () => {
+    const edgeSource = readFileSync(
+      new URL('../supabase/functions/admin-directory/index.ts', import.meta.url),
+      'utf8',
+    )
+    const createBlockStart = edgeSource.indexOf("if (action === 'create-person')")
+    const createBlockEnd = edgeSource.indexOf("if (action === 'update-student')", createBlockStart)
+    const createBlock = edgeSource.slice(createBlockStart, createBlockEnd)
+
+    expect(createBlock).toContain("rpc('service_create_school_person_v2'")
+    expect(createBlock).toContain('p_classroom_ids: classroomIds')
+    expect(createBlock).toContain('await serviceClient.auth.admin.deleteUser(authData.user.id)')
   })
 })

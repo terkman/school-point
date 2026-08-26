@@ -3,6 +3,7 @@ import {
   DEFAULT_PROFILE_AVATAR_CROP,
   getProfileAvatarPlacement,
   getProfileAvatar,
+  isPersistableProfileAvatarDataUrl,
   normalizeProfileAvatarCrop,
   PROFILE_AVATAR_ASSET_VERSION,
   PROFILE_AVATARS,
@@ -59,5 +60,11 @@ describe('student profile avatars', () => {
       x: -50,
       y: 25,
     })
+  })
+
+  it('accepts only a persistent data URL for the demo avatar, never a blob URL', () => {
+    expect(isPersistableProfileAvatarDataUrl('data:image/webp;base64,AAAA')).toBe(true)
+    expect(isPersistableProfileAvatarDataUrl('blob:https://school.example/avatar')).toBe(false)
+    expect(isPersistableProfileAvatarDataUrl('data:image/png;base64,AAAA')).toBe(false)
   })
 })

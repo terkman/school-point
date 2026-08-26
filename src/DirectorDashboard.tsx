@@ -3,6 +3,7 @@ import type { AppDataActions } from './dataActions'
 import { formatThaiDate, type Account, type DemoState } from './domain'
 import { SchoolDirectoryPanel } from './SchoolDirectoryPanel'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
+import { HISTORY_PAGE_SIZE, INITIAL_HISTORY_LIMIT, visibleHistory } from './historyPagination'
 
 type DirectorTab = 'overview' | 'directory' | 'activity'
 
@@ -18,9 +19,11 @@ export function DirectorDashboard({
   onLogout: () => void
 }) {
   const [tab, setTab] = useState<DirectorTab>('overview')
+  const [historyLimit, setHistoryLimit] = useState(INITIAL_HISTORY_LIMIT)
   const pendingAdditions = state.additionRequests.filter((item) => item.status === 'pending')
   const pendingAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
+  const visibleTransactions = visibleHistory(state.transactions, historyLimit)
   const items: NavItem<DirectorTab>[] = [
     { id: 'overview', label: 'ภาพรวมโรงเรียน', icon: 'home' },
     { id: 'directory', label: 'รายชื่อทั้งหมด', icon: 'users' },
@@ -65,10 +68,10 @@ export function DirectorDashboard({
       {tab === 'activity' ? (
         <section className="panel">
           <div className="section-heading"><div><p className="eyebrow">อ่านอย่างเดียว</p><h2>ประวัติคะแนนทั้งหมด</h2></div><span className="counter">{state.transactions.length}</span></div>
-          {state.transactions.length ? <div className="record-list">{state.transactions.map((transaction) => {
+          {state.transactions.length ? <><div className="record-list">{visibleTransactions.items.map((transaction) => {
             const student = state.students.find((item) => item.id === transaction.studentId)
             return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • {transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta} คะแนน</strong><span>{transaction.reason}</span><small>{formatThaiDate(transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className={`badge ${transaction.appliedDelta < 0 ? 'status-rejected' : 'status-approved'}`}>{transaction.kind === 'deduction' ? 'ตัดคะแนน' : transaction.kind === 'addition' ? 'เพิ่มคะแนน' : 'เปิดภาคเรียน'}</span></article>
-          })}</div> : <EmptyState title="ยังไม่มีประวัติ" detail="ข้อมูลคะแนนจะปรากฏเมื่อมีการบันทึก" />}
+          })}</div>{visibleTransactions.hasMore ? <div className="form-actions"><button type="button" className="button secondary" onClick={() => setHistoryLimit((current) => current + HISTORY_PAGE_SIZE)}>โหลดประวัติเพิ่ม</button></div> : null}</> : <EmptyState title="ยังไม่มีประวัติ" detail="ข้อมูลคะแนนจะปรากฏเมื่อมีการบันทึก" />}
         </section>
       ) : null}
     </AppShell>

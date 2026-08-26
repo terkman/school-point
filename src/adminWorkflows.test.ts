@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   additionDecisionNeedsReason,
+  calculateAppealAdjustment,
   guardianOutcomeClosesNotification,
   guardianReminderDueAt,
   validateAdditionDecision,
@@ -18,6 +19,12 @@ describe('admin review decisions', () => {
   it('requires a public explanation and supports partial restoration', () => {
     expect(validateAppealDecision({ accepted: true, restoredPoints: 4, maximumRestorablePoints: 10, explanation: 'คืนคะแนนบางส่วนตามหลักฐาน' })).toBe('')
     expect(validateAppealDecision({ accepted: false, restoredPoints: 0, maximumRestorablePoints: 10, explanation: '' })).toContain('คำชี้แจง')
+  })
+
+  it('applies only the difference when an appeal is reviewed again', () => {
+    expect(calculateAppealAdjustment(undefined, 5)).toBe(5)
+    expect(calculateAppealAdjustment(5, 3)).toBe(-2)
+    expect(calculateAppealAdjustment(5, 0)).toBe(-5)
   })
 })
 

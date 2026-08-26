@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_column text;
@@ -56,6 +58,9 @@ begin
   end if;
 end;
 $$;
+
+select pass('admin workflow v2 assertions completed');
+select * from finish();
 
 do $$
 declare

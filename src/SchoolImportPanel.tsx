@@ -76,14 +76,19 @@ function PreviewSummary({ preview }: { preview: SchoolImportPreview }) {
 }
 
 function ImportSuccess({ result }: { result: SchoolImportResult }) {
+  const partial = result.completion === 'partial'
   return (
-    <section className="school-import-success" role="status">
+    <section className="school-import-success" role={partial ? 'alert' : 'status'}>
       <span className="school-import-success-icon"><Icon name="check" size={30} /></span>
       <div>
-        <p className="eyebrow">บันทึกเรียบร้อย</p>
-        <h3>{result.alreadyApplied ? 'ไฟล์นี้เคยนำเข้าแล้ว ระบบไม่สร้างข้อมูลซ้ำ' : 'นำเข้าข้อมูลโรงเรียนสำเร็จ'}</h3>
+        <p className="eyebrow">{partial ? 'บันทึกข้อมูลแล้ว แต่บัญชียังไม่ครบ' : 'บันทึกเรียบร้อย'}</p>
+        <h3>{partial
+          ? 'นำเข้าข้อมูลโรงเรียนสำเร็จบางส่วน'
+          : result.alreadyApplied
+            ? 'ไฟล์นี้เคยนำเข้าแล้ว ระบบไม่สร้างข้อมูลซ้ำ'
+            : 'นำเข้าข้อมูลโรงเรียนสำเร็จ'}</h3>
         <p>ผูกบัญชีแล้ว {result.provisioning.linked.toLocaleString('th-TH')} จาก {result.provisioning.total.toLocaleString('th-TH')} บัญชี บัญชีใหม่ยังต้องออกรหัสครั้งแรกจากหน้ารายชื่อ</p>
-        {result.provisioning.failed ? <p className="form-error">มี {result.provisioning.failed.toLocaleString('th-TH')} บัญชีที่ยังสร้างไม่สำเร็จ สามารถตรวจและนำเข้าไฟล์เดิมซ้ำเพื่อให้ระบบลองผูกบัญชีอีกครั้ง</p> : null}
+        {partial ? <p className="form-error">มี {result.provisioning.failed.toLocaleString('th-TH')} บัญชีที่ยังสร้างไม่สำเร็จ ข้อมูลโรงเรียนถูกบันทึกแล้ว กรุณาตรวจไฟล์เดิมและนำเข้าอีกครั้งเพื่อให้ระบบลองผูกเฉพาะบัญชีที่ค้าง โดยไม่สร้างข้อมูลโรงเรียนซ้ำ</p> : null}
       </div>
     </section>
   )

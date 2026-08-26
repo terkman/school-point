@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { applyScoreDelta, formatThaiDate, type DemoState } from './domain'
 import { EvidenceSummary } from './EvidenceField'
 import type { AppDataActions } from './dataActions'
 import {
   additionDecisionNeedsReason,
+  calculateAppealAdjustment,
   validateAdditionDecision,
   validateAppealDecision,
 } from './adminWorkflows'
 import { EmptyState, Icon } from './ui'
+import { useDialogAccessibility } from './useDialogAccessibility'
 
 export interface AdditionDecisionInput {
   approve: boolean
@@ -45,6 +47,31 @@ type SelectedReview = { type: ReviewTab; id: string } | null
 
 function initials(name?: string): string {
   return name?.trim().slice(0, 2) || 'นร'
+}
+
+function ReviewDialog({
+  titleId,
+  onClose,
+  busy,
+  className = 'phase2-review-detail',
+  children,
+}: {
+  titleId: string
+  onClose: () => void
+  busy: boolean
+  className?: string
+  children: ReactNode
+}) {
+  const dialogRef = useDialogAccessibility({ onClose, busy })
+  return (
+    <div className="phase2-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+      if (!busy && event.target === event.currentTarget) onClose()
+    }}>
+      <section ref={dialogRef} tabIndex={-1} className={className} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        {children}
+      </section>
+    </div>
+  )
 }
 
 export function AdminReviewCenter({
@@ -354,13 +381,11 @@ export function AdminReviewCenter({
       ) : null}
 
       {reopenAppealId ? (
-        <div className="phase2-dialog-backdrop">
-          <section className="phase2-review-detail" role="dialog" aria-modal="true" aria-labelledby="reopen-appeal-title">
+        <ReviewDialog titleId="reopen-appeal-title" busy={busy} onClose={() => setReopenAppealId('')}>
             <header className="phase2-detail-header"><button type="button" className="icon-back-button" aria-label="ยกเลิก" disabled={busy} onClick={() => setReopenAppealId('')}><Icon name="chevronRight" /></button><div><p>คำอุทธรณ์ที่ตัดสินแล้ว</p><h2 id="reopen-appeal-title">เปิดพิจารณาใหม่</h2></div></header>
             <div className="phase2-detail-body"><p className="form-help">ผลเดิมและรายการคะแนนเดิมจะไม่ถูกลบ ระบบจะเก็บเป็นประวัติอีกหนึ่งรุ่น</p><label className="phase2-note-field">เหตุผลที่เปิดใหม่ <b>จำเป็น</b><textarea value={reopenReason} minLength={5} maxLength={2000} disabled={busy} placeholder="เช่น ได้รับเอกสารหรือข้อเท็จจริงเพิ่มเติม" onChange={(event) => { setReopenReason(event.target.value); setReopenError('') }} /></label>{reopenError ? <p className="form-error" role="alert">{reopenError}</p> : null}</div>
             <footer className="phase2-decision-footer single-action"><button type="button" className="button primary" disabled={busy} onClick={() => void submitReopenAppeal()}>{busyAction === `appeal-reopen-${reopenAppealId}` ? 'กำลังเปิดใหม่…' : 'ยืนยันเปิดพิจารณาใหม่'}</button></footer>
-          </section>
-        </div>
+        </ReviewDialog>
       ) : null}
 
       {selectedDeduction ? (() => {
@@ -370,8 +395,7 @@ export function AdminReviewCenter({
         const nextScore = applyScoreDelta(student?.score ?? 0, -deductionPoints).after
         const reasonRequired = additionDecisionNeedsReason(true, selectedDeduction.requestedPoints, deductionPoints)
         return (
-          <div className="phase2-dialog-backdrop">
-            <section className="phase2-review-detail" role="dialog" aria-modal="true" aria-labelledby="deduction-review-title">
+          <ReviewDialog titleId="deduction-review-title" busy={busy} onClose={() => setSelected(null)}>
               <header className="phase2-detail-header">
                 <button type="button" className="icon-back-button" aria-label="กลับไปคิวงาน" disabled={busy} onClick={() => setSelected(null)}><Icon name="chevronRight" /></button>
                 <div><p>คำขอตัดคะแนนตั้งแต่ 10 คะแนน</p><h2 id="deduction-review-title">ตรวจสอบก่อนให้มีผล</h2></div>
@@ -412,8 +436,7 @@ export function AdminReviewCenter({
                 <button type="button" className="button reject" disabled={busy} onClick={() => void submitDeduction(false)}>ปฏิเสธคำขอ</button>
                 <button type="button" className="button approve" disabled={busy} onClick={() => void submitDeduction(true)}>{busyAction === `deduction-request-${selectedDeduction.id}` ? 'กำลังบันทึก…' : `อนุมัติตัด ${deductionPoints} คะแนน`}</button>
               </footer>
-            </section>
-          </div>
+          </ReviewDialog>
         )
       })() : null}
 
@@ -424,8 +447,7 @@ export function AdminReviewCenter({
         const nextScore = applyScoreDelta(student?.score ?? 0, approvedPoints).after
         const reasonRequired = additionDecisionNeedsReason(true, selectedAddition.requestedPoints, approvedPoints)
         return (
-          <div className="phase2-dialog-backdrop">
-            <section className="phase2-review-detail" role="dialog" aria-modal="true" aria-labelledby="addition-review-title">
+          <ReviewDialog titleId="addition-review-title" busy={busy} onClose={() => setSelected(null)}>
               <header className="phase2-detail-header">
                 <button type="button" className="icon-back-button" aria-label="กลับไปคิวงาน" disabled={busy} onClick={() => setSelected(null)}><Icon name="chevronRight" /></button>
                 <div><p>คำขอเพิ่มคะแนน</p><h2 id="addition-review-title">ตรวจสอบก่อนอนุมัติ</h2></div>
@@ -471,17 +493,20 @@ export function AdminReviewCenter({
                 <button type="button" className="button reject" disabled={busy} onClick={() => void submitAddition(false)}>ปฏิเสธคำขอ</button>
                 <button type="button" className="button approve" disabled={busy} onClick={() => void submitAddition(true)}>{busyAction === `request-${selectedAddition.id}` ? 'กำลังบันทึก…' : `อนุมัติ +${approvedPoints} คะแนน`}</button>
               </footer>
-            </section>
-          </div>
+          </ReviewDialog>
         )
       })() : null}
 
       {selectedAppeal ? (() => {
         const student = studentById.get(selectedAppeal.studentId)
-        const nextScore = applyScoreDelta(student?.score ?? 0, restorePoints ? restoredPoints : 0).after
+        const priorRestoredPoints = selectedAppeal.reviewVersion ? (selectedAppeal.restoredPoints ?? 0) : 0
+        const nextRestoredPoints = restorePoints ? restoredPoints : 0
+        const nextScore = applyScoreDelta(
+          student?.score ?? 0,
+          calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints),
+        ).after
         return (
-          <div className="phase2-dialog-backdrop">
-            <section className="phase2-review-detail appeal-detail" role="dialog" aria-modal="true" aria-labelledby="appeal-review-title">
+          <ReviewDialog titleId="appeal-review-title" busy={busy} onClose={() => setSelected(null)} className="phase2-review-detail appeal-detail">
               <header className="phase2-detail-header">
                 <button type="button" className="icon-back-button" aria-label="กลับไปคิวงาน" disabled={busy} onClick={() => setSelected(null)}><Icon name="chevronRight" /></button>
                 <div><p>คำอุทธรณ์จากนักเรียน</p><h2 id="appeal-review-title">พิจารณาคืนคะแนน</h2></div>
@@ -521,8 +546,7 @@ export function AdminReviewCenter({
               <footer className="phase2-decision-footer single-action">
                 <button type="button" className={restorePoints ? 'button approve' : 'button reject'} disabled={busy} onClick={() => void submitAppeal()}>{busyAction === `appeal-${selectedAppeal.id}` ? 'กำลังบันทึก…' : restorePoints ? `ยืนยันคืน ${restoredPoints} คะแนน` : 'ยืนยันไม่คืนคะแนน'}</button>
               </footer>
-            </section>
-          </div>
+          </ReviewDialog>
         )
       })() : null}
     </div>

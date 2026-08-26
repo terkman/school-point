@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_signature regprocedure := to_regprocedure(
@@ -34,3 +36,6 @@ begin
   end if;
 end;
 $$;
+
+select pass('admin password reset assertions completed');
+select * from finish();

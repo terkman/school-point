@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_function regprocedure := to_regprocedure(
@@ -34,3 +36,6 @@ begin
   end if;
 end;
 $$;
+
+select pass('web Excel import assertions completed');
+select * from finish();

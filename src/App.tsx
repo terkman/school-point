@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
-import { AdminDashboard } from './AdminDashboard'
-import { DirectorDashboard } from './DirectorDashboard'
 import type { Account, DemoState } from './domain'
 import {
   completeFirstPasswordActivation,
@@ -10,8 +8,6 @@ import {
 } from './firstPasswordActivation'
 import { LoginPage } from './LoginPage'
 import { PasswordActivationPage } from './PasswordActivationPage'
-import { StudentDashboard } from './StudentDashboard'
-import { TeacherDashboard } from './TeacherDashboard'
 import {
   clearSession,
   loadDemoState,
@@ -26,6 +22,41 @@ import { sessionUserId } from './authSession'
 import { brand } from './brand'
 import { routeAfterRoleChange } from './adminRoute'
 import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
+
+const AdminDashboard = lazy(() => import('./AdminDashboard').then((module) => ({ default: module.AdminDashboard })))
+const DirectorDashboard = lazy(() => import('./DirectorDashboard').then((module) => ({ default: module.DirectorDashboard })))
+const StudentDashboard = lazy(() => import('./StudentDashboard').then((module) => ({ default: module.StudentDashboard })))
+const TeacherDashboard = lazy(() => import('./TeacherDashboard').then((module) => ({ default: module.TeacherDashboard })))
+
+class DashboardErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    // The fallback below is intentionally user-facing; details are available in browser diagnostics.
+  }
+
+  render() {
+    if (this.state.error) {
+      return <StatusPage title="เปิดหน้าตามบทบาทไม่สำเร็จ" detail="ลองโหลดหน้าใหม่อีกครั้ง หากยังพบปัญหา โปรดติดต่อผู้ดูแลระบบ" action={{ label: 'โหลดหน้าใหม่', run: () => window.location.reload() }} />
+    }
+    return this.props.children
+  }
+}
+
+function RoleDashboard({ children, syncWarning }: { children: ReactNode; syncWarning?: string }) {
+  return (
+    <DashboardErrorBoundary>
+      {syncWarning ? <div className="warning-note" role="status"><span>บันทึกข้อมูลสำเร็จแล้ว แต่ยังโหลดข้อมูลล่าสุดไม่สำเร็จ: {syncWarning}</span></div> : null}
+      <Suspense fallback={<StatusPage title="กำลังเปิดหน้าของคุณ" detail="กำลังเตรียมเครื่องมือที่ตรงกับบทบาทของคุณ" />}>
+        {children}
+      </Suspense>
+    </DashboardErrorBoundary>
+  )
+}
 
 function alignBrowserRouteWithRole(role: Account['role']) {
   if (typeof window === 'undefined') return
@@ -73,17 +104,17 @@ function DemoApp() {
   if (!account) return <LoginPage state={state} onLogin={login} />
 
   if (account.role === 'student') {
-    return <StudentDashboard account={account} state={state} onChange={setState} onLogout={logout} />
+    return <RoleDashboard><StudentDashboard account={account} state={state} onChange={setState} onLogout={logout} /></RoleDashboard>
   }
 
   if (account.role === 'teacher') {
-    return <TeacherDashboard account={account} state={state} onChange={setState} onLogout={logout} />
+    return <RoleDashboard><TeacherDashboard account={account} state={state} onChange={setState} onLogout={logout} /></RoleDashboard>
   }
   if (account.role === 'director') {
-    return <DirectorDashboard account={account} state={state} onLogout={logout} />
+    return <RoleDashboard><DirectorDashboard account={account} state={state} onLogout={logout} /></RoleDashboard>
   }
 
-  return <AdminDashboard account={account} state={state} onChange={setState} onResetDemo={resetDemo} onLogout={logout} />
+  return <RoleDashboard><AdminDashboard account={account} state={state} onChange={setState} onResetDemo={resetDemo} onLogout={logout} /></RoleDashboard>
 }
 
 interface StatusPageAction {
@@ -125,6 +156,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   const [state, setState] = useState<DemoState | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [syncWarning, setSyncWarning] = useState('')
   const [activationRequired, setActivationRequired] = useState<boolean | undefined>(undefined)
   const [activationInProgress, setActivationInProgress] = useState(false)
   const [activationLoginError, setActivationLoginError] = useState('')
@@ -194,6 +226,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     if (nextAccount) alignBrowserRouteWithRole(nextAccount.role)
     setState(nextState)
     setLoadError('')
+    setSyncWarning('')
   }, [activationRequired, client, signedInUserId])
 
   useEffect(() => {
@@ -211,6 +244,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
           const nextAccount = nextState.accounts[0]
           if (nextAccount) alignBrowserRouteWithRole(nextAccount.role)
           setState(nextState)
+          setSyncWarning('')
         }
       })
       .catch((error: unknown) => {
@@ -224,7 +258,10 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     }
   }, [activationRequired, client, signedInUserId])
 
-  const actions = useMemo(() => createSupabaseActions(client, refresh), [client, refresh])
+  const actions = useMemo(
+    () => createSupabaseActions(client, refresh, (warning) => setSyncWarning(warning.message)),
+    [client, refresh],
+  )
 
   async function authenticate(username: string, password: string) {
     setActivationLoginError('')
@@ -252,6 +289,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   async function logout() {
     setActivationLoginError('')
     setActivationError('')
+    setSyncWarning('')
     const { error } = await client.auth.signOut()
     if (error) {
       setLoadError(error.message)
@@ -369,15 +407,15 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }
 
   if (account.role === 'student') {
-    return <StudentDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />
+    return <RoleDashboard syncWarning={syncWarning}><StudentDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} /></RoleDashboard>
   }
   if (account.role === 'teacher') {
-    return <TeacherDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />
+    return <RoleDashboard syncWarning={syncWarning}><TeacherDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} /></RoleDashboard>
   }
   if (account.role === 'director') {
-    return <DirectorDashboard account={account} state={state} actions={actions} onLogout={() => void logout()} />
+    return <RoleDashboard syncWarning={syncWarning}><DirectorDashboard account={account} state={state} actions={actions} onLogout={() => void logout()} /></RoleDashboard>
   }
-  return <AdminDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} />
+  return <RoleDashboard syncWarning={syncWarning}><AdminDashboard account={account} state={state} onChange={setState} actions={actions} onLogout={() => void logout()} /></RoleDashboard>
 }
 
 function SupabaseRoot() {

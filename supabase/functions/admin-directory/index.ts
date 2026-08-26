@@ -18,7 +18,7 @@ const corsHeaders = {
 const usernamePattern = /^[a-z0-9][a-z0-9._-]*[a-z0-9]$|^[a-z0-9]$/
 const gradeLevels = new Set(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3'])
 const roomNumberPattern = /^[0-9A-Za-zก-๙._-]+$/
-const authDomain = 'accounts.school-point.invalid'
+const defaultAuthEmailDomain = 'accounts.school-point.invalid'
 
 type JsonRecord = Record<string, unknown>
 
@@ -38,6 +38,18 @@ function environmentKey(mapName: string, legacyName: string): string {
     }
   }
   return Deno.env.get(legacyName) ?? ''
+}
+
+function authEmailDomain(): string {
+  // Keep the former generated-address domain as the safe compatibility default.
+  // Both directory and import provisioning read this same Edge secret name.
+  const domain = (Deno.env.get('SCHOOL_POINT_AUTH_EMAIL_DOMAIN') ?? defaultAuthEmailDomain)
+    .trim()
+    .toLowerCase()
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+    throw new Error('การตั้งค่า SCHOOL_POINT_AUTH_EMAIL_DOMAIN ไม่ถูกต้อง')
+  }
+  return domain
 }
 
 function requiredText(value: unknown, label: string, maxLength = 200): string {
@@ -85,6 +97,7 @@ function isoDate(value: unknown): string | null {
 async function generateActivationCode(
   serviceClient: ReturnType<typeof createClient>,
   username: string,
+  authDomain: string,
 ) {
   const email = `${username}@${authDomain}`
   const { data, error } = await serviceClient.auth.admin.generateLink({
@@ -113,6 +126,7 @@ Deno.serve(async (request) => {
     if (!supabaseUrl || !publishableKey || !secretKey) {
       throw new Error('บริการจัดการบัญชียังตั้งค่าไม่ครบ')
     }
+    const authDomain = authEmailDomain()
 
     const authorization = request.headers.get('Authorization') ?? ''
     const accessToken = authorization.replace(/^Bearer\s+/i, '').trim()
@@ -157,6 +171,12 @@ Deno.serve(async (request) => {
     if (!isActiveDirectoryAdmin(profile)) {
       return response(403, { ok: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขข้อมูลนี้ได้' })
     }
+    if (!tokenHasPasswordAuthentication(accessToken)) {
+      return response(403, {
+        ok: false,
+        error: 'กรุณาเข้าสู่ระบบด้วยรหัสผ่านอีกครั้งก่อนแก้ไขข้อมูลโรงเรียน',
+      })
+    }
 
     if (action === 'create-classroom') {
       const gradeLevel = String(input.gradeLevel ?? '').trim().toUpperCase()
@@ -190,6 +210,15 @@ Deno.serve(async (request) => {
       if (kind === 'staff' && !['teacher', 'director', 'admin'].includes(role ?? '')) {
         throw new Error('ตำแหน่งบุคลากรไม่ถูกต้อง')
       }
+      const classroomIds = Array.isArray(input.classroomIds)
+        ? [...new Set(input.classroomIds.map((value) => idValue(value, 'รหัสห้องเรียน')))]
+        : []
+      if (kind !== 'staff' && classroomIds.length) {
+        throw new Error('กำหนดห้องเรียนได้เฉพาะบุคลากรตำแหน่งครู')
+      }
+      if (kind === 'staff' && role !== 'teacher' && classroomIds.length) {
+        throw new Error('กำหนดห้องเรียนได้เฉพาะบุคลากรตำแหน่งครู')
+      }
 
       const email = `${username}@${authDomain}`
       const { data: authData, error: authError } = await serviceClient.auth.admin.createUser({
@@ -204,7 +233,7 @@ Deno.serve(async (request) => {
         throw new Error(authError?.message ?? 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ')
       }
 
-      const { data, error } = await serviceClient.rpc('service_create_school_person', {
+      const { data, error } = await serviceClient.rpc('service_create_school_person_v2', {
         p_actor_user_id: userData.user.id,
         p_auth_user_id: authData.user.id,
         p_kind: kind,
@@ -216,6 +245,7 @@ Deno.serve(async (request) => {
         p_role: role,
         p_classroom_id: optionalId(input.classroomId),
         p_birth_date: isoDate(input.birthDate),
+        p_classroom_ids: classroomIds,
       })
       if (error) {
         await serviceClient.auth.admin.deleteUser(authData.user.id)
@@ -224,7 +254,7 @@ Deno.serve(async (request) => {
 
       let activation
       try {
-        activation = await generateActivationCode(serviceClient, username)
+        activation = await generateActivationCode(serviceClient, username, authDomain)
       } catch {
         activation = undefined
       }
@@ -289,17 +319,11 @@ Deno.serve(async (request) => {
         p_username: username,
       })
       if (error) throw new Error(error.message)
-      const activation = await generateActivationCode(serviceClient, username)
+      const activation = await generateActivationCode(serviceClient, username, authDomain)
       return response(200, { ok: true, data: activation })
     }
 
     if (action === 'reset-password') {
-      if (!tokenHasPasswordAuthentication(accessToken)) {
-        return response(403, {
-          ok: false,
-          error: 'กรุณาเข้าสู่ระบบด้วยรหัสผ่านอีกครั้งก่อนกู้บัญชีให้ผู้อื่น',
-        })
-      }
       const username = usernameValue(input.username)
       const reason = passwordResetReason(input.reason)
       const { data: account, error: prepareError } = await serviceClient.rpc(
@@ -330,7 +354,7 @@ Deno.serve(async (request) => {
 
       let activation
       try {
-        activation = await generateActivationCode(serviceClient, accountUsername)
+        activation = await generateActivationCode(serviceClient, accountUsername, authDomain)
       } catch {
         throw new Error('รหัสผ่านเดิมถูกยกเลิกแล้ว แต่ยังสร้างรหัสกู้บัญชีไม่สำเร็จ กรุณาออกรหัสครั้งเดียวใหม่')
       }

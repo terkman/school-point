@@ -1,0 +1,48 @@
+name: Validate School Point
+
+on:
+  pull_request:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Frontend, schema, and runtime validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Prepare ignored test directories
+        run: mkdir -p private-data
+      - name: Validate release consistency
+        run: npm run validate:release
+      - name: Run frontend and import tests
+        run: npm test
+      - name: Typecheck frontend
+        run: npm run typecheck
+      - name: Build frontend
+        run: npm run build
+      - name: Set up Deno for Edge Function type-checking
+        uses: denoland/setup-deno@v2.0.3
+        with:
+          deno-version: v2.5.6
+      - name: Validate Supabase migrations and SQL assertions when local runtime is available
+        run: npm run validate:supabase
+        env:
+          SUPABASE_DB_TEST_MODE: auto
+          SUPABASE_FUNCTIONS_CHECK: required

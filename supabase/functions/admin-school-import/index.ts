@@ -1,6 +1,9 @@
 import ExcelJS from 'npm:exceljs@4.4.0'
 import { createClient } from 'npm:@supabase/supabase-js@2.110.2'
-import { isActiveDirectoryAdmin } from '../_shared/directoryAuthorization.ts'
+import {
+  isActiveDirectoryAdmin,
+  tokenHasPasswordAuthentication,
+} from '../_shared/directoryAuthorization.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,7 +12,7 @@ const corsHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
 }
 
-const authDomain = 'accounts.school-point.invalid'
+const defaultAuthEmailDomain = 'accounts.school-point.invalid'
 const maxFileBytes = 10 * 1024 * 1024
 const maxRows = 5_000
 const headerRowNumber = 4
@@ -154,6 +157,18 @@ function environmentKey(mapName: string, legacyName: string): string {
     }
   }
   return Deno.env.get(legacyName) ?? ''
+}
+
+function authEmailDomain(): string {
+  // Keep existing generated addresses working until deployments explicitly set
+  // SCHOOL_POINT_AUTH_EMAIL_DOMAIN in both provisioning Edge Functions.
+  const domain = (Deno.env.get('SCHOOL_POINT_AUTH_EMAIL_DOMAIN') ?? defaultAuthEmailDomain)
+    .trim()
+    .toLowerCase()
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+    throw new Error('การตั้งค่า SCHOOL_POINT_AUTH_EMAIL_DOMAIN ไม่ถูกต้อง')
+  }
+  return domain
 }
 
 function issue(
@@ -679,6 +694,7 @@ async function inspectAccounts(
   serviceClient: ReturnType<typeof createClient>,
   accounts: Array<{ username: string; role: string }>,
   issues: ImportIssue[],
+  authDomain: string,
 ) {
   const users = await listAllUsers(serviceClient)
   const profileIds = await listProfileIds(serviceClient)
@@ -709,6 +725,8 @@ async function assertPublicSignupDisabled(projectUrl: string, apiKey: string) {
 async function provisionAccounts(
   serviceClient: ReturnType<typeof createClient>,
   accounts: Array<{ username: string; role: string }>,
+  actorUserId: string,
+  authDomain: string,
 ) {
   const users = await listAllUsers(serviceClient)
   const profileIds = await listProfileIds(serviceClient)
@@ -739,7 +757,8 @@ async function provisionAccounts(
         } else {
           results.existing += 1
         }
-        const { data, error } = await serviceClient.rpc('admin_link_provisioned_account', {
+        const { data, error } = await serviceClient.rpc('service_admin_link_provisioned_account', {
+          p_actor_user_id: actorUserId,
           p_username: account.username,
           p_user_id: user.id,
         })
@@ -783,6 +802,8 @@ async function parseAndValidate(
   file: File,
   context: ImportContext,
   serviceClient: ReturnType<typeof createClient>,
+  actorUserId: string,
+  authDomain: string,
 ) {
   const issues: ImportIssue[] = []
   const workbook = new ExcelJS.Workbook()
@@ -799,7 +820,8 @@ async function parseAndValidate(
 
   let rpcResult: JsonRecord = { ok: false, errors: [] }
   if (!issues.some((item) => item.severity === 'error')) {
-    const { data, error } = await serviceClient.rpc('admin_import_school_data', {
+    const { data, error } = await serviceClient.rpc('service_admin_import_school_data_v2', {
+      p_actor_user_id: actorUserId,
       p_payload: normalized.plan,
       p_dry_run: true,
     })
@@ -815,7 +837,7 @@ async function parseAndValidate(
   }
   const accountSummary = issues.some((item) => item.severity === 'error')
     ? { total: normalized.accounts.length, willCreate: 0, alreadyExists: 0, skipped: 0 }
-    : await inspectAccounts(serviceClient, normalized.accounts, issues)
+    : await inspectAccounts(serviceClient, normalized.accounts, issues, authDomain)
   return {
     ...normalized,
     issues,
@@ -833,6 +855,7 @@ Deno.serve(async (request) => {
     const publishableKey = environmentKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
     const secretKey = environmentKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
     if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('บริการนำเข้ายังตั้งค่าไม่ครบ')
+    const authDomain = authEmailDomain()
 
     const authorization = request.headers.get('Authorization') ?? ''
     const accessToken = authorization.replace(/^Bearer\s+/i, '').trim()
@@ -853,6 +876,12 @@ Deno.serve(async (request) => {
       .maybeSingle()
     if (profileError) return response(500, { ok: false, error: 'ตรวจสอบสิทธิ์ผู้ดูแลระบบไม่สำเร็จ' })
     if (!isActiveDirectoryAdmin(profile)) return response(403, { ok: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้นที่นำเข้าข้อมูลได้' })
+    if (!tokenHasPasswordAuthentication(accessToken)) {
+      return response(403, {
+        ok: false,
+        error: 'กรุณาเข้าสู่ระบบด้วยรหัสผ่านอีกครั้งก่อนตรวจหรือนำเข้าข้อมูล',
+      })
+    }
 
     const form = await request.formData()
     const mode = String(form.get('mode') ?? 'preview')
@@ -864,7 +893,7 @@ Deno.serve(async (request) => {
     if (!['preview', 'apply'].includes(mode)) throw new Error('โหมดนำเข้าไม่ถูกต้อง')
 
     const context = await loadContext(userClient)
-    const result = await parseAndValidate(file, context, serviceClient)
+    const result = await parseAndValidate(file, context, serviceClient, userData.user.id, authDomain)
     const hasErrors = result.issues.some((item) => item.severity === 'error')
     if (mode === 'preview') {
       return response(200, {
@@ -887,21 +916,49 @@ Deno.serve(async (request) => {
       throw new Error('ข้อมูลหรือฐานข้อมูลเปลี่ยนหลังรอบตรวจสอบ กรุณากดตรวจสอบไฟล์อีกครั้ง')
     }
     await assertPublicSignupDisabled(supabaseUrl, secretKey)
-    const { data: applyData, error: applyError } = await serviceClient.rpc('admin_import_school_data', {
-      p_payload: result.plan,
+    const { data: applyData, error: applyError } = await serviceClient.rpc('service_admin_import_school_data_v2', {
+      p_actor_user_id: userData.user.id,
+      // The service wrapper verifies this opaque preview token while holding
+      // the import revision lock, then removes it before legacy plan hashing.
+      p_payload: { ...result.plan, previewToken: expectedFingerprint },
       p_dry_run: false,
     })
     if (applyError || applyData?.ok !== true) throw new Error(applyError?.message ?? 'ฐานข้อมูลปฏิเสธการนำเข้า')
     if (applyData.serverFingerprint !== expectedFingerprint) throw new Error('ผลยืนยันจากฐานข้อมูลไม่ตรงกับไฟล์ที่ตรวจสอบ')
-    const provisioning = await provisionAccounts(serviceClient, result.accounts)
+    let provisioning
+    try {
+      provisioning = await provisionAccounts(serviceClient, result.accounts, userData.user.id, authDomain)
+    } catch (error) {
+      // The import batch is committed independently from Auth. Surface this
+      // state as retryable rather than reporting a failed database import.
+      const message = error instanceof Error ? error.message : 'เชื่อมต่อบริการบัญชีไม่สำเร็จ'
+      provisioning = {
+        total: result.accounts.length,
+        created: 0,
+        existing: 0,
+        linked: 0,
+        failed: result.accounts.length,
+        failures: result.accounts.map((account) => ({ username: account.username, message })),
+      }
+    }
+    const incomplete = provisioning.failed > 0
+    const batchId = applyData.batchId ? String(applyData.batchId) : ''
     return response(200, {
       ok: true,
       data: {
         alreadyApplied: applyData.alreadyApplied === true,
-        batchId: applyData.batchId ? String(applyData.batchId) : '',
+        batchId,
         fingerprint: applyData.serverFingerprint,
         counts: result.counts,
         provisioning,
+        completion: incomplete ? 'partial' : 'complete',
+        incomplete,
+        retry: {
+          supported: incomplete,
+          idempotency: 'import-batch-and-provisioning-queue',
+          batchId,
+          action: incomplete ? 'preview-and-apply-the-same-file' : 'none',
+        },
       },
     })
   } catch (error) {

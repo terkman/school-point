@@ -148,3 +148,24 @@ export async function prepareProfileAvatar(
     bitmap.close()
   }
 }
+
+export async function profileAvatarFileToDataUrl(file: File): Promise<string> {
+  if (!allowedInputTypes.has(file.type)) throw new Error('ไม่สามารถบันทึกรูปโปรไฟล์ในรูปแบบนี้ได้')
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('ไม่สามารถบันทึกรูปโปรไฟล์ในเบราว์เซอร์ได้'))
+    reader.onload = () => {
+      const result = reader.result
+      if (!isPersistableProfileAvatarDataUrl(result, file.type)) {
+        reject(new Error('ไม่สามารถบันทึกรูปโปรไฟล์ในรูปแบบที่ปลอดภัยได้'))
+        return
+      }
+      resolve(result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+export function isPersistableProfileAvatarDataUrl(value: unknown, mimeType = 'image/webp'): value is string {
+  return typeof value === 'string' && value.startsWith(`data:${mimeType};base64,`)
+}

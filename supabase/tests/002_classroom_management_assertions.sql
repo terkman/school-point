@@ -1,3 +1,5 @@
+select plan(1);
+
 do $$
 declare
   v_function regprocedure :=
@@ -29,3 +31,6 @@ begin
   end if;
 end;
 $$;
+
+select pass('classroom management assertions completed');
+select * from finish();
