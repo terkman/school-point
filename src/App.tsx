@@ -22,6 +22,7 @@ import {
 } from './storage'
 import { dataMode, getSupabaseClient, usernameToInternalEmail } from './supabaseClient'
 import { createSupabaseActions, getSessionUsername, loadSupabaseState } from './supabaseData'
+import { sessionUserId } from './authSession'
 import { brand } from './brand'
 import { routeAfterRoleChange } from './adminRoute'
 import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
@@ -120,6 +121,7 @@ export function StatusPage({
 
 function SupabaseApp({ client }: { client: SupabaseClient }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
+  const signedInUserId = sessionUserId(session)
   const [state, setState] = useState<DemoState | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -130,7 +132,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   const activationInProgressRef = useRef(false)
 
   useEffect(() => {
-    if (!session?.user) {
+    if (!signedInUserId) {
       setActivationRequired(undefined)
       return
     }
@@ -141,7 +143,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     void client
       .from('profiles')
       .select('activation_required')
-      .eq('user_id', session.user.id)
+      .eq('user_id', signedInUserId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (!active) return
@@ -160,7 +162,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     return () => {
       active = false
     }
-  }, [activationInProgress, client, session?.user])
+  }, [activationInProgress, client, signedInUserId])
 
   useEffect(() => {
     let active = true
@@ -186,16 +188,16 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   }, [client])
 
   const refresh = useCallback(async () => {
-    if (!session?.user || activationRequired !== false) return
+    if (!signedInUserId || activationRequired !== false || !session?.user) return
     const nextState = await loadSupabaseState(client, session.user)
     const nextAccount = nextState.accounts[0]
     if (nextAccount) alignBrowserRouteWithRole(nextAccount.role)
     setState(nextState)
     setLoadError('')
-  }, [activationRequired, client, session?.user])
+  }, [activationRequired, client, signedInUserId])
 
   useEffect(() => {
-    if (!session?.user || activationRequired !== false) {
+    if (!signedInUserId || activationRequired !== false || !session?.user) {
       setState(null)
       setLoading(false)
       return
@@ -220,7 +222,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
     return () => {
       active = false
     }
-  }, [activationRequired, client, session?.user])
+  }, [activationRequired, client, signedInUserId])
 
   const actions = useMemo(() => createSupabaseActions(client, refresh), [client, refresh])
 
