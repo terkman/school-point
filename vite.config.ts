@@ -39,5 +39,8 @@ export default defineConfig(async ({ mode }) => {
     preview: {
       port: 4173,
     },
+    test: {
+      exclude: ['e2e/**', '**/node_modules/**', 'dist/**', 'outputs/**'],
+    },
   }
 })

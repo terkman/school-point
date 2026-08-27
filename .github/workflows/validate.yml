@@ -33,6 +33,10 @@ jobs:
         run: npm run validate:release
       - name: Run frontend and import tests
         run: npm test
+      - name: Install Chromium for browser acceptance tests
+        run: npx playwright install --with-deps chromium
+      - name: Run browser acceptance tests
+        run: npm run test:e2e
       - name: Typecheck frontend
         run: npm run typecheck
       - name: Build frontend

@@ -81,10 +81,22 @@ if (!lockRoot || lockRoot.name !== packageJson.name || lockRoot.version !== pack
   fail(`package.json and package-lock.json root metadata differ (${packageJson.name}@${packageJson.version})`)
 }
 
-for (const requiredScript of ['test', 'typecheck', 'build', 'validate:release', 'validate:supabase']) {
+for (const requiredScript of ['test', 'test:e2e', 'test:recovery', 'typecheck', 'build', 'validate:release', 'validate:supabase']) {
   if (typeof packageJson.scripts?.[requiredScript] !== 'string') {
     fail(`Missing required npm script: ${requiredScript}`)
   }
+}
+
+const latestMigrationVersion = migrations.at(-1)?.version
+const resetProcedure = await readFile(
+  join(repositoryRoot, 'supabase', 'operations', 'reset_all_trial_score_data.sql'),
+  'utf8',
+)
+const documentedResetMigrationHead = /-v expected_migration_head=(\d+)/.exec(resetProcedure)?.[1]
+if (!documentedResetMigrationHead) {
+  fail('Operational reset example is missing expected_migration_head')
+} else if (documentedResetMigrationHead !== latestMigrationVersion) {
+  fail(`Operational reset example migration head ${documentedResetMigrationHead} does not match latest migration ${latestMigrationVersion}`)
 }
 
 const config = await readFile(join(repositoryRoot, 'supabase', 'config.toml'), 'utf8')
