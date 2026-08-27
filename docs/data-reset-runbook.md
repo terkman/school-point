@@ -94,9 +94,15 @@ immutable และวงจร FK ระหว่าง `appeals` กับ `pa
 ครบแล้ว ให้ใช้ transaction ที่ล็อกช่วงบำรุงรักษาและ `TRUNCATE` แบบ **ระบุครบทั้ง 16
 ตารางในคำสั่งเดียว** เท่านั้น โดยใช้ `CONTINUE IDENTITY`, ห้าม `CASCADE`, ห้ามปิด
 trigger และต้องตรวจ FK closure จาก preflight ก่อนทุกครั้ง สคริปต์ปฏิบัติการที่ผ่านการ
-ทบทวนคือ `supabase/operations/reset_all_trial_score_data.sql`; สำหรับ SQL Editor ให้ใช้
-ฉบับ one-time ที่ระบุโปรเจกต์และ backup โดยตรง ห้ามลบ `audit_logs`, ตัวตน, roster,
-กฎ หรือ permissions และห้ามลบ `storage.objects` โดยตรง
+ทบทวนคือ `supabase/operations/reset_all_trial_score_data.sql` และใช้ได้เฉพาะ `psql`
+ที่เชื่อมต่อฐานข้อมูลซึ่งตรวจสอบแล้วเท่านั้น หากใช้ Supabase Management API ให้สร้าง
+ไฟล์แบบคำสั่งเดียวด้วย `scripts/generate-operational-reset-query.mjs` โดยผูก database,
+project, migration head, roster, backup และ restore drill ให้ตรงกับ preflight จากนั้น
+ทดสอบไฟล์ที่ได้กับฐานข้อมูลสำเนาที่กู้คืนผ่าน `supabase db query --file` ก่อนใช้ไฟล์
+production ผ่าน `supabase db query --linked --file` เสมอ ตัวสร้างไฟล์จะไม่เขียนทับ
+ไฟล์เดิมและอนุญาตให้เก็บเฉพาะใน `private-data` หรือโฟลเดอร์สำรองภายนอก repository
+ห้ามนำสคริปต์ `psql` แบบหลายคำสั่งไปใช้ผ่าน Management API/SQL Editor, ห้ามลบ
+`audit_logs`, ตัวตน, roster, กฎ หรือ permissions และห้ามลบ `storage.objects` โดยตรง
 
 ## เกณฑ์ตรวจสอบผล
 

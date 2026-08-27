@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { tmpdir } from 'node:os'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { verifyRecoveryEvidence } from './verify-recovery-evidence.mjs'
+
+const execFileAsync = promisify(execFile)
+const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const restoreChecks = [
   'migration_catalog_matches_backup',
@@ -88,4 +94,37 @@ test('rejects production UAT evidence and mismatched backup artifacts', async ()
     },
   })
   await assert.rejects(verifyRecoveryEvidence(mismatched), /artifact ไม่ตรง/)
+})
+
+test('generates one atomic management-query reset with exact escaped bindings', async () => {
+  const privateDataDirectory = join(repositoryRoot, 'private-data')
+  await mkdir(privateDataDirectory, { recursive: true })
+  const directory = await mkdtemp(join(privateDataDirectory, 'reset-query-test-'))
+  const output = join(directory, 'reset.sql')
+  try {
+    await execFileAsync(process.execPath, [
+      join(repositoryRoot, 'scripts', 'generate-operational-reset-query.mjs'),
+      '--output', output,
+      '--target-term-id', '7',
+      '--expected-database', 'postgres',
+      '--project-binding', 'project-ref',
+      '--migration-head', '202608270001',
+      '--active-enrollments', '102',
+      '--backup-reference', 'backup-001',
+      '--operator-label', "ผู้ทดสอบ O'Brien",
+      '--restore-drill-reference', 'restore-001',
+    ])
+    const sql = await readFile(output, 'utf8')
+    assert.match(sql, /^-- Generated one-time operational reset\. Do not reuse\.\r?\ndo \$reset\$/)
+    assert.match(sql, /v_target_term_id bigint := 7;/)
+    assert.match(sql, /v_expected_active_enrollments bigint := 102;/)
+    assert.match(sql, /ผู้ทดสอบ O''Brien/)
+    assert.match(sql, /protected data verification failed/)
+    assert.match(sql, /\$reset\$;\s*$/)
+    assert.equal((sql.match(/do \$reset\$/g) ?? []).length, 1)
+    assert.doesNotMatch(sql, /^\\/m)
+    assert.doesNotMatch(sql, /:'[a-z_]+']/)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

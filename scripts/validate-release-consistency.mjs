@@ -92,11 +92,25 @@ const resetProcedure = await readFile(
   join(repositoryRoot, 'supabase', 'operations', 'reset_all_trial_score_data.sql'),
   'utf8',
 )
+const managementResetGenerator = await readFile(
+  join(repositoryRoot, 'scripts', 'generate-operational-reset-query.mjs'),
+  'utf8',
+)
 const documentedResetMigrationHead = /-v expected_migration_head=(\d+)/.exec(resetProcedure)?.[1]
 if (!documentedResetMigrationHead) {
   fail('Operational reset example is missing expected_migration_head')
 } else if (documentedResetMigrationHead !== latestMigrationVersion) {
   fail(`Operational reset example migration head ${documentedResetMigrationHead} does not match latest migration ${latestMigrationVersion}`)
+}
+for (const requiredGuard of [
+  'do $reset$',
+  'pg_advisory_xact_lock',
+  'protected data verification failed',
+  "writeFile(output, sql, { flag: 'wx' })",
+]) {
+  if (!managementResetGenerator.includes(requiredGuard)) {
+    fail(`Management reset generator is missing guard: ${requiredGuard}`)
+  }
 }
 
 const config = await readFile(join(repositoryRoot, 'supabase', 'config.toml'), 'utf8')
