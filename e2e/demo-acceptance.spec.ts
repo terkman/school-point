@@ -96,6 +96,41 @@ test.describe('demo acceptance smoke checks', () => {
     expect(errors).toEqual([])
   })
 
+  test('shows a complete student-code-sorted grade roster across target viewports', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
+    await page.getByRole('combobox', { name: 'ระดับชั้นสำหรับสถิติ' }).selectOption('M2')
+
+    const roster = page.getByRole('table', { name: 'รายชื่อนักเรียน ม.2 เรียงตามรหัสนักเรียน' })
+    await expect(roster).toBeVisible()
+    await expect(roster.locator('.analytics-student-entry')).toHaveCount(3)
+    await expect(roster.locator('.analytics-student-name small')).toHaveText([
+      /รหัส 69001/,
+      /รหัส 69002/,
+      /รหัส 69003/,
+    ])
+    await expect(roster.getByText('ไม่มีรายการในช่วงนี้')).toBeVisible()
+
+    await roster.getByRole('button', { name: 'ดูประวัติของ นักเรียนตัวอย่าง 02' }).click()
+    await expect(roster.getByText('นักเรียนคนนี้ไม่มีรายการคะแนนในช่วงที่เลือก')).toBeVisible()
+    await page.getByRole('combobox', { name: 'ประเภทคะแนน' }).selectOption('addition')
+    await expect(roster.locator('.analytics-student-entry')).toHaveCount(3)
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport)
+      await expect(roster).toBeVisible()
+      await expect(roster.getByText('นักเรียนตัวอย่าง 01', { exact: true })).toBeVisible()
+      await expect(roster.getByText('นักเรียนตัวอย่าง 02', { exact: true })).toBeVisible()
+      await expect(roster.getByText('นักเรียนตัวอย่าง 03', { exact: true })).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+    }
+
+    expect(errors).toEqual([])
+  })
+
   test('carries a teacher deduction and addition request through admin approval to student history and appeal submission', async ({ page }) => {
     const errors = collectBrowserErrors(page)
     const positiveRule = 'อุทิศตนและเสียสละช่วยงานโรงเรียนหรืองานครูจนเป็นที่ยอมรับ'

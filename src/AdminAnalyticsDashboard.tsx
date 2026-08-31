@@ -49,7 +49,9 @@ function barStyle(value: number, maximum: number): CSSProperties {
 
 export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
   const [filters, setFilters] = useState<AnalyticsFilters>(filtersFromLocation)
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null)
   const summary = useMemo(() => buildAdminAnalytics(state, filters), [filters, state])
+  const selectedGradeLabel = summary.gradeOptions.find((option) => option.value === filters.gradeLevel)?.label
   const gradeMaximum = Math.max(1, ...summary.gradeRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const monthMaximum = Math.max(1, ...summary.monthRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const visibleTransactions = summary.transactions.slice(0, DETAIL_LIMIT)
@@ -68,11 +70,13 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
 
   function updateFilter<Key extends keyof AnalyticsFilters>(key: Key, value: AnalyticsFilters[Key]) {
     const next = { ...filters, [key]: value }
+    setExpandedStudentId(null)
     setFilters(next)
     replaceFilterLocation(next)
   }
 
   function resetFilters() {
+    setExpandedStudentId(null)
     setFilters(DEFAULT_FILTERS)
     replaceFilterLocation(DEFAULT_FILTERS)
   }
@@ -133,8 +137,8 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
 
       <section className="analytics-metrics" aria-label="ตัวเลขสรุปคะแนน">
         <article>
-          <span className="analytics-metric-icon neutral"><Icon name="score" /></span>
-          <div><strong>{summary.totalEvents.toLocaleString('th-TH')}</strong><small>รายการที่ตรงกับตัวกรอง</small></div>
+          <span className="analytics-metric-icon neutral"><Icon name="users" /></span>
+          <div><strong>{summary.scopeStudentCount.toLocaleString('th-TH')}</strong><small>นักเรียนในขอบเขต • {summary.totalEvents} รายการ</small></div>
         </article>
         <article>
           <span className="analytics-metric-icon deduction">−</span>
@@ -149,6 +153,96 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
           <div><strong>{signedPoints(summary.netPoints)}</strong><small>ผลต่างสุทธิ</small></div>
         </article>
       </section>
+
+      {selectedGradeLabel ? (
+        <section className="analytics-panel analytics-roster-panel" aria-labelledby="student-roster-title">
+          <div className="analytics-roster-heading">
+            <div>
+              <p className="eyebrow">ข้อมูลรายบุคคล</p>
+              <h2 id="student-roster-title">รายชื่อนักเรียน {selectedGradeLabel} • {summary.studentRows.length} คน</h2>
+              <p>แสดงนักเรียนครบทุกคนตามรหัสนักเรียน แม้ไม่มีรายการคะแนนในช่วงที่เลือก</p>
+            </div>
+            <div className="analytics-roster-heading-side">
+              <span className="analytics-all-chip"><Icon name="check" size={15} /> ทุกคน</span>
+              <dl className="analytics-roster-summary" aria-label={`สรุป ${selectedGradeLabel}`}>
+                <div><dt>นักเรียน</dt><dd>{summary.studentRows.length} คน</dd></div>
+                <div><dt>ตัด</dt><dd className="analytics-negative">{summary.deductionPoints}</dd></div>
+                <div><dt>เพิ่ม</dt><dd className="analytics-positive">{summary.additionPoints}</dd></div>
+                <div><dt>สุทธิ</dt><dd className={summary.netPoints < 0 ? 'analytics-negative' : 'analytics-positive'}>{signedPoints(summary.netPoints)}</dd></div>
+              </dl>
+            </div>
+          </div>
+
+          <div className="analytics-roster" role="table" aria-label={`รายชื่อนักเรียน ${selectedGradeLabel} เรียงตามรหัสนักเรียน`}>
+            <div className="analytics-roster-columns" role="row">
+              <span role="columnheader">นักเรียน / รหัส</span>
+              <span role="columnheader">เพิ่ม</span>
+              <span role="columnheader">ตัด</span>
+              <span role="columnheader">สุทธิ</span>
+              <span role="columnheader">คะแนนปัจจุบัน</span>
+              <span role="columnheader">รายการล่าสุด</span>
+              <span role="columnheader" className="sr-only">เปิดประวัติ</span>
+            </div>
+            <div role="rowgroup">
+              {summary.studentRows.map((row) => {
+                const expanded = expandedStudentId === row.student.id
+                const historyId = `analytics-history-${row.student.id}`
+                return (
+                  <article className={`analytics-student-entry${expanded ? ' is-expanded' : ''}`} key={row.student.id}>
+                    <div className="analytics-student-row" role="row">
+                      <div className="analytics-student-name" role="cell">
+                        <strong>{row.student.name}</strong>
+                        <small>รหัส {row.student.studentCode}{row.student.roomNumber ? ` • ห้อง ${row.student.roomNumber}` : ''}</small>
+                      </div>
+                      <span className={`analytics-roster-number is-addition ${row.additionPoints ? 'analytics-positive' : 'is-zero'}`} role="cell" data-label="เพิ่ม">+{row.additionPoints}</span>
+                      <span className={`analytics-roster-number is-deduction ${row.deductionPoints ? 'analytics-negative' : 'is-zero'}`} role="cell" data-label="ตัด">{deductedPoints(row.deductionPoints)}</span>
+                      <span className={`analytics-roster-number is-net ${row.netPoints < 0 ? 'analytics-negative' : row.netPoints > 0 ? 'analytics-positive' : 'is-zero'}`} role="cell" data-label="สุทธิ">{signedPoints(row.netPoints)}</span>
+                      <span className={`analytics-current-score${row.student.score < 50 ? ' is-low' : ''}`} role="cell" data-label="คะแนนปัจจุบัน">{row.student.score}</span>
+                      <div className="analytics-latest" role="cell">
+                        {row.latest ? (
+                          <><strong>{row.latest.transaction.reason}</strong><small>{formatThaiDate(row.latest.occurredAt, false)} • {row.totalEvents} รายการ</small></>
+                        ) : <span>ไม่มีรายการในช่วงนี้</span>}
+                      </div>
+                      <button
+                        aria-controls={historyId}
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? 'ซ่อน' : 'ดู'}ประวัติของ ${row.student.name}`}
+                        className="analytics-expand-button"
+                        type="button"
+                        onClick={() => setExpandedStudentId(expanded ? null : row.student.id)}
+                      >
+                        <Icon name="chevronRight" size={19} />
+                      </button>
+                    </div>
+                    {expanded ? (
+                      <div className="analytics-student-history" id={historyId}>
+                        <div className="analytics-history-heading">
+                          <strong>ประวัติที่ตรงกับตัวกรอง</strong>
+                          <small>{row.totalEvents} รายการ</small>
+                        </div>
+                        {row.transactions.length ? row.transactions.map((item) => (
+                          <div className="analytics-history-row" key={item.transaction.id}>
+                            <time dateTime={item.occurredAt}>{formatThaiDate(item.occurredAt, false)}</time>
+                            <span>{item.transaction.reason}</span>
+                            <strong className={item.transaction.kind === 'deduction' ? 'analytics-negative' : 'analytics-positive'}>
+                              {item.transaction.kind === 'deduction' ? '−' : '+'}{item.points}
+                            </strong>
+                          </div>
+                        )) : <p className="analytics-history-empty">นักเรียนคนนี้ไม่มีรายการคะแนนในช่วงที่เลือก</p>}
+                      </div>
+                    ) : null}
+                  </article>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="analytics-roster-prompt" aria-label="คำแนะนำการดูรายชื่อนักเรียน">
+          <span><Icon name="users" size={22} /></span>
+          <div><strong>เลือกระดับชั้นเพื่อดูรายชื่อนักเรียนครบทุกคน</strong><p>ระบบจะเรียงตามรหัสนักเรียน และแสดงทั้งผู้ที่มีและไม่มีรายการคะแนน</p></div>
+        </section>
+      )}
 
       <div className="analytics-primary-grid">
         <section className="analytics-panel" aria-labelledby="grade-chart-title">

@@ -39,8 +39,21 @@ export interface AnalyticsMonthRow {
   netPoints: number
 }
 
+export interface AnalyticsStudentRow {
+  student: Student
+  transactions: AnalyticsTransaction[]
+  totalEvents: number
+  deductionCount: number
+  deductionPoints: number
+  additionCount: number
+  additionPoints: number
+  netPoints: number
+  latest?: AnalyticsTransaction
+}
+
 export interface AdminAnalyticsSummary {
   transactions: AnalyticsTransaction[]
+  studentRows: AnalyticsStudentRow[]
   gradeRows: AnalyticsGradeRow[]
   monthRows: AnalyticsMonthRow[]
   gradeOptions: Array<{ value: string; label: string }>
@@ -51,6 +64,7 @@ export interface AdminAnalyticsSummary {
   additionCount: number
   additionPoints: number
   netPoints: number
+  scopeStudentCount: number
 }
 
 const BANGKOK_TIME_ZONE = 'Asia/Bangkok'
@@ -118,6 +132,13 @@ function summarizeRows(rows: AnalyticsTransaction[]) {
   }
 }
 
+export function compareStudentCodes(left: Student, right: Student): number {
+  return left.studentCode.localeCompare(right.studentCode, 'th', {
+    numeric: true,
+    sensitivity: 'base',
+  }) || left.name.localeCompare(right.name, 'th')
+}
+
 export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters): AdminAnalyticsSummary {
   const studentById = new Map(state.students.map((student) => [student.id, student]))
   const gradeLevels = [...new Set(state.students
@@ -162,6 +183,27 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()
       || right.transaction.id.localeCompare(left.transaction.id))
 
+  const scopeStudents = state.students
+    .filter((student) => student.status === 'active')
+    .filter((student) => safeGrade === 'all' || student.gradeLevel === safeGrade)
+    .sort(compareStudentCodes)
+  const rowsByStudentId = new Map<string, AnalyticsTransaction[]>()
+  for (const row of transactions) {
+    const studentRows = rowsByStudentId.get(row.student.id)
+    if (studentRows) studentRows.push(row)
+    else rowsByStudentId.set(row.student.id, [row])
+  }
+  const studentRows = safeGrade === 'all' ? [] : scopeStudents.map((student) => {
+    const rows = rowsByStudentId.get(student.id) ?? []
+    return {
+      student,
+      transactions: rows,
+      totalEvents: rows.length,
+      ...summarizeRows(rows),
+      latest: rows[0],
+    }
+  })
+
   const displayedGrades = safeGrade === 'all' ? gradeLevels : [safeGrade]
   const gradeRows = displayedGrades.map((gradeLevel) => {
     const rows = transactions.filter((row) => row.student.gradeLevel === gradeLevel)
@@ -185,11 +227,13 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
 
   return {
     transactions,
+    studentRows,
     gradeRows,
     monthRows,
     gradeOptions,
     monthOptions,
     totalEvents: transactions.length,
+    scopeStudentCount: scopeStudents.length,
     ...totals,
   }
 }

@@ -23,7 +23,7 @@ function analyticsState(): DemoState {
   state.term = { ...state.term, id: 'term-current', label: 'ปีการศึกษา 2569 ภาคเรียนที่ 1' }
   state.students = [
     { id: 'p1-a', studentCode: '1001', name: 'นักเรียน ป.1', classroomId: 'p1', classroomName: 'ป.1', gradeLevel: 'P1', score: 95, status: 'active' },
-    { id: 'p2-a', studentCode: '2001', name: 'นักเรียน ป.2', classroomId: 'p2', classroomName: 'ป.2', gradeLevel: 'P2', score: 96, status: 'active' },
+    { id: 'p2-a', studentCode: '20010', name: 'นักเรียน ป.2', classroomId: 'p2', classroomName: 'ป.2', gradeLevel: 'P2', score: 96, status: 'active' },
     { id: 'p2-b', studentCode: '2002', name: 'นักเรียน ป.2 คนที่สอง', classroomId: 'p2', classroomName: 'ป.2', gradeLevel: 'P2', score: 100, status: 'active' },
   ]
   state.transactions = [
@@ -67,6 +67,17 @@ describe('admin score analytics', () => {
 
   it('uses Bangkok time when assigning an event to a month', () => {
     expect(analyticsMonthKey('2026-06-30T18:30:00Z')).toBe('2026-07')
+  })
+
+  it('keeps every active student in a selected grade and sorts numeric student codes', () => {
+    const summary = buildAdminAnalytics(analyticsState(), { kind: 'deduction', gradeLevel: 'P2', month: '2026-08' })
+
+    expect(summary.scopeStudentCount).toBe(2)
+    expect(summary.studentRows.map((row) => row.student.studentCode)).toEqual(['2002', '20010'])
+    expect(summary.studentRows.map((row) => [row.totalEvents, row.deductionPoints, row.student.score])).toEqual([
+      [0, 0, 100],
+      [1, 4, 96],
+    ])
   })
 
   it('renders accessible filter controls, grade summaries, and an auditable detail table', () => {
