@@ -1,4 +1,4 @@
-import { access, mkdtemp } from 'node:fs/promises'
+import { access, cp, mkdtemp } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -8,13 +8,12 @@ import { dirname } from 'node:path'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const supabaseEntrypoint = join(repositoryRoot, 'node_modules', 'supabase', 'dist', 'supabase.js')
-const edgeImportMap = join(repositoryRoot, 'scripts', 'deno-edge-validation-import-map.json')
 const mode = (process.env.SUPABASE_DB_TEST_MODE ?? 'auto').toLowerCase()
 const functionMode = (process.env.SUPABASE_FUNCTIONS_CHECK ?? 'auto').toLowerCase()
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
-    cwd: repositoryRoot,
+    cwd: options.cwd ?? repositoryRoot,
     env: { ...process.env, ...options.env },
     encoding: 'utf8',
     stdio: options.inherit ? 'inherit' : 'pipe',
@@ -98,9 +97,24 @@ if (functionMode !== 'off' && functionMode !== 'skip') {
     if (functionMode === 'required') fail('Deno is required but unavailable')
     else console.log('Deno runtime unavailable; Edge Function type-check skipped.')
   } else {
+    // Check a focused copy outside the repository so Deno cannot discover the
+    // frontend package.json and download unrelated Vite/Playwright/Cloudflare
+    // dependencies. Relative imports within the Functions tree are preserved.
+    const edgeValidationRoot = await mkdtemp(join(tmpdir(), 'school-point-edge-'))
+    const edgeFunctionsRoot = join(edgeValidationRoot, 'functions')
+    const edgeImportMap = join(edgeValidationRoot, 'deno-edge-validation-import-map.json')
+    await cp(join(repositoryRoot, 'supabase', 'functions'), edgeFunctionsRoot, { recursive: true })
+    await cp(
+      join(repositoryRoot, 'scripts', 'deno-edge-validation-import-map.json'),
+      edgeImportMap,
+    )
+    await cp(
+      join(repositoryRoot, 'scripts', 'deno-exceljs-validation-shim.ts'),
+      join(edgeValidationRoot, 'deno-exceljs-validation-shim.ts'),
+    )
     const functionEntrypoints = [
-      'supabase/functions/admin-directory/index.ts',
-      'supabase/functions/admin-school-import/index.ts',
+      join(edgeFunctionsRoot, 'admin-directory', 'index.ts'),
+      join(edgeFunctionsRoot, 'admin-school-import', 'index.ts'),
     ]
     for (const entrypoint of functionEntrypoints) {
       // Keep Edge Function validation isolated from the frontend package tree.
@@ -110,7 +124,7 @@ if (functionMode !== 'off' && functionMode !== 'skip') {
       const check = run(
         'deno',
         ['check', '--node-modules-dir=none', `--import-map=${edgeImportMap}`, entrypoint],
-        { inherit: true },
+        { inherit: true, cwd: edgeValidationRoot },
       )
       if (check.status !== 0) fail(`Deno type-check failed for ${entrypoint}`)
     }
