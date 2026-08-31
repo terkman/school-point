@@ -383,7 +383,7 @@ begin
         'score_ledger_positive_rule_snapshot_pair',
         'score_ledger_idempotency_pair',
         'score_ledger_payload_hash_length',
-        'score_ledger_direct_addition_details'
+        'score_ledger_idempotent_details'
       )
       and constraint_row.contype = 'c'
       and constraint_row.convalidated
@@ -449,12 +449,17 @@ begin
     select 1
     from pg_constraint constraint_row
     where constraint_row.conrelid = 'public.score_ledger'::regclass
-      and constraint_row.conname = 'score_ledger_direct_addition_details'
+      and constraint_row.conname = 'score_ledger_idempotent_details'
       and position(
         'entry_type = ''admin_addition'''
         in lower(pg_get_constraintdef(constraint_row.oid))
       ) > 0
+      and position(
+        'entry_type = ''admin_adjustment'''
+        in lower(pg_get_constraintdef(constraint_row.oid))
+      ) > 0
       and position('positive_rule_id is not null' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+      and position('positive_rule_id is null' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
       and position('activity_occurred_at is not null' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
       and position('internal_reason' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
       and position('evidence_note' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
@@ -1164,11 +1169,13 @@ begin
         'smallint'::regtype::oid,
         'text'::regtype::oid,
         'bigint'::regtype::oid,
+        'timestamp with time zone'::regtype::oid,
         'timestamp with time zone'::regtype::oid
       ]::oid[]
       and procedure.proargmodes = array[
         't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
-        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char"
+        't'::"char", 't'::"char", 't'::"char", 't'::"char", 't'::"char",
+        't'::"char"
       ]::"char"[]
       and procedure.proargnames = array[
         'id',
@@ -1180,7 +1187,8 @@ begin
         'balance_after',
         'reason',
         'incident_id',
-        'created_at'
+        'created_at',
+        'activity_occurred_at'
       ]::text[]
   ) then
     raise exception 'student score-history RPC return contract or STABLE volatility is incorrect';
