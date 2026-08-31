@@ -1,4 +1,4 @@
-export type AdminTab = 'overview' | 'score' | 'directory' | 'paper' | 'approvals' | 'cases' | 'manage'
+export type AdminTab = 'overview' | 'analytics' | 'score' | 'directory' | 'paper' | 'approvals' | 'cases' | 'manage'
 
 export type AdminRouteId =
   | 'today'
@@ -35,7 +35,7 @@ export const adminRoutes: readonly AdminRouteDefinition[] = [
   { id: 'system-paper', pathname: '/admin/system/paper', legacyTab: 'paper' },
   { id: 'system-academic-years', pathname: '/admin/system/academic-years', legacyTab: 'manage' },
   { id: 'system-progression', pathname: '/admin/system/progression', legacyTab: 'manage' },
-  { id: 'reports-overview', pathname: '/admin/reports', search: '?tab=overview', legacyTab: 'overview' },
+  { id: 'reports-overview', pathname: '/admin/reports', search: '?tab=overview', legacyTab: 'analytics' },
   { id: 'reports-care', pathname: '/admin/reports', search: '?tab=care', legacyTab: 'overview' },
   { id: 'reports-audit', pathname: '/admin/reports', search: '?tab=audit', legacyTab: 'overview' },
 ] as const
@@ -44,6 +44,7 @@ const routeById = new Map(adminRoutes.map((route) => [route.id, route]))
 
 const legacyRouteByTab: Record<AdminTab, AdminRouteId> = {
   overview: 'today',
+  analytics: 'reports-overview',
   score: 'score',
   directory: 'system-students',
   approvals: 'reviews',

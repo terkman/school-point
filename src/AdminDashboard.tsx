@@ -42,6 +42,7 @@ import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianO
 export type { AdminTab } from './adminRoute'
 
 const AdminPaperCenter = lazy(() => import('./AdminPaperCenter').then((module) => ({ default: module.AdminPaperCenter })))
+const AdminAnalyticsDashboard = lazy(() => import('./AdminAnalyticsDashboard').then((module) => ({ default: module.AdminAnalyticsDashboard })))
 
 function newRequestId(): string {
   return globalThis.crypto.randomUUID()
@@ -331,6 +332,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const approvalQueueCount = pendingDeductions.length + pending.length + openAppeals.length
   const navItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'แดชบอร์ด', icon: 'home' },
+    { id: 'analytics', label: 'สถิติ', icon: 'history' },
     { id: 'score', label: 'คะแนน', icon: 'star' },
     { id: 'approvals', label: 'งานรอตรวจ', icon: 'approval', count: approvalQueueCount },
     { id: 'cases', label: 'เคสร้ายแรง', icon: 'alert', count: openCases.length },
@@ -338,6 +340,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   ]
   const mobileNavItems: NavItem<AdminTab>[] = [
     { id: 'overview', label: 'วันนี้', icon: 'calendar' },
+    { id: 'analytics', label: 'สถิติ', icon: 'history' },
     { id: 'score', label: 'คะแนน', icon: 'star' },
     { id: 'approvals', label: 'ตรวจ', icon: 'approval', count: approvalQueueCount },
     { id: 'cases', label: 'เคส', icon: 'alert', count: openCases.length },
@@ -1084,7 +1087,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
   return (
     <AppShell account={account} state={state} items={navItems} mobileItems={mobileNavItems} active={tab === 'directory' || tab === 'paper' ? 'manage' : tab} onNavigate={navigateAdmin} onLogout={onLogout}>
-      {tab !== 'overview' && tab !== 'directory' ? <div className="page-heading">
+      {tab !== 'overview' && tab !== 'analytics' && tab !== 'directory' ? <div className="page-heading">
         <div><p className="eyebrow">ศูนย์ควบคุมระบบ</p><h1>{tab === 'score' ? 'จัดการคะแนน' : tab === 'approvals' ? 'งานรอตรวจ' : tab === 'cases' ? 'เคสร้ายแรง' : tab === 'paper' ? 'ศูนย์เอกสารกระดาษ' : 'จัดการระบบ'}</h1></div>
         <span className="class-chip">ผู้ดูแลระบบ • สิทธิ์ทั้งหมด</span>
       </div> : null}
@@ -1117,6 +1120,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         onOpenReviews={() => navigateAdmin('approvals')}
         onOpenCases={() => navigateAdmin('cases')}
       /> : null}
+
+      {tab === 'analytics' ? (
+        <Suspense fallback={<div className="panel"><p className="form-help">กำลังโหลดสถิติคะแนน…</p></div>}>
+          <AdminAnalyticsDashboard state={state} />
+        </Suspense>
+      ) : null}
 
       {tab === 'approvals' ? (
         <AdminReviewCenter

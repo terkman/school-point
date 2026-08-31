@@ -11,6 +11,7 @@ import {
 describe('admin URL contract', () => {
   it('maps current admin tabs to stable shareable URLs', () => {
     expect(adminHrefForTab('overview')).toBe('/admin/today')
+    expect(adminHrefForTab('analytics')).toBe('/admin/reports?tab=overview')
     expect(adminHrefForTab('score')).toBe('/admin/score')
     expect(adminHrefForTab('directory')).toBe('/admin/system/students')
     expect(adminHrefForTab('paper')).toBe('/admin/system/paper')
@@ -22,6 +23,7 @@ describe('admin URL contract', () => {
   it('resolves report filters and future system pages without losing the legacy screen', () => {
     expect(resolveAdminRoute('/admin/reports', '?tab=care').id).toBe('reports-care')
     expect(resolveAdminRoute('/admin/reports', '?tab=audit').id).toBe('reports-audit')
+    expect(adminTabFromLocation('/admin/reports', '?tab=overview&grade=P3&month=2026-07')).toBe('analytics')
     expect(adminTabFromLocation('/admin/system/rules')).toBe('manage')
     expect(adminTabFromLocation('/admin/system/paper')).toBe('paper')
     expect(adminTabFromLocation('/admin/score')).toBe('score')
