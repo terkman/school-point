@@ -102,7 +102,11 @@ if (functionMode !== 'off' && functionMode !== 'skip') {
       'supabase/functions/admin-school-import/index.ts',
     ]
     for (const entrypoint of functionEntrypoints) {
-      const check = run('deno', ['check', '--node-modules-dir=auto', entrypoint], { inherit: true })
+      // Keep Edge Function validation isolated from the frontend package tree.
+      // `auto` installs every package.json dependency into Deno's managed
+      // node_modules directory, which can exhaust GitHub runner resources even
+      // though these functions only need their explicit npm: imports.
+      const check = run('deno', ['check', '--node-modules-dir=none', entrypoint], { inherit: true })
       if (check.status !== 0) fail(`Deno type-check failed for ${entrypoint}`)
     }
   }
