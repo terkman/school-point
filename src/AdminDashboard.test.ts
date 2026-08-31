@@ -133,3 +133,38 @@ describe('admin appeal dashboard', () => {
     expect(markup).toContain('เปิดศูนย์ตรวจสอบ')
   })
 })
+
+describe('admin score correction and rule catalogue', () => {
+  it('offers append-only administrator correction as a distinct score action', () => {
+    const demo = createDemoState()
+    const account = demo.accounts.find((item) => item.role === 'admin')
+    if (!account) throw new Error('Admin demo account is missing')
+    const markup = renderToStaticMarkup(createElement(AdminDashboard, {
+      account,
+      state: demo,
+      initialTab: 'score',
+      onChange: () => undefined,
+      onLogout: () => undefined,
+    }))
+    expect(markup).toContain('ปรับคะแนนโดยผู้ดูแล')
+    expect(markup).toContain('แก้ยอดด้วยรายการใหม่ ไม่แก้ประวัติเดิม')
+  })
+
+  it('shows only add and remove rule management without a merge workflow', () => {
+    const demo = createDemoState()
+    const account = demo.accounts.find((item) => item.role === 'admin')
+    if (!account) throw new Error('Admin demo account is missing')
+    const markup = renderToStaticMarkup(createElement(AdminDashboard, {
+      account,
+      state: demo,
+      initialTab: 'rules',
+      onChange: () => undefined,
+      onLogout: () => undefined,
+    }))
+    expect(markup).toContain('เพิ่มเกณฑ์')
+    expect(markup).toContain('เกณฑ์ตัดคะแนน')
+    expect(markup).toContain('เกณฑ์เพิ่มคะแนน')
+    expect(markup).toContain('>ลบ<')
+    expect(markup).not.toContain('รวมเกณฑ์')
+  })
+})

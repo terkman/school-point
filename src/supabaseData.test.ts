@@ -718,6 +718,62 @@ describe('Supabase score mutations', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('records a signed append-only administrator score adjustment', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        ok: true,
+        replayed: false,
+        ledgerId: 401,
+        studentId: 12,
+        requestedDelta: -8,
+        appliedDelta: -8,
+        balanceBefore: 96,
+        balanceAfter: 88,
+      },
+      error: null,
+    })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    const result = await actions.adminAdjustScore({
+      clientRequestId: 'df519ee9-4ca8-4c3f-bc95-757d75c9374d',
+      studentId: '12',
+      delta: -8,
+      occurredAt: '2026-08-31T04:00:00.000Z',
+      reason: '  แก้ไขยอดจากเอกสารตรวจสอบ  ',
+      termId: '9',
+    })
+
+    expect(result).toMatchObject({ ledgerId: '401', requestedDelta: -8, appliedDelta: -8, balanceAfter: 88 })
+    expect(rpc).toHaveBeenCalledWith('admin_adjust_score', {
+      p_client_request_id: 'df519ee9-4ca8-4c3f-bc95-757d75c9374d',
+      p_student_id: '12',
+      p_delta: -8,
+      p_activity_occurred_at: '2026-08-31T04:00:00.000Z',
+      p_reason: 'แก้ไขยอดจากเอกสารตรวจสอบ',
+      p_term_id: '9',
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('adds and removes rules only through audited administrator RPCs', async () => {
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: { ok: true, id: 501, code: 'D-AUTO-000001' }, error: null })
+      .mockResolvedValueOnce({ data: { ok: true, outcome: 'archived' }, error: null })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    const actions = createSupabaseActions({ rpc } as unknown as SupabaseClient, refresh)
+
+    await expect(actions.createBehaviorRule({ title: '  ทดสอบเกณฑ์ใหม่  ', points: 5 })).resolves.toMatchObject({ code: 'D-AUTO-000001' })
+    await expect(actions.removeBehaviorRule('501')).resolves.toMatchObject({ outcome: 'archived' })
+    expect(rpc).toHaveBeenNthCalledWith(1, 'admin_create_behavior_rule', {
+      p_title: 'ทดสอบเกณฑ์ใหม่',
+      p_points: 5,
+      p_description: null,
+    })
+    expect(rpc).toHaveBeenNthCalledWith(2, 'admin_remove_behavior_rule', { p_rule_id: '501' })
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
   it('activates a planned term through the admin-only RPC and refreshes once', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: { ok: true, updated: true, term_id: 9, status: 'active' },

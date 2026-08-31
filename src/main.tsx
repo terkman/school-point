@@ -7,6 +7,7 @@ import './admin-phase1.css'
 import './admin-phase2.css'
 import './admin-paper.css'
 import './admin-analytics.css'
+import './admin-rules.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,4 +1,4 @@
-export type AdminTab = 'overview' | 'analytics' | 'score' | 'directory' | 'paper' | 'approvals' | 'cases' | 'manage'
+export type AdminTab = 'overview' | 'analytics' | 'score' | 'directory' | 'rules' | 'paper' | 'approvals' | 'cases' | 'manage'
 
 export type AdminRouteId =
   | 'today'
@@ -30,7 +30,7 @@ export const adminRoutes: readonly AdminRouteDefinition[] = [
   { id: 'cases', pathname: '/admin/cases', legacyTab: 'cases' },
   { id: 'system-students', pathname: '/admin/system/students', legacyTab: 'directory' },
   { id: 'system-staff', pathname: '/admin/system/staff', legacyTab: 'manage' },
-  { id: 'system-rules', pathname: '/admin/system/rules', legacyTab: 'manage' },
+  { id: 'system-rules', pathname: '/admin/system/rules', legacyTab: 'rules' },
   { id: 'system-import', pathname: '/admin/system/import', legacyTab: 'manage' },
   { id: 'system-paper', pathname: '/admin/system/paper', legacyTab: 'paper' },
   { id: 'system-academic-years', pathname: '/admin/system/academic-years', legacyTab: 'manage' },
@@ -47,6 +47,7 @@ const legacyRouteByTab: Record<AdminTab, AdminRouteId> = {
   analytics: 'reports-overview',
   score: 'score',
   directory: 'system-students',
+  rules: 'system-rules',
   approvals: 'reviews',
   cases: 'cases',
   manage: 'system-staff',

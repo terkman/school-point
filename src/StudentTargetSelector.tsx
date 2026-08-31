@@ -11,12 +11,13 @@ interface StudentTargetSelectorProps {
   value: StudentTargetSelection
   onChange: (next: StudentTargetSelection) => void
   disabled: boolean
-  actionLabel: 'ตัดคะแนน' | 'หักคะแนน' | 'เพิ่มคะแนน'
+  actionLabel: 'ตัดคะแนน' | 'หักคะแนน' | 'เพิ่มคะแนน' | 'ปรับคะแนน'
+  selectionMode?: 'multiple' | 'single'
   stepStart?: number
   emptyDetail?: string
 }
 
-export type ScoreAction = 'addition' | 'deduction'
+export type ScoreAction = 'addition' | 'deduction' | 'adjustment'
 
 export function ScoreActionSelector({
   value,
@@ -28,13 +29,16 @@ export function ScoreActionSelector({
   disabled: boolean
 }) {
   return (
-    <section className="score-action-selector" aria-label="เลือกว่าจะเพิ่มหรือตัดคะแนน">
+    <section className="score-action-selector" aria-label="เลือกประเภทการจัดการคะแนน">
       <div className="score-action-options" role="group" aria-label="ประเภทการจัดการคะแนน">
         <button type="button" disabled={disabled} className={value === 'deduction' ? 'deduction active' : 'deduction'} aria-pressed={value === 'deduction'} onClick={() => onChange('deduction')}>
           <strong>ตัดคะแนน</strong><span>บันทึกการกระทำผิดระเบียบ</span>
         </button>
         <button type="button" disabled={disabled} className={value === 'addition' ? 'addition active' : 'addition'} aria-pressed={value === 'addition'} onClick={() => onChange('addition')}>
           <strong>เพิ่มคะแนน</strong><span>กิจกรรมหรือพฤติกรรมเชิงบวก</span>
+        </button>
+        <button type="button" disabled={disabled} className={value === 'adjustment' ? 'adjustment active' : 'adjustment'} aria-pressed={value === 'adjustment'} onClick={() => onChange('adjustment')}>
+          <strong>ปรับคะแนนโดยผู้ดูแล</strong><span>แก้ยอดด้วยรายการใหม่ ไม่แก้ประวัติเดิม</span>
         </button>
       </div>
     </section>
@@ -47,6 +51,7 @@ export function StudentTargetSelector({
   onChange,
   disabled,
   actionLabel,
+  selectionMode = 'multiple',
   stepStart = 1,
   emptyDetail,
 }: StudentTargetSelectorProps) {
@@ -77,7 +82,7 @@ export function StudentTargetSelector({
     const firstClassroom = classrooms.find((classroom) => classroom.gradeLevel === gradeLevel)
     onChange({
       ...value,
-      scope: 'selected',
+      scope: selectionMode === 'single' ? 'single' : 'selected',
       gradeLevel,
       classroomId: firstClassroom?.id ?? '',
       singleStudentId: firstClassroom?.students[0]?.id ?? '',
@@ -90,7 +95,7 @@ export function StudentTargetSelector({
     const classroom = classrooms.find((item) => item.id === classroomId)
     onChange({
       ...value,
-      scope: 'selected',
+      scope: selectionMode === 'single' ? 'single' : 'selected',
       classroomId,
       singleStudentId: classroom?.students[0]?.id ?? '',
       selectedStudentIds: new Set(),
@@ -99,6 +104,10 @@ export function StudentTargetSelector({
   }
 
   function toggleStudent(studentId: string) {
+    if (selectionMode === 'single') {
+      onChange({ ...value, scope: 'single', singleStudentId: studentId, selectedStudentIds: new Set() })
+      return
+    }
     const nextIds = new Set(selectedIds)
     if (nextIds.has(studentId)) nextIds.delete(studentId)
     else nextIds.add(studentId)
@@ -150,17 +159,17 @@ export function StudentTargetSelector({
         </div>
       ) : (
         <div className="picker-panel">
-          <div className="picker-toolbar">
+          {selectionMode === 'multiple' ? <div className="picker-toolbar">
             <label className="select-all-row">
               <input type="checkbox" disabled={disabled || !visibleStudents.length} checked={allVisibleSelected} onChange={toggleVisibleStudents} />
               <span>{normalizedQuery ? 'เลือกทั้งหมดที่ค้นพบ' : 'เลือกทั้งหมดในห้องนี้'}</span>
               <small>{visibleStudents.length} คน</small>
             </label>
-          </div>
+          </div> : <p className="single-selection-note">เลือกนักเรียน 1 คนที่ต้องการปรับยอดคะแนน</p>}
           <div className="picker-list" aria-label="รายชื่อนักเรียน">
             {visibleStudents.length ? visibleStudents.map((student) => (
               <label className={selectedIds.has(student.id) ? 'picker-check-row selected student-list-item' : 'picker-check-row student-list-item'} key={student.id}>
-                <input type="checkbox" disabled={disabled} checked={selectedIds.has(student.id)} onChange={() => toggleStudent(student.id)} />
+                <input type={selectionMode === 'single' ? 'radio' : 'checkbox'} name={selectionMode === 'single' ? 'score-adjustment-student' : undefined} disabled={disabled} checked={selectedIds.has(student.id)} onChange={() => toggleStudent(student.id)} />
                 <span className="student-avatar">{student.name.slice(-2)}</span>
                 <span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span>
                 <b>{student.score}<small> คะแนน</small></b>

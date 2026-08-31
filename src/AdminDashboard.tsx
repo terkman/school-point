@@ -4,11 +4,16 @@ import {
   createId,
   formatThaiDate,
   type Account,
+  type BehaviorRule,
   type DemoState,
+  type PositiveBehaviorRule,
 } from './domain'
 import type {
   AdminAddPointsBulkResult,
+  AdminAdjustScoreResult,
   AppDataActions,
+  CreateBehaviorRuleInput,
+  CreatePositiveRuleInput,
   DeductionScope,
   RecordDeductionsResult,
   UpdateTeacherClassroomsInput,
@@ -37,7 +42,8 @@ import type { AdminTab } from './adminRoute'
 import { AdminToday } from './AdminToday'
 import { AdminReviewCenter, type AdditionDecisionInput, type AppealDecisionInput, type DeductionDecisionInput } from './AdminReviewCenter'
 import { AdminCaseCenter, type GuardianAttemptInput } from './AdminCaseCenter'
-import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt } from './adminWorkflows'
+import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt, validateAdminScoreAdjustment } from './adminWorkflows'
+import { AdminRuleCatalog } from './AdminRuleCatalog'
 
 export type { AdminTab } from './adminRoute'
 
@@ -46,6 +52,13 @@ const AdminAnalyticsDashboard = lazy(() => import('./AdminAnalyticsDashboard').t
 
 function newRequestId(): string {
   return globalThis.crypto.randomUUID()
+}
+
+function behaviorSeverityForPoints(points: number): BehaviorRule['severity'] {
+  if (points >= 50) return 'critical'
+  if (points >= 25) return 'serious'
+  if (points >= 10) return 'medium'
+  return 'low'
 }
 
 interface AdminDashboardProps {
@@ -274,6 +287,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
   const openAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
+  const adminAdjustments = state.transactions.filter((item) => item.kind === 'adjustment')
   const [tab, setTab] = useAdminRoute(initialTab)
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('deduction')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students, 'selected'))
@@ -309,6 +323,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminConfirmSeriousBulk, setAdminConfirmSeriousBulk] = useState(false)
   const [adminDeductionRequestId, setAdminDeductionRequestId] = useState(() => newRequestId())
   const [adminDeductionResult, setAdminDeductionResult] = useState<RecordDeductionsResult | null>(null)
+  const [adminAdjustmentDirection, setAdminAdjustmentDirection] = useState<'increase' | 'decrease'>('increase')
+  const [adminAdjustmentPoints, setAdminAdjustmentPoints] = useState(1)
+  const [adminAdjustmentOccurredAt, setAdminAdjustmentOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [adminAdjustmentReason, setAdminAdjustmentReason] = useState('')
+  const [adminAdjustmentReview, setAdminAdjustmentReview] = useState(false)
+  const [adminAdjustmentRequestId, setAdminAdjustmentRequestId] = useState(() => newRequestId())
+  const [adminAdjustmentResult, setAdminAdjustmentResult] = useState<AdminAdjustScoreResult | null>(null)
   const [adminScoreStage, setAdminScoreStage] = useState<'select' | 'details'>('select')
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
@@ -327,6 +348,9 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const adminDeductionBeforeTotal = adminTargets.reduce((sum, student) => sum + student.score, 0)
   const adminDeductionAfterTotal = adminTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, -(adminDeductionRule?.points ?? 0)).after, 0)
   const adminSeriousBulk = Boolean(adminDeductionRule && ['serious', 'critical'].includes(adminDeductionRule.severity) && adminTargets.length > 1)
+  const adminAdjustmentTarget = adminTargets.length === 1 ? adminTargets[0] : undefined
+  const adminAdjustmentDelta = (adminAdjustmentDirection === 'increase' ? 1 : -1) * adminAdjustmentPoints
+  const adminAdjustmentPreview = applyScoreDelta(adminAdjustmentTarget?.score ?? 0, adminAdjustmentDelta)
   const mutationBusy = Boolean(busyAction)
   const adminAdditionBusy = mutationBusy
   const approvalQueueCount = pendingDeductions.length + pending.length + openAppeals.length
@@ -613,20 +637,31 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setAdminDeductionRequestId(newRequestId())
   }
 
+  function invalidateAdminAdjustment() {
+    setAdminAdjustmentReview(false)
+    setAdminAdjustmentResult(null)
+    setAdminAdjustmentRequestId(newRequestId())
+  }
+
   function changeAdminSelection(next: typeof adminSelection) {
     setAdminSelection(next)
     invalidateAdminRequest()
     invalidateAdminDeduction()
+    invalidateAdminAdjustment()
   }
 
   function changeAdminScoreAction(next: ScoreAction) {
     setAdminScoreAction(next)
+    if (next === 'adjustment' && resolveStudentTargets(state.students, adminSelection).length !== 1) {
+      setAdminSelection(createInitialStudentSelection(state.students, 'single'))
+    }
     setAdminScoreStage('select')
     setAnnouncement('')
   }
 
   function openAdminScore(next: ScoreAction = 'deduction') {
     setAdminScoreAction(next)
+    if (next === 'adjustment') setAdminSelection(createInitialStudentSelection(state.students, 'single'))
     setAdminScoreStage('select')
     setAnnouncement('')
     navigateAdmin('score')
@@ -881,6 +916,174 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
   }
 
+  async function adjustScoreDirectly(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (mutationBusy) return
+    const occurredAt = localDateTimeToIso(adminAdjustmentOccurredAt)
+    const validationError = validateAdminScoreAdjustment({
+      delta: adminAdjustmentDelta,
+      occurredAt: occurredAt ?? '',
+      reason: adminAdjustmentReason,
+    })
+    if (!adminAdjustmentTarget) {
+      setAnnouncement('กรุณาเลือกนักเรียน 1 คนที่ต้องการปรับยอดคะแนน')
+      return
+    }
+    if (validationError) {
+      setAnnouncement(validationError)
+      return
+    }
+    if (!adminAdjustmentReview) {
+      setAdminAdjustmentReview(true)
+      setAnnouncement(`ตรวจสอบการปรับคะแนนของ ${adminAdjustmentTarget.name} ก่อนยืนยัน`)
+      return
+    }
+
+    setBusyAction('admin-adjustment')
+    try {
+      let result: AdminAdjustScoreResult
+      if (actions) {
+        result = await actions.adminAdjustScore({
+          clientRequestId: adminAdjustmentRequestId,
+          studentId: adminAdjustmentTarget.id,
+          delta: adminAdjustmentDelta,
+          occurredAt: occurredAt!,
+          reason: adminAdjustmentReason.trim(),
+          termId: state.term.id,
+        })
+      } else {
+        const change = applyScoreDelta(adminAdjustmentTarget.score, adminAdjustmentDelta)
+        const ledgerId = createId('tx')
+        result = {
+          ok: true,
+          replayed: false,
+          ledgerId,
+          studentId: adminAdjustmentTarget.id,
+          requestedDelta: change.requestedDelta,
+          appliedDelta: change.appliedDelta,
+          balanceBefore: change.before,
+          balanceAfter: change.after,
+        }
+        onChange({
+          ...state,
+          students: state.students.map((student) => student.id === adminAdjustmentTarget.id ? { ...student, score: change.after } : student),
+          transactions: [{
+            id: ledgerId,
+            studentId: adminAdjustmentTarget.id,
+            termId: state.term.id,
+            kind: 'adjustment',
+            requestedDelta: change.requestedDelta,
+            appliedDelta: change.appliedDelta,
+            scoreBefore: change.before,
+            scoreAfter: change.after,
+            reason: adminAdjustmentReason.trim(),
+            occurredAt: occurredAt!,
+            activityOccurredAt: occurredAt!,
+            internalReason: adminAdjustmentReason.trim(),
+            actorId: account.id,
+          }, ...state.transactions],
+        })
+      }
+      setAdminAdjustmentResult(result)
+      setAdminAdjustmentReview(false)
+      setAdminAdjustmentReason('')
+      setAdminAdjustmentRequestId(newRequestId())
+      const appliedLabel = result.appliedDelta > 0 ? `+${result.appliedDelta}` : String(result.appliedDelta)
+      setAnnouncement(`บันทึกการปรับคะแนน ${appliedLabel} คะแนนแล้ว ยอดเปลี่ยนจาก ${result.balanceBefore} เป็น ${result.balanceAfter} โดยประวัติเดิมไม่ถูกแก้ไข`)
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกการปรับคะแนนได้')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function createBehaviorRule(input: CreateBehaviorRuleInput) {
+    if (mutationBusy) return
+    setBusyAction('create-behavior-rule')
+    try {
+      if (actions) {
+        const result = await actions.createBehaviorRule(input)
+        setAnnouncement(`เพิ่มเกณฑ์ ${result.code} เรียบร้อยแล้ว`)
+      } else {
+        const severity = behaviorSeverityForPoints(input.points)
+        const newRule: BehaviorRule = {
+          id: createId('rule'),
+          code: `D-AUTO-${String(state.rules.length + 1).padStart(6, '0')}`,
+          category: severity === 'critical' ? 'ความผิดขั้นร้ายแรงมาก' : severity === 'serious' ? 'ความผิดขั้นร้ายแรง' : severity === 'medium' ? 'ความผิดขั้นปานกลาง' : 'ความผิดขั้นเบา',
+          title: input.title.trim(),
+          description: input.description?.trim(),
+          points: input.points,
+          severity,
+          guardianContactRequired: severity === 'serious' || severity === 'critical',
+          active: true,
+        }
+        onChange({ ...state, rules: [...state.rules, newRule] })
+        setAnnouncement(`เพิ่มเกณฑ์ ${newRule.code} เรียบร้อยแล้ว`)
+      }
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function createPositiveRule(input: CreatePositiveRuleInput) {
+    if (mutationBusy) return
+    setBusyAction('create-positive-rule')
+    try {
+      if (actions) {
+        const result = await actions.createPositiveRule(input)
+        setAnnouncement(`เพิ่มเกณฑ์ ${result.code} เรียบร้อยแล้ว`)
+      } else {
+        const newRule: PositiveBehaviorRule = {
+          id: createId('positive-rule'),
+          code: `P-AUTO-${String(state.positiveRules.length + 1).padStart(6, '0')}`,
+          category: 'เกณฑ์การเพิ่มคะแนนความประพฤติ',
+          title: input.title.trim(),
+          description: input.description?.trim() ?? '',
+          defaultPoints: input.discretionary ? null : input.points,
+          maxPoints: input.points,
+          discretionary: input.discretionary,
+          active: true,
+        }
+        onChange({ ...state, positiveRules: [...state.positiveRules, newRule] })
+        setAnnouncement(`เพิ่มเกณฑ์ ${newRule.code} เรียบร้อยแล้ว`)
+      }
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function removeBehaviorRule(rule: BehaviorRule) {
+    if (mutationBusy) return
+    setBusyAction(`remove-behavior-rule-${rule.id}`)
+    try {
+      if (actions) {
+        const result = await actions.removeBehaviorRule(rule.id)
+        setAnnouncement(result.outcome === 'deleted' ? `ลบเกณฑ์ ${rule.title} แล้ว` : `นำเกณฑ์ ${rule.title} ออกจากรายการครูแล้ว โดยยังเก็บประวัติเดิมไว้`)
+      } else {
+        onChange({ ...state, rules: state.rules.map((item) => item.id === rule.id ? { ...item, active: false } : item) })
+        setAnnouncement(`นำเกณฑ์ ${rule.title} ออกจากรายการครูแล้ว โดยยังเก็บประวัติเดิมไว้`)
+      }
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function removePositiveRule(rule: PositiveBehaviorRule) {
+    if (mutationBusy) return
+    setBusyAction(`remove-positive-rule-${rule.id}`)
+    try {
+      if (actions) {
+        const result = await actions.removePositiveRule(rule.id)
+        setAnnouncement(result.outcome === 'deleted' ? `ลบเกณฑ์ ${rule.title} แล้ว` : `นำเกณฑ์ ${rule.title} ออกจากรายการครูแล้ว โดยยังเก็บประวัติเดิมไว้`)
+      } else {
+        onChange({ ...state, positiveRules: state.positiveRules.map((item) => item.id === rule.id ? { ...item, active: false } : item) })
+        setAnnouncement(`นำเกณฑ์ ${rule.title} ออกจากรายการครูแล้ว โดยยังเก็บประวัติเดิมไว้`)
+      }
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   async function resetTermScores() {
     if (mutationBusy || state.term.resetCompletedAt) return
     const confirmed = window.confirm(`ยืนยันเริ่มคะแนน ${state.term.label} ที่ 100 สำหรับนักเรียน ${state.students.length} คน? เคสติดตามที่ยังไม่เสร็จจะยังคงอยู่`)
@@ -1086,14 +1289,14 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   }
 
   return (
-    <AppShell account={account} state={state} items={navItems} mobileItems={mobileNavItems} active={tab === 'directory' || tab === 'paper' ? 'manage' : tab} onNavigate={navigateAdmin} onLogout={onLogout}>
+    <AppShell account={account} state={state} items={navItems} mobileItems={mobileNavItems} active={tab === 'directory' || tab === 'rules' || tab === 'paper' ? 'manage' : tab} onNavigate={navigateAdmin} onLogout={onLogout}>
       {tab !== 'overview' && tab !== 'analytics' && tab !== 'directory' ? <div className="page-heading">
         <div><p className="eyebrow">ศูนย์ควบคุมระบบ</p><h1>{tab === 'score' ? 'จัดการคะแนน' : tab === 'approvals' ? 'งานรอตรวจ' : tab === 'cases' ? 'เคสร้ายแรง' : tab === 'paper' ? 'ศูนย์เอกสารกระดาษ' : 'จัดการระบบ'}</h1></div>
         <span className="class-chip">ผู้ดูแลระบบ • สิทธิ์ทั้งหมด</span>
       </div> : null}
       <div className="announcement" aria-live="polite">{announcement}</div>
 
-      {tab === 'manage' || tab === 'directory' || tab === 'paper' ? (
+      {tab === 'manage' || tab === 'directory' || tab === 'rules' || tab === 'paper' ? (
         <nav className="system-subnav" aria-label="เมนูจัดการระบบ">
           <button className={tab === 'manage' ? 'active' : ''} aria-current={tab === 'manage' ? 'page' : undefined} onClick={() => navigateAdmin('manage')}>
             <Icon name="settings" size={18} />
@@ -1102,6 +1305,10 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           <button className={tab === 'directory' ? 'active' : ''} aria-current={tab === 'directory' ? 'page' : undefined} onClick={() => navigateAdmin('directory')}>
             <Icon name="users" size={18} />
             <span><strong>บุคคลและบัญชี</strong><small>นักเรียน บุคลากร และรหัสผ่าน</small></span>
+          </button>
+          <button className={tab === 'rules' ? 'active' : ''} aria-current={tab === 'rules' ? 'page' : undefined} onClick={() => navigateAdmin('rules')}>
+            <Icon name="book" size={18} />
+            <span><strong>เกณฑ์คะแนน</strong><small>เพิ่มหรือนำเกณฑ์ออก</small></span>
           </button>
           <button className={tab === 'paper' ? 'active' : ''} aria-current={tab === 'paper' ? 'page' : undefined} onClick={() => navigateAdmin('paper')}>
             <Icon name="document" size={18} />
@@ -1154,6 +1361,16 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} /> : null}
 
+      {tab === 'rules' ? <AdminRuleCatalog
+        deductionRules={state.rules}
+        positiveRules={state.positiveRules}
+        busy={mutationBusy}
+        onCreateBehavior={createBehaviorRule}
+        onCreatePositive={createPositiveRule}
+        onRemoveBehavior={removeBehaviorRule}
+        onRemovePositive={removePositiveRule}
+      /> : null}
+
       {tab === 'paper' ? (
         <Suspense fallback={<div className="panel"><p className="form-help">กำลังเปิดศูนย์เอกสารกระดาษ…</p></div>}>
           <AdminPaperCenter state={state} actions={actions} />
@@ -1198,12 +1415,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             value={adminSelection}
             onChange={changeAdminSelection}
             disabled={mutationBusy}
-            actionLabel={adminScoreAction === 'addition' ? 'เพิ่มคะแนน' : 'หักคะแนน'}
+            actionLabel={adminScoreAction === 'addition' ? 'เพิ่มคะแนน' : adminScoreAction === 'adjustment' ? 'ปรับคะแนน' : 'หักคะแนน'}
+            selectionMode={adminScoreAction === 'adjustment' ? 'single' : 'multiple'}
             stepStart={1}
           />
           <div className="score-selection-footer">
             <span>เลือกแล้ว <strong>{adminTargets.length}</strong> คน</span>
-            <button className="button primary" type="button" disabled={mutationBusy || !adminTargets.length} onClick={() => { setAdminScoreStage('details'); setAnnouncement('') }}>
+            <button className="button primary" type="button" disabled={mutationBusy || !adminTargets.length || (adminScoreAction === 'adjustment' && adminTargets.length !== 1)} onClick={() => { setAdminScoreStage('details'); setAnnouncement('') }}>
               ถัดไป <Icon name="chevronRight" size={18} />
             </button>
           </div>
@@ -1252,6 +1470,37 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             </div>
             {adminAdditionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminAdditionResult.targetCount} คน</strong><span>เพิ่มจริงรวม {adminAdditionResult.totalAppliedPoints} คะแนน</span></div> : null}
           </form>
+          ) : adminScoreAction === 'adjustment' ? (
+          <form className="panel stack-form score-details-form admin-adjustment-form" onSubmit={adjustScoreDirectly}>
+            <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>ปรับคะแนนโดยผู้ดูแล</h2></div><span className="badge status-pending">สร้างประวัติใหม่</span></div>
+            {adminAdjustmentTarget ? <div className="selected-student-bar batch-target-bar">
+              <div><span className="student-avatar large">1</span><div><strong>{adminAdjustmentTarget.name}</strong><small>{adminAdjustmentTarget.studentCode} • {adminAdjustmentTarget.classroomName}</small></div></div>
+              <div><span>คะแนนปัจจุบัน</span><b>{adminAdjustmentTarget.score}</b></div>
+            </div> : <p className="form-error">กรุณากลับไปเลือกนักเรียน 1 คน</p>}
+            <fieldset className="adjustment-direction-fieldset">
+              <legend>ประเภทการปรับ</legend>
+              <div className="adjustment-direction-options">
+                <button type="button" className={adminAdjustmentDirection === 'increase' ? 'increase active' : 'increase'} aria-pressed={adminAdjustmentDirection === 'increase'} disabled={mutationBusy} onClick={() => { setAdminAdjustmentDirection('increase'); invalidateAdminAdjustment() }}>+ เพิ่มคะแนน</button>
+                <button type="button" className={adminAdjustmentDirection === 'decrease' ? 'decrease active' : 'decrease'} aria-pressed={adminAdjustmentDirection === 'decrease'} disabled={mutationBusy} onClick={() => { setAdminAdjustmentDirection('decrease'); invalidateAdminAdjustment() }}>− ลดคะแนน</button>
+              </div>
+            </fieldset>
+            <div className="date-field-grid">
+              <label>จำนวนคะแนน<input type="number" min="1" max="100" step="1" value={adminAdjustmentPoints} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentPoints(Number(event.target.value)); invalidateAdminAdjustment() }} required /></label>
+              <label>วันที่และเวลาของรายการ<input type="datetime-local" max={toLocalDateTimeInputValue()} value={adminAdjustmentOccurredAt} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentOccurredAt(event.target.value); invalidateAdminAdjustment() }} required /></label>
+            </div>
+            <label>เหตุผลการปรับคะแนน <b>จำเป็น</b><textarea minLength={5} maxLength={2000} value={adminAdjustmentReason} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentReason(event.target.value); invalidateAdminAdjustment() }} placeholder="เช่น แก้ไขยอดจากการบันทึกคลาดเคลื่อน หรือปรับยอดตามเอกสารตรวจสอบ" required /></label>
+            <p className="scope-note"><Icon name="shield" size={18} /> ระบบจะเพิ่มรายการใหม่นี้ในประวัติ นักเรียนเห็นเหตุผลและคะแนนที่เปลี่ยน แต่รายการเดิมจะไม่ถูกแก้ไข</p>
+            {adminAdjustmentTarget ? <div className="score-result-preview adjustment-preview"><span>คะแนนหลังปรับ</span><strong>{adminAdjustmentPreview.before} <i>→</i> {adminAdjustmentPreview.after}</strong><small>ขอปรับ {adminAdjustmentDelta > 0 ? '+' : ''}{adminAdjustmentDelta} • มีผลจริง {adminAdjustmentPreview.appliedDelta > 0 ? '+' : ''}{adminAdjustmentPreview.appliedDelta}</small></div> : null}
+            {adminAdjustmentReview ? <section className="deduction-review adjustment-review" aria-label="ตรวจสอบก่อนปรับคะแนน">
+              <div className="review-heading"><div><p className="eyebrow">ขั้นตอนสุดท้าย</p><h2>ยืนยันสร้างรายการปรับคะแนน</h2></div></div>
+              <dl className="review-facts"><div><dt>นักเรียน</dt><dd>{adminAdjustmentTarget?.name}</dd></div><div><dt>การเปลี่ยนแปลง</dt><dd>{adminAdjustmentDelta > 0 ? '+' : ''}{adminAdjustmentDelta} คะแนน</dd></div><div><dt>วันที่</dt><dd>{formatThaiDate(localDateTimeToIso(adminAdjustmentOccurredAt) ?? adminAdjustmentOccurredAt)}</dd></div><div><dt>เหตุผล</dt><dd>{adminAdjustmentReason.trim()}</dd></div></dl>
+            </section> : null}
+            <div className="form-actions">
+              <button type="button" className="button secondary" disabled={mutationBusy} onClick={() => { if (adminAdjustmentReview) setAdminAdjustmentReview(false); else { setAdminAdjustmentReason(''); invalidateAdminAdjustment() } }}>{adminAdjustmentReview ? 'กลับไปแก้ไข' : 'ล้างเหตุผล'}</button>
+              <button type="submit" className="button primary" disabled={mutationBusy || !adminAdjustmentTarget}>{busyAction === 'admin-adjustment' ? 'กำลังบันทึก…' : adminAdjustmentReview ? 'ยืนยันปรับคะแนน' : 'ตรวจสอบก่อนยืนยัน'}</button>
+            </div>
+            {adminAdjustmentResult ? <div className="batch-result compact-result"><strong>บันทึกการปรับคะแนนแล้ว</strong><span>ยอด {adminAdjustmentResult.balanceBefore} → {adminAdjustmentResult.balanceAfter} • ประวัติเดิมยังอยู่ครบ</span></div> : null}
+          </form>
           ) : (
           <form className="panel stack-form score-details-form" onSubmit={deductPointsDirectly}>
             <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการตัดคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
@@ -1289,9 +1538,11 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             {adminDeductionResult ? <div className="batch-result compact-result"><strong>บันทึกสำเร็จ {adminDeductionResult.targetCount} คน</strong><span>ตัดคะแนนจริงรวม {adminDeductionResult.totalAppliedPoints} คะแนน</span></div> : null}
           </form>
           )}
-          <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
+          {adminScoreAction === 'adjustment' ? <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติปรับคะแนนโดยผู้ดูแล</h2></div><span className="counter">{adminAdjustments.length}</span></div>
+            {adminAdjustments.length ? <div className="record-list">{adminAdjustments.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • {transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta} คะแนน</strong><span>{transaction.reason}</span><small>{formatThaiDate(transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-pending">ปรับยอด</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการปรับคะแนน" detail="รายการแก้ยอดโดยผู้ดูแลจะแสดงที่นี่โดยไม่แก้ประวัติเดิม" />}
+          </section> : <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
             {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); const detail = transaction.internalReason?.trim() !== transaction.positiveRuleTitle?.trim() ? transaction.internalReason?.trim() : ''; return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={transaction.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
-          </section>
+          </section>}
           </>}
           </> : null}
           {tab === 'manage' ? <>

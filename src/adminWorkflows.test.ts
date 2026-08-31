@@ -6,6 +6,7 @@ import {
   guardianReminderDueAt,
   validateAdditionDecision,
   validateAppealDecision,
+  validateAdminScoreAdjustment,
 } from './adminWorkflows'
 
 describe('admin review decisions', () => {
@@ -41,5 +42,15 @@ describe('guardian contact outcomes', () => {
 
   it('schedules the next reminder after 24 hours', () => {
     expect(guardianReminderDueAt('2026-08-03T00:00:00.000Z').toISOString()).toBe('2026-08-04T00:00:00.000Z')
+  })
+})
+
+describe('administrator score adjustments', () => {
+  it('requires a signed non-zero integer, a reason, and a nonfuture date', () => {
+    const now = new Date('2026-08-31T12:00:00.000Z')
+    expect(validateAdminScoreAdjustment({ delta: -5, occurredAt: '2026-08-31T10:00:00.000Z', reason: 'แก้ไขยอดที่บันทึกคลาดเคลื่อน', now })).toBe('')
+    expect(validateAdminScoreAdjustment({ delta: 0, occurredAt: '2026-08-31T10:00:00.000Z', reason: 'แก้ไขยอดเดิม', now })).toContain('จำนวนเต็ม')
+    expect(validateAdminScoreAdjustment({ delta: 5, occurredAt: '2026-08-31T10:00:00.000Z', reason: '', now })).toContain('เหตุผล')
+    expect(validateAdminScoreAdjustment({ delta: 5, occurredAt: '2026-09-01T10:00:00.000Z', reason: 'แก้ไขยอดเดิม', now })).toContain('อนาคต')
   })
 })

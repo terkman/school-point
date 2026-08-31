@@ -57,6 +57,29 @@ export function validateAppealDecision(input: {
   return ''
 }
 
+export function validateAdminScoreAdjustment(input: {
+  delta: number
+  occurredAt: string
+  reason: string
+  now?: Date
+}): string {
+  if (!Number.isInteger(input.delta) || input.delta === 0 || input.delta < -100 || input.delta > 100) {
+    return 'คะแนนที่ปรับต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 100 และเลือกเพิ่มหรือลดให้ชัดเจน'
+  }
+  if (input.reason.trim().length < MIN_REVIEW_NOTE_LENGTH) {
+    return 'กรุณาระบุเหตุผลการปรับคะแนนอย่างน้อย 5 ตัวอักษร'
+  }
+  const occurredAt = new Date(input.occurredAt)
+  if (!input.occurredAt || !Number.isFinite(occurredAt.getTime())) {
+    return 'กรุณาระบุวันที่และเวลาที่ต้องการบันทึก'
+  }
+  const now = input.now ?? new Date()
+  if (occurredAt.getTime() > now.getTime() + 5 * 60 * 1000) {
+    return 'วันที่และเวลาปรับคะแนนต้องไม่เป็นเวลาในอนาคต'
+  }
+  return ''
+}
+
 export function guardianOutcomeClosesNotification(channel: GuardianContactChannel, outcome: GuardianContactOutcome): boolean {
   if (channel === 'phone') return outcome === 'answered'
   if (channel === 'line' || channel === 'messenger' || channel === 'sms') return outcome === 'read_or_replied'

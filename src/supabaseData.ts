@@ -2,13 +2,16 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import type {
   AdminAddPointsBulkResult,
   AdminAddPointsResult,
+  AdminAdjustScoreResult,
   AppDataActions,
+  CreateRuleResult,
   PaperDocumentRecord,
   PaperDocumentSnapshot,
   RecordGuardianContactAttemptResult,
   RecordDeductionsResult,
   RequestDeductionsResult,
   RequestPointAdditionsResult,
+  RemoveRuleResult,
   MutationSyncWarning,
 } from './dataActions'
 import type {
@@ -79,8 +82,10 @@ interface TermRow {
 
 interface RuleRow {
   id: number | string
+  rule_code: string
   category: string
   title_th: string
+  description_th: string | null
   default_deduction: number
   severity: Severity
   guardian_contact_required: boolean
@@ -315,6 +320,7 @@ function fullName(row: { title: string | null; given_name: string; family_name: 
 }
 
 function ledgerKind(entryType: string, appliedDelta: number): ScoreTransaction['kind'] {
+  if (entryType === 'admin_adjustment') return 'adjustment'
   if (entryType === 'deduction' || appliedDelta < 0) return 'deduction'
   if (entryType === 'semester_opening') return 'reset'
   return 'addition'
@@ -343,8 +349,10 @@ function profileAccount(profile: ProfileRow, user: User, username: string, avata
 function mapRules(rows: RuleRow[]): BehaviorRule[] {
   return rows.map((row) => ({
     id: asId(row.id),
+    code: row.rule_code,
     category: row.category,
     title: row.title_th,
+    description: row.description_th ?? '',
     points: row.default_deduction,
     severity: row.severity,
     guardianContactRequired: row.guardian_contact_required,
@@ -468,6 +476,50 @@ function normalizeAdminAddPointsResult(value: unknown): AdminAddPointsResult {
     throw new Error('รูปแบบผลสรุปการเพิ่มคะแนนไม่ถูกต้อง')
   }
   return result
+}
+
+function normalizeAdminAdjustScoreResult(value: unknown): AdminAdjustScoreResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปการปรับคะแนนกลับมา')
+  const row = value as Record<string, unknown>
+  const result: AdminAdjustScoreResult = {
+    ok: row.ok === true,
+    replayed: row.replayed === true,
+    ledgerId: String(row.ledgerId ?? ''),
+    studentId: String(row.studentId ?? ''),
+    requestedDelta: Number(row.requestedDelta),
+    appliedDelta: Number(row.appliedDelta),
+    balanceBefore: Number(row.balanceBefore),
+    balanceAfter: Number(row.balanceAfter),
+    ...syncWarningProperty(row),
+  }
+  if (!result.ok || !result.ledgerId || !result.studentId
+    || [result.requestedDelta, result.appliedDelta, result.balanceBefore, result.balanceAfter].some((item) => !Number.isFinite(item))) {
+    throw new Error('รูปแบบผลสรุปการปรับคะแนนไม่ถูกต้อง')
+  }
+  return result
+}
+
+function normalizeCreateRuleResult(value: unknown): CreateRuleResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งข้อมูลเกณฑ์ที่สร้างกลับมา')
+  const row = value as Record<string, unknown>
+  const result: CreateRuleResult = {
+    ok: row.ok === true,
+    id: String(row.id ?? ''),
+    code: String(row.code ?? ''),
+    ...syncWarningProperty(row),
+  }
+  if (!result.ok || !result.id || !result.code) throw new Error('รูปแบบข้อมูลเกณฑ์ที่สร้างไม่ถูกต้อง')
+  return result
+}
+
+function normalizeRemoveRuleResult(value: unknown): RemoveRuleResult {
+  if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลการนำเกณฑ์ออกกลับมา')
+  const row = value as Record<string, unknown>
+  const outcome = String(row.outcome)
+  if (row.ok !== true || (outcome !== 'deleted' && outcome !== 'archived')) {
+    throw new Error('รูปแบบผลการนำเกณฑ์ออกไม่ถูกต้อง')
+  }
+  return { ok: true, outcome, ...syncWarningProperty(row) }
 }
 
 function normalizeRequestPointAdditionsResult(value: unknown): RequestPointAdditionsResult {
@@ -692,19 +744,19 @@ async function loadAccessibleTermAndRules(
     .maybeSingle()
   const rulesQuery = fetchAllPages<RuleRow>('โหลดระเบียบ', (from, to) => client
     .from('behavior_rules')
-    .select('id,category,title_th,default_deduction,severity,guardian_contact_required,is_active')
+    .select('id,rule_code,category,title_th,description_th,default_deduction,severity,guardian_contact_required,is_active')
     .order('rule_code')
     .order('id')
     .range(from, to))
   const positiveRulesQuery = role === 'student'
     ? Promise.resolve([] as PositiveRuleRow[])
-    : fetchAllPages<PositiveRuleRow>('โหลดเกณฑ์เพิ่มคะแนน', (from, to) => client
-      .from('positive_behavior_rules')
-      .select('id,rule_code,category,title_th,description_th,default_addition,max_addition,is_discretionary,is_active')
-      .eq('is_active', true)
-      .order('rule_code')
-      .order('id')
-      .range(from, to))
+    : fetchAllPages<PositiveRuleRow>('โหลดเกณฑ์เพิ่มคะแนน', (from, to) => {
+      const query = client
+        .from('positive_behavior_rules')
+        .select('id,rule_code,category,title_th,description_th,default_addition,max_addition,is_discretionary,is_active')
+      const visibleQuery = role === 'admin' || role === 'director' ? query : query.eq('is_active', true)
+      return visibleQuery.order('rule_code').order('id').range(from, to)
+    })
 
   if (role !== 'admin' && role !== 'director') {
     const [activeResult, rulesResult, positiveRulesResult] = await Promise.all([
@@ -788,7 +840,7 @@ async function loadStudentState(
       scoreBefore: row.balance_before,
       scoreAfter: row.balance_after,
       reason: row.reason,
-      occurredAt: incident?.occurred_at ?? row.created_at,
+      occurredAt: incident?.occurred_at ?? row.activity_occurred_at ?? row.created_at,
       actorId: '',
       incidentId,
       appealDeadline: incident?.appeal_deadline,
@@ -1025,7 +1077,7 @@ async function loadStaffState(
       scoreAfter: row.balance_after,
       ruleId: incident ? asId(incident.rule_id) : undefined,
       reason: row.reason,
-      occurredAt: incident?.occurred_at ?? row.created_at,
+      occurredAt: incident?.occurred_at ?? row.activity_occurred_at ?? row.created_at,
       actorId: row.actor_user_id ?? '',
       incidentId,
       sourceRequestId: row.deduction_request_id !== null && row.deduction_request_id !== undefined
@@ -1427,6 +1479,37 @@ export function createSupabaseActions(
         p_evidence_note: input.evidenceNote.trim(),
         p_term_id: input.termId,
       }),
+    ),
+    adminAdjustScore: async (input) => normalizeAdminAdjustScoreResult(
+      await mutate<unknown>('admin_adjust_score', {
+        p_client_request_id: input.clientRequestId,
+        p_student_id: input.studentId,
+        p_delta: input.delta,
+        p_activity_occurred_at: input.occurredAt,
+        p_reason: input.reason.trim(),
+        p_term_id: input.termId,
+      }),
+    ),
+    createBehaviorRule: async (input) => normalizeCreateRuleResult(
+      await mutate<unknown>('admin_create_behavior_rule', {
+        p_title: input.title.trim(),
+        p_points: input.points,
+        p_description: input.description?.trim() || null,
+      }),
+    ),
+    createPositiveRule: async (input) => normalizeCreateRuleResult(
+      await mutate<unknown>('admin_create_positive_rule', {
+        p_title: input.title.trim(),
+        p_points: input.points,
+        p_is_discretionary: input.discretionary,
+        p_description: input.description?.trim() || null,
+      }),
+    ),
+    removeBehaviorRule: async (ruleId) => normalizeRemoveRuleResult(
+      await mutate<unknown>('admin_remove_behavior_rule', { p_rule_id: ruleId }),
+    ),
+    removePositiveRule: async (ruleId) => normalizeRemoveRuleResult(
+      await mutate<unknown>('admin_remove_positive_rule', { p_rule_id: ruleId }),
     ),
     initializeTermScores: (termId) => mutate<void>('initialize_term_scores', { p_term_id: termId }),
     updateTermSchedule: (input) => mutate<void>('admin_update_term_schedule', {

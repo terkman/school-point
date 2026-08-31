@@ -4,5 +4,6 @@
 begin;
 
 select private.seed_2569_behavior_rules();
+select private.consolidate_2569_score_rules();
 
 commit;

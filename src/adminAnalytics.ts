@@ -152,7 +152,7 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
 
   const allTermRows: AnalyticsTransaction[] = []
   for (const transaction of state.transactions) {
-    if (transaction.termId !== state.term.id || transaction.kind === 'reset') continue
+    if (transaction.termId !== state.term.id || transaction.kind === 'reset' || transaction.kind === 'adjustment') continue
     const student = studentById.get(transaction.studentId)
     if (!student || !student.gradeLevel) continue
     const occurredAt = analyticsOccurredAt(transaction)

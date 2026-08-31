@@ -205,6 +205,53 @@ export interface AdminAddPointsBulkResult {
   syncWarning?: MutationSyncWarning
 }
 
+export interface AdminAdjustScoreInput {
+  clientRequestId: string
+  studentId: string
+  delta: number
+  occurredAt: string
+  reason: string
+  termId: string
+}
+
+export interface AdminAdjustScoreResult {
+  ok: boolean
+  replayed: boolean
+  ledgerId: string
+  studentId: string
+  requestedDelta: number
+  appliedDelta: number
+  balanceBefore: number
+  balanceAfter: number
+  syncWarning?: MutationSyncWarning
+}
+
+export interface CreateBehaviorRuleInput {
+  title: string
+  points: number
+  description?: string
+}
+
+export interface CreatePositiveRuleInput {
+  title: string
+  points: number
+  discretionary: boolean
+  description?: string
+}
+
+export interface CreateRuleResult {
+  ok: boolean
+  id: string
+  code: string
+  syncWarning?: MutationSyncWarning
+}
+
+export interface RemoveRuleResult {
+  ok: boolean
+  outcome: 'deleted' | 'archived'
+  syncWarning?: MutationSyncWarning
+}
+
 export interface UpdateTermScheduleInput {
   termId: string
   startsOn: string
@@ -342,6 +389,11 @@ export interface AppDataActions {
   reopenAppeal: (input: ReopenAppealInput) => Promise<void>
   adminAddPoints: (input: AdminAddPointsInput) => Promise<AdminAddPointsResult>
   adminAddPointsBulk: (input: AdminAddPointsBulkInput) => Promise<AdminAddPointsBulkResult>
+  adminAdjustScore: (input: AdminAdjustScoreInput) => Promise<AdminAdjustScoreResult>
+  createBehaviorRule: (input: CreateBehaviorRuleInput) => Promise<CreateRuleResult>
+  createPositiveRule: (input: CreatePositiveRuleInput) => Promise<CreateRuleResult>
+  removeBehaviorRule: (ruleId: string) => Promise<RemoveRuleResult>
+  removePositiveRule: (ruleId: string) => Promise<RemoveRuleResult>
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
   updateTeacherClassrooms: (input: UpdateTeacherClassroomsInput) => Promise<void>

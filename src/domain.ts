@@ -35,8 +35,10 @@ export interface Teacher {
 
 export interface BehaviorRule {
   id: string
+  code?: string
   category: string
   title: string
+  description?: string
   points: number
   severity: Severity
   guardianContactRequired: boolean
@@ -59,7 +61,7 @@ export interface ScoreTransaction {
   id: string
   studentId: string
   termId: string
-  kind: 'deduction' | 'addition' | 'reset'
+  kind: 'deduction' | 'addition' | 'reset' | 'adjustment'
   requestedDelta: number
   appliedDelta: number
   scoreBefore: number
