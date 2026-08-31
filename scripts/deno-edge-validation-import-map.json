@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "npm:exceljs@4.4.0": "./deno-exceljs-validation-shim.ts"
+  }
+}

@@ -8,6 +8,7 @@ import { dirname } from 'node:path'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const supabaseEntrypoint = join(repositoryRoot, 'node_modules', 'supabase', 'dist', 'supabase.js')
+const edgeImportMap = join(repositoryRoot, 'scripts', 'deno-edge-validation-import-map.json')
 const mode = (process.env.SUPABASE_DB_TEST_MODE ?? 'auto').toLowerCase()
 const functionMode = (process.env.SUPABASE_FUNCTIONS_CHECK ?? 'auto').toLowerCase()
 
@@ -106,7 +107,11 @@ if (functionMode !== 'off' && functionMode !== 'skip') {
       // `auto` installs every package.json dependency into Deno's managed
       // node_modules directory, which can exhaust GitHub runner resources even
       // though these functions only need their explicit npm: imports.
-      const check = run('deno', ['check', '--node-modules-dir=none', entrypoint], { inherit: true })
+      const check = run(
+        'deno',
+        ['check', '--node-modules-dir=none', `--import-map=${edgeImportMap}`, entrypoint],
+        { inherit: true },
+      )
       if (check.status !== 0) fail(`Deno type-check failed for ${entrypoint}`)
     }
   }
