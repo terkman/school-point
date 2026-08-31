@@ -1,3 +1,7 @@
+// ExcelJS ships a large legacy declaration graph. Keep the runtime import, but
+// describe only the small workbook surface this function uses so Deno does not
+// need to instantiate the full third-party type tree during CI validation.
+// @ts-ignore Runtime module shape is constrained by ExcelWorkbookLike below.
 import ExcelJS from 'npm:exceljs@4.4.0'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.110.2'
 import {
@@ -24,6 +28,31 @@ const requiredSheets = ['ห้องเรียน', 'นักเรียน
 type JsonRecord = Record<string, unknown>
 type UntypedSupabaseClient = SupabaseClient<any, 'public', 'public', any, any>
 type Severity = 'error' | 'warning'
+
+interface ExcelCellLike {
+  value: unknown
+  text: string
+}
+
+interface ExcelRowLike {
+  eachCell(
+    options: { includeEmpty: boolean },
+    callback: (cell: ExcelCellLike, columnNumber: number) => void,
+  ): void
+  getCell(columnNumber: number): ExcelCellLike
+}
+
+interface ExcelWorksheetLike {
+  actualRowCount: number
+  getRow(rowNumber: number): ExcelRowLike
+}
+
+interface ExcelWorkbookLike {
+  xlsx: {
+    load(bytes: Uint8Array): Promise<unknown>
+  }
+  getWorksheet(name: string): ExcelWorksheetLike | undefined
+}
 
 interface ImportIssue {
   severity: Severity
@@ -192,7 +221,7 @@ function normalizedHeader(value: unknown): string {
     .toLocaleLowerCase('th')
 }
 
-function cellValue(cell: ExcelJS.Cell, issues: ImportIssue[], sheet: string, row: number, column: string): unknown {
+function cellValue(cell: ExcelCellLike, issues: ImportIssue[], sheet: string, row: number, column: string): unknown {
   const value = cell.value
   if (value && typeof value === 'object' && 'formula' in value) {
     issue(issues, 'error', 'FORMULA_NOT_ALLOWED', sheet, 'ไม่รองรับสูตรในช่องข้อมูล กรุณาวางเป็นค่าเท่านั้น', row, column)
@@ -210,7 +239,7 @@ function hasValue(value: unknown): boolean {
 }
 
 function readSheet(
-  workbook: ExcelJS.Workbook,
+  workbook: ExcelWorkbookLike,
   sheetName: (typeof requiredSheets)[number],
   issues: ImportIssue[],
 ): ParsedRow[] {
@@ -807,10 +836,10 @@ async function parseAndValidate(
   authDomain: string,
 ) {
   const issues: ImportIssue[] = []
-  const workbook = new ExcelJS.Workbook()
+  const workbook = new ExcelJS.Workbook() as unknown as ExcelWorkbookLike
   try {
     const workbookBytes = new Uint8Array(await file.arrayBuffer())
-    await workbook.xlsx.load(workbookBytes as unknown as Parameters<typeof workbook.xlsx.load>[0])
+    await workbook.xlsx.load(workbookBytes)
   } catch {
     throw new Error('เปิดไฟล์ Excel ไม่สำเร็จ กรุณาใช้แบบฟอร์ม .xlsx ที่ดาวน์โหลดจากระบบ')
   }
