@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   completeFirstPasswordActivation,
   completePasswordAuthenticatedActivation,
+  sessionCanResumePasswordActivation,
   sessionHasPasswordAuthentication,
 } from './firstPasswordActivation'
 
@@ -159,10 +160,25 @@ function sessionWithAmr(method: string): Pick<Session, 'access_token'> {
   return { access_token: `header.${payload}.signature` }
 }
 
+function resumableSession(method: string, mustChangePassword: boolean): Pick<Session, 'access_token' | 'user'> {
+  return {
+    ...sessionWithAmr(method),
+    user: { user_metadata: { must_change_password: mustChangePassword } } as unknown as Session['user'],
+  }
+}
+
 describe('sessionHasPasswordAuthentication', () => {
   it('uses password AMR only as a resilient UI hint', () => {
     expect(sessionHasPasswordAuthentication(sessionWithAmr('password'))).toBe(true)
     expect(sessionHasPasswordAuthentication(sessionWithAmr('otp'))).toBe(false)
     expect(sessionHasPasswordAuthentication({ access_token: 'malformed-token' })).toBe(false)
+  })
+})
+
+describe('sessionCanResumePasswordActivation', () => {
+  it('never treats the temporary password handoff as a completed personal-password change', () => {
+    expect(sessionCanResumePasswordActivation(resumableSession('password', true))).toBe(false)
+    expect(sessionCanResumePasswordActivation(resumableSession('password', false))).toBe(true)
+    expect(sessionCanResumePasswordActivation(resumableSession('otp', false))).toBe(false)
   })
 })

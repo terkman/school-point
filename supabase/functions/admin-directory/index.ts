@@ -156,6 +156,7 @@ async function generateActivationCode(
     activationCode,
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    purpose,
   }
 }
 
@@ -417,10 +418,18 @@ Deno.serve(async (request) => {
       if (error) throw new Error(error.message)
       const accountRow = account && typeof account === 'object' ? account as JsonRecord : null
       const userId = String(accountRow?.userId ?? '')
+      const pendingPurpose = accountRow?.pendingPurpose === 'password-reset' ? 'password-reset' : 'activation'
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
         throw new Error('ข้อมูลบัญชีสำหรับเปิดใช้ไม่ถูกต้อง')
       }
-      const activation = await generateActivationCode(serviceClient, secretKey, userData.user.id, userId, username)
+      const activation = await generateActivationCode(
+        serviceClient,
+        secretKey,
+        userData.user.id,
+        userId,
+        username,
+        pendingPurpose,
+      )
       return response(200, { ok: true, data: activation })
     }
 
@@ -461,7 +470,7 @@ Deno.serve(async (request) => {
       }
       return response(200, {
         ok: true,
-        data: { ...activation, purpose: 'password-reset' },
+        data: activation,
       })
     }
 

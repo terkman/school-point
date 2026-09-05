@@ -92,7 +92,7 @@ function ActivationDialog({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
-  const isPasswordReset = 'purpose' in result && result.purpose === 'password-reset'
+  const isPasswordReset = result.purpose === 'password-reset'
   async function copyCode() {
     try {
       await navigator.clipboard.writeText(result.activationCode)
@@ -504,6 +504,7 @@ export function SchoolDirectoryPanel({
         activationCode: result.activationCode,
         issuedAt: result.issuedAt,
         expiresAt: result.expiresAt,
+        purpose: result.purpose ?? 'activation',
       })
     }
   }
@@ -601,7 +602,7 @@ export function SchoolDirectoryPanel({
               <div className="directory-record-main">{studentProfileById.get(student.id) ? <StudentAvatar student={studentProfileById.get(student.id)!} className="student-avatar" /> : <span className="student-avatar">{student.givenName.slice(0, 1)}</span>}<div><strong>{studentProfileById.get(student.id) ? studentDisplayName(studentProfileById.get(student.id)!) : fullName(student)}</strong><span>{student.studentCode} • {student.classroomName || 'ยังไม่ระบุห้อง'}</span><small>ชื่อผู้ใช้ {student.username || 'ยังไม่มีบัญชี'}</small></div></div>
               <div className="directory-record-status"><span className={`badge ${statusClass(student.status)}`}>{personStatusLabels[student.status]}</span>{student.activationRequired && student.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
               <div className="inline-actions">
-                {!readOnly && student.activationRequired && student.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(student.username)}>{busyUsername === student.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly && student.activationRequired && student.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(student.username)}>{busyUsername === student.username ? 'กำลังออก…' : 'ออกรหัสใหม่'}</button> : null}
                 {!readOnly && student.accountActive && !student.activationRequired ? <button className="button ghost compact" type="button" onClick={() => setPasswordResetTarget({ username: student.username, displayName: fullName(student) })}><Icon name="shield" size={16} /> กู้บัญชี</button> : null}
                 {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'student', person: student })}>แก้ไข</button> : null}
               </div>
@@ -613,7 +614,7 @@ export function SchoolDirectoryPanel({
               <div className="directory-record-main"><span className="student-avatar">{person.givenName.slice(0, 1)}</span><div><strong>{fullName(person)}</strong><span>{person.employeeCode} • {staffRoleLabels[person.role]}</span><small>{person.role === 'teacher' ? `รับผิดชอบ ${person.classroomIds.length} ห้อง` : person.username}</small></div></div>
               <div className="directory-record-status"><span className={`badge ${statusClass(person.status)}`}>{personStatusLabels[person.status]}</span>{person.activationRequired && person.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
               <div className="inline-actions">
-                {!readOnly && person.activationRequired && person.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(person.username)}>{busyUsername === person.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}
+                {!readOnly && person.activationRequired && person.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(person.username)}>{busyUsername === person.username ? 'กำลังออก…' : 'ออกรหัสใหม่'}</button> : null}
                 {!readOnly && person.accountActive && !person.activationRequired ? <button className="button ghost compact" type="button" onClick={() => setPasswordResetTarget({ username: person.username, displayName: fullName(person) })}><Icon name="shield" size={16} /> กู้บัญชี</button> : null}
                 {!readOnly ? <button className="button secondary compact" type="button" onClick={() => setEditor({ kind: 'staff', person })}>แก้ไข</button> : null}
               </div>

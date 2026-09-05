@@ -4,7 +4,7 @@ import type { Account, DemoState } from './domain'
 import {
   completeFirstPasswordActivation,
   completePasswordAuthenticatedActivation,
-  sessionHasPasswordAuthentication,
+  sessionCanResumePasswordActivation,
 } from './firstPasswordActivation'
 import { LoginPage } from './LoginPage'
 import { PasswordActivationPage } from './PasswordActivationPage'
@@ -396,7 +396,7 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
         username={getSessionUsername(session.user)}
         onSetPassword={setPersonalPassword}
         onResumeActivation={resumePasswordActivation}
-        passwordAuthenticated={sessionHasPasswordAuthentication(session)}
+        passwordAuthenticated={sessionCanResumePasswordActivation(session)}
         initialError={activationError}
         onLogout={() => void logout()}
       />

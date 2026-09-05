@@ -43,6 +43,18 @@ export function sessionHasPasswordAuthentication(session: Pick<Session, 'access_
   }
 }
 
+/**
+ * The temporary Edge handoff is password-authenticated too. Metadata only
+ * controls which screen is shown; the database state machine remains the
+ * security boundary when activation is completed.
+ */
+export function sessionCanResumePasswordActivation(
+  session: Pick<Session, 'access_token' | 'user'>,
+): boolean {
+  return sessionHasPasswordAuthentication(session)
+    && session.user.user_metadata?.must_change_password !== true
+}
+
 /** Complete activation from an existing password-authenticated session. */
 export async function completePasswordAuthenticatedActivation(
   client: SupabaseClient,
