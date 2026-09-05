@@ -5,8 +5,9 @@ import {
   type AnalyticsKindFilter,
 } from './adminAnalytics'
 import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
-import { formatThaiDate, type DemoState } from './domain'
+import { formatThaiDate, studentDisplayName, type DemoState } from './domain'
 import { EmptyState, Icon } from './ui'
+import { StudentAvatar } from './ProfileAvatar'
 
 const DEFAULT_FILTERS: AnalyticsFilters = {
   kind: 'all',
@@ -191,8 +192,8 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                   <article className={`analytics-student-entry${expanded ? ' is-expanded' : ''}`} key={row.student.id}>
                     <div className="analytics-student-row" role="row">
                       <div className="analytics-student-name" role="cell">
-                        <strong>{row.student.name}</strong>
-                        <small>รหัส {row.student.studentCode}{row.student.roomNumber ? ` • ห้อง ${row.student.roomNumber}` : ''}</small>
+                        <StudentAvatar student={row.student} />
+                        <span><strong>{studentDisplayName(row.student)}</strong><small>รหัส {row.student.studentCode}{row.student.roomNumber ? ` • ห้อง ${row.student.roomNumber}` : ''}</small></span>
                       </div>
                       <span className={`analytics-roster-number is-addition ${row.additionPoints ? 'analytics-positive' : 'is-zero'}`} role="cell" data-label="เพิ่ม">+{row.additionPoints}</span>
                       <span className={`analytics-roster-number is-deduction ${row.deductionPoints ? 'analytics-negative' : 'is-zero'}`} role="cell" data-label="ตัด">{deductedPoints(row.deductionPoints)}</span>
@@ -206,7 +207,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                       <button
                         aria-controls={historyId}
                         aria-expanded={expanded}
-                        aria-label={`${expanded ? 'ซ่อน' : 'ดู'}ประวัติของ ${row.student.name}`}
+                        aria-label={`${expanded ? 'ซ่อน' : 'ดู'}ประวัติของ ${studentDisplayName(row.student)}`}
                         className="analytics-expand-button"
                         type="button"
                         onClick={() => setExpandedStudentId(expanded ? null : row.student.id)}
@@ -332,7 +333,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                   {visibleTransactions.map((row) => (
                     <tr key={row.transaction.id}>
                       <td>{formatThaiDate(row.occurredAt, false)}</td>
-                      <td><strong>{row.student.name}</strong><small>{row.student.studentCode}</small></td>
+                      <td><div className="student-name-cell"><StudentAvatar student={row.student} /><span><strong>{studentDisplayName(row.student)}</strong><small>{row.student.studentCode}</small></span></div></td>
                       <td>{row.student.gradeLevel ? row.student.classroomName : '—'}</td>
                       <td>{row.transaction.reason}</td>
                       <td className={row.transaction.kind === 'deduction' ? 'analytics-negative' : 'analytics-positive'}>

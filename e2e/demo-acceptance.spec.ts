@@ -32,14 +32,15 @@ async function expectNoHorizontalOverflow(page: Page) {
 
 async function signInAsDemoAdmin(page: Page) {
   await page.getByRole('button', { name: /ผู้ดูแลระบบ admin\.demo/ }).click()
+  await expect(page.getByLabel('ชื่อผู้ใช้ / รหัสนักเรียน')).toHaveValue('admin.demo')
   await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click()
-  await expect(page.getByRole('main')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ออกจากระบบ' }).first()).toBeVisible()
 }
 
 async function signInAsDemoRole(page: Page, account: RegExp) {
   await page.getByRole('button', { name: account }).click()
   await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click()
-  await expect(page.getByRole('main')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ออกจากระบบ' }).first()).toBeVisible()
 }
 
 async function signOutOfDemo(page: Page) {
@@ -89,7 +90,7 @@ test.describe('demo acceptance smoke checks', () => {
     await page.goto('/')
     await signInAsDemoAdmin(page)
 
-    await page.getByRole('button', { name: 'ระบบ' }).last().click()
+    await page.getByRole('button', { name: 'ระบบ', exact: true }).click()
     await expectHealthyScreen(page)
     await expect(page.getByRole('heading', { name: 'จัดการระบบ' })).toBeVisible()
     await expectNoHorizontalOverflow(page)
@@ -172,6 +173,42 @@ test.describe('demo acceptance smoke checks', () => {
     await expect(page.getByText('ส่งคำอุทธรณ์เรียบร้อยแล้ว')).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'คำอุทธรณ์ของฉัน' })).toBeVisible()
     await expect(page.getByText('อยู่ระหว่างพิจารณา').first()).toBeVisible()
+    await expectHealthyScreen(page)
+    expect(errors).toEqual([])
+  })
+
+  test('carries a teacher rule proposal through admin approval and versioned editing', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    const proposedTitle = 'ทิ้งขยะนอกจุดที่กำหนด'
+    const revisedTitle = 'ทิ้งขยะไม่ถูกจุดที่โรงเรียนกำหนด'
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+
+    await signInAsDemoRole(page, /คุณครู teacher\.demo/)
+    await page.getByRole('button', { name: /เสนอเกณฑ์/ }).first().click()
+    await expect(page.getByRole('heading', { name: 'สร้างข้อเสนอเกณฑ์คะแนน' })).toBeVisible()
+    await page.getByLabel(/ชื่อเกณฑ์/).fill(proposedTitle)
+    await page.getByLabel('จำนวนคะแนนที่เสนอให้ตัด').fill('8')
+    await page.getByRole('button', { name: 'ส่งข้อเสนอให้แอดมิน' }).click()
+    await expect(page.getByText('ส่งข้อเสนอเกณฑ์ให้แอดมินตรวจสอบแล้ว')).toBeVisible()
+    await expect(page.getByRole('article').filter({ hasText: proposedTitle })).toBeVisible()
+
+    await signOutOfDemo(page)
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: 'จัดการระบบ', exact: true }).click()
+    await page.getByRole('button', { name: /เกณฑ์คะแนน/ }).click()
+    const proposal = page.locator('.rule-proposal-row').filter({ hasText: proposedTitle })
+    await expect(proposal).toBeVisible()
+    await proposal.getByRole('button', { name: 'อนุมัติ', exact: true }).click()
+    await proposal.getByRole('button', { name: 'ยืนยันอนุมัติ' }).click()
+
+    const publishedRule = page.locator('.rule-catalog-row').filter({ hasText: proposedTitle })
+    await expect(publishedRule).toBeVisible()
+    await publishedRule.getByRole('button', { name: 'แก้ไข' }).click()
+    await page.getByLabel(/ชื่อเกณฑ์/).fill(revisedTitle)
+    await page.getByRole('button', { name: 'บันทึกเป็นรุ่นใหม่' }).click()
+    await expect(page.locator('.rule-catalog-row').filter({ hasText: revisedTitle })).toBeVisible()
+    await expect(page.locator('.rule-catalog-row').filter({ hasText: proposedTitle })).toHaveCount(0)
     await expectHealthyScreen(page)
     expect(errors).toEqual([])
   })

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   formatThaiDate,
+  studentDisplayName,
   type DemoState,
   type GuardianContact,
   type GuardianContactChannel,
@@ -14,6 +15,7 @@ import {
   resolveOpenCaseSelection,
 } from './adminWorkflows'
 import { EmptyState, Icon, StatusBadge } from './ui'
+import { StudentAvatar } from './ProfileAvatar'
 
 export interface GuardianAttemptInput {
   clientRequestId?: string
@@ -196,8 +198,8 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
               const isOverdue = item.guardianContactStatus === 'pending' && due.getTime() <= Date.now()
               return (
                 <button type="button" className={selectedCase?.id === item.id ? 'selected' : ''} key={item.id} onClick={() => selectCase(item.id)}>
-                  <span className="case-queue-alert"><Icon name="alert" size={20} /></span>
-                  <span><strong>{caseStudent?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><small>{caseStudent?.classroomName} • {Math.abs(caseTransaction?.appliedDelta ?? 0)} คะแนน</small><em className={item.guardianContactStatus === 'completed' ? 'complete' : ''}>{isOverdue ? 'ครบกำหนดติดตามแล้ว' : item.guardianContactStatus === 'completed' ? 'แจ้งผู้ปกครองแล้ว' : 'รอแจ้งผู้ปกครอง'}</em></span>
+                  {caseStudent ? <StudentAvatar student={caseStudent} className="case-queue-alert" /> : <span className="case-queue-alert"><Icon name="alert" size={20} /></span>}
+                  <span><strong>{caseStudent ? studentDisplayName(caseStudent) : 'ไม่พบข้อมูลนักเรียน'}</strong><small>{caseStudent?.classroomName} • {Math.abs(caseTransaction?.appliedDelta ?? 0)} คะแนน</small><em className={item.guardianContactStatus === 'completed' ? 'complete' : ''}>{isOverdue ? 'ครบกำหนดติดตามแล้ว' : item.guardianContactStatus === 'completed' ? 'แจ้งผู้ปกครองแล้ว' : 'รอแจ้งผู้ปกครอง'}</em></span>
                   <Icon name="chevronRight" size={18} />
                 </button>
               )
@@ -209,7 +211,7 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
       {selectedCase ? (
         <section className="case-detail-shell" aria-labelledby="case-detail-title">
           <header className="case-detail-header">
-            <div><p className="eyebrow">รายละเอียดและการติดตาม</p><h2 id="case-detail-title">{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</h2><span>{student?.studentCode} • {student?.classroomName}</span></div>
+            <div className="student-name-cell">{student ? <StudentAvatar student={student} className="large" /> : null}<div><p className="eyebrow">รายละเอียดและการติดตาม</p><h2 id="case-detail-title">{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</h2><span>{student?.studentCode} • {student?.classroomName}</span></div></div>
             <StatusBadge severity={selectedCase.severity} />
           </header>
 

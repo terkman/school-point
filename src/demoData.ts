@@ -189,6 +189,7 @@ export function createDemoState(): DemoState {
         active: true,
       },
     ],
+    ruleProposals: [],
     transactions: [
       {
         id: 'tx-student-01-a',

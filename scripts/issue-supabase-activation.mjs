@@ -3,6 +3,7 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createHmac, randomInt } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 
 const USERNAME_PATTERN = /^[a-z0-9._-]+$/
@@ -20,7 +21,7 @@ Environment ที่ต้องมี (ห้ามใช้ VITE_*):
   --auth-domain DOMAIN   ค่าเริ่มต้น accounts.school-point.invalid
   --help                 แสดงวิธีใช้
 
-ควรออกรหัสเมื่อพร้อมส่งให้ผู้ใช้ เพราะ OTP มีอายุตามค่า Auth ของ Supabase และใช้ได้ครั้งเดียว`
+รหัสเปิดใช้มีอายุ 24 ชั่วโมง ใช้ได้ครั้งเดียว และการออกรหัสใหม่จะยกเลิกรหัสเดิม`
 }
 
 function parseArgs(argv) {
@@ -179,13 +180,22 @@ async function main() {
     projectUrl: url,
     adminKey: serviceRoleKey,
   })
-  const { data, error } = await client.auth.admin.generateLink({ type: 'magiclink', email })
-  const activationCode = data?.properties?.email_otp
-  if (error || !activationCode) throw new Error(`ออกรหัสเปิดใช้ไม่สำเร็จ (${error?.status ?? 'unknown'})`)
+  const activationCode = String(randomInt(0, 100_000_000)).padStart(8, '0')
+  const tokenHash = createHmac('sha256', serviceRoleKey).update(`${username}:${activationCode}`).digest('hex')
+  const issuedAt = new Date()
+  const expiresAt = new Date(issuedAt.getTime() + 24 * 60 * 60 * 1000)
+  const { error } = await client.rpc('service_issue_school_account_code', {
+    p_actor_user_id: null,
+    p_user_id: user.id,
+    p_token_hash_hex: tokenHash,
+    p_purpose: 'activation',
+    p_expires_at: expiresAt.toISOString(),
+  })
+  if (error) throw new Error(`ออกรหัสเปิดใช้ไม่สำเร็จ (${error.code ?? 'unknown'})`)
 
   artifact.updatedAt = new Date().toISOString()
   artifact.accounts = artifact.accounts.filter((account) => normalizeUsername(account.username) !== username)
-  artifact.accounts.push({ username, activationCode, issuedAt: new Date().toISOString() })
+  artifact.accounts.push({ username, activationCode, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString() })
   artifact.accounts.sort((left, right) => left.username.localeCompare(right.username, 'en'))
   await mkdir(dirname(output), { recursive: true })
   await writeFile(output, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })

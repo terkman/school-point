@@ -25,6 +25,7 @@ import type {
   GuardianContactChannel,
   GuardianContactOutcome,
   PositiveBehaviorRule,
+  RuleProposal,
   RequestStatus,
   Role,
   ScoreTransaction,
@@ -111,6 +112,7 @@ interface StudentRow {
   title: string | null
   given_name: string
   family_name: string
+  nickname: string | null
   status: string
 }
 
@@ -478,6 +480,26 @@ function normalizeAdminAddPointsResult(value: unknown): AdminAddPointsResult {
   return result
 }
 
+interface PermissionGrantRow {
+  id: number | string
+  user_id: string
+  term_id: number | string | null
+}
+
+interface RuleProposalRow {
+  id: number | string
+  proposed_by: string
+  kind: 'deduction' | 'positive'
+  title_th: string
+  description_th: string | null
+  points: number
+  is_discretionary: boolean
+  status: RequestStatus
+  review_note: string | null
+  created_at: string
+}
+interface StudentProfileCardRow { student_id: number | string; nickname: string | null; avatar_preset: string | null; avatar_path: string | null; avatar_updated_at: string | null }
+
 function normalizeAdminAdjustScoreResult(value: unknown): AdminAdjustScoreResult {
   if (!value || typeof value !== 'object') throw new Error('ฐานข้อมูลไม่ส่งผลสรุปการปรับคะแนนกลับมา')
   const row = value as Record<string, unknown>
@@ -814,7 +836,7 @@ async function loadStudentState(
   const termId = asId(term.id)
   const [avatarUrl, studentResult, enrollmentResult, classroomResult, scoreResult, history] = await Promise.all([
     createProfileAvatarUrl(client, profile),
-    client.from('students').select('id,user_id,student_code,title,given_name,family_name,status').eq('user_id', user.id).maybeSingle(),
+    client.from('students').select('id,user_id,student_code,title,given_name,family_name,nickname,status').eq('user_id', user.id).maybeSingle(),
     client.from('enrollments').select('classroom_id,student_id').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
     client.from('classrooms').select('id,display_name,grade_level,room_number').eq('term_id', term.id).eq('is_active', true).maybeSingle(),
     client.from('student_current_scores').select('term_id,balance').eq('term_id', term.id).maybeSingle(),
@@ -869,6 +891,7 @@ async function loadStudentState(
     id: studentId,
     studentCode: studentRow.student_code,
     name: fullName(studentRow),
+    nickname: studentRow.nickname ?? undefined,
     classroomId: asId(enrollment.classroom_id),
     classroomName: classroom.display_name,
     gradeLevel: classroom.grade_level,
@@ -876,7 +899,7 @@ async function loadStudentState(
     score: score?.balance ?? 100,
     status: studentRow.status === 'graduated' ? 'graduated' : 'active',
   }
-  const account = { ...profileAccount(profile, user, getSessionUsername(user), avatarUrl), studentId }
+  const account = { ...profileAccount(profile, user, getSessionUsername(user), avatarUrl), nickname: studentRow.nickname ?? undefined, studentId }
   return {
     version: 2,
     term: {
@@ -891,6 +914,7 @@ async function loadStudentState(
     teachers: [],
     rules,
     positiveRules: [],
+    ruleProposals: [],
     transactions,
     deductionRequests: [],
     additionRequests: [],
@@ -927,10 +951,11 @@ async function loadStaffState(
   positiveRules: PositiveBehaviorRule[],
 ): Promise<DemoState> {
   const [studentsResult, teachersResult, enrollmentsResult, classroomsResult, assignmentsResult, scoresResult,
-    ledgerResult, incidentsResult, deductionRequestsResult, requestsResult, appealsResult, casesResult, guardianResult] = await Promise.all([
+    ledgerResult, incidentsResult, deductionRequestsResult, requestsResult, appealsResult, casesResult, guardianResult,
+    scoreScopeGrantsResult, ruleProposalsResult] = await Promise.all([
     fetchAllPages<StudentRow>('โหลดนักเรียน', (from, to) => client
       .from('students')
-      .select('id,user_id,student_code,title,given_name,family_name,status')
+      .select('id,user_id,student_code,title,given_name,family_name,nickname,status')
       .order('id')
       .range(from, to)),
     fetchAllPages<TeacherRow>('โหลดครู', (from, to) => client
@@ -1010,6 +1035,20 @@ async function loadStaffState(
       .select('id,incident_id,status,note,completed_at,next_reminder_at')
       .order('id')
       .range(from, to)),
+    fetchAllPages<PermissionGrantRow>('โหลดสิทธิ์ให้คะแนนข้ามชั้น', (from, to) => client
+      .from('staff_permission_grants')
+      .select('id,user_id,term_id')
+      .eq('bundle', 'score_all_classrooms')
+      .eq('term_id', term.id)
+      .is('revoked_at', null)
+      .order('id')
+      .range(from, to)),
+    fetchAllPages<RuleProposalRow>('โหลดข้อเสนอเกณฑ์', (from, to) => client
+      .from('teacher_rule_proposals')
+      .select('id,proposed_by,kind,title_th,description_th,points,is_discretionary,status,review_note,created_at')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)),
   ])
   const studentRows = studentsResult
   const teacherRows = teachersResult
@@ -1024,11 +1063,27 @@ async function loadStaffState(
   const appealRows = appealsResult
   const caseRows = casesResult
   const guardianRows = guardianResult
+  const scoreScopeGrants = scoreScopeGrantsResult
   const guardianAttemptRows = profile.role === 'admin' && guardianRows.length
     ? await runRpc<GuardianContactAttemptRow[]>(client, 'get_guardian_contact_attempts_v2', {
       p_task_ids: guardianRows.map((row) => row.id),
     })
     : []
+  const profileCards = profile.role === 'director' ? [] : await runRpc<StudentProfileCardRow[]>(client, 'get_staff_student_profile_cards', {
+    p_student_ids: studentRows.map((row) => row.id),
+  })
+  const avatarPaths = profileCards.flatMap((row) => row.avatar_path ? [row.avatar_path] : [])
+  const signedAvatarUrlByPath = new Map<string, string>()
+  if (avatarPaths.length) {
+    const { data: signedAvatars, error: signedAvatarError } = await client.storage
+      .from(PROFILE_AVATAR_BUCKET)
+      .createSignedUrls(avatarPaths, 3600)
+    if (signedAvatarError) throw new Error(`โหลดรูปโปรไฟล์นักเรียนไม่สำเร็จ: ${signedAvatarError.message}`)
+    for (const signedAvatar of signedAvatars ?? []) {
+      if (signedAvatar.path && signedAvatar.signedUrl) signedAvatarUrlByPath.set(signedAvatar.path, signedAvatar.signedUrl)
+    }
+  }
+  const profileCardByStudent = new Map(profileCards.map((row) => [asId(row.student_id), row]))
 
   const classroomById = new Map(classrooms.map((row) => [asId(row.id), row]))
   const enrollmentByStudent = new Map(enrollments.map((row) => [asId(row.student_id), row]))
@@ -1041,6 +1096,12 @@ async function loadStaffState(
       id: asId(row.id),
       studentCode: row.student_code,
       name: fullName(row),
+      nickname: row.nickname ?? undefined,
+      avatarPreset: profileCardByStudent.get(asId(row.id))?.avatar_preset ?? undefined,
+      avatarPath: profileCardByStudent.get(asId(row.id))?.avatar_path ?? undefined,
+      avatarUrl: profileCardByStudent.get(asId(row.id))?.avatar_path
+        ? signedAvatarUrlByPath.get(profileCardByStudent.get(asId(row.id))!.avatar_path!)
+        : undefined,
       classroomId,
       classroomName: classroomById.get(classroomId)?.display_name ?? 'ไม่ระบุห้อง',
       gradeLevel: classroomById.get(classroomId)?.grade_level,
@@ -1058,8 +1119,25 @@ async function loadStaffState(
   }
   const teachers: Teacher[] = teacherRows.map((row) => ({
     id: asId(row.id),
+    userId: row.user_id ?? undefined,
     name: fullName(row),
     classroomIds: classroomIdsByTeacher.get(asId(row.id)) ?? [],
+    canScoreAllClassrooms: scoreScopeGrants.some((grant) => grant.user_id === row.user_id),
+    scoreAllClassroomsGrantId: scoreScopeGrants.find((grant) => grant.user_id === row.user_id)
+      ? asId(scoreScopeGrants.find((grant) => grant.user_id === row.user_id)!.id)
+      : undefined,
+  }))
+  const ruleProposals: RuleProposal[] = ruleProposalsResult.map((row) => ({
+    id: asId(row.id),
+    proposedBy: row.proposed_by,
+    kind: row.kind,
+    title: row.title_th,
+    description: row.description_th ?? undefined,
+    points: row.points,
+    discretionary: row.is_discretionary,
+    status: row.status,
+    reviewNote: row.review_note ?? undefined,
+    createdAt: row.created_at,
   }))
   const teacherIdByUserId = new Map(teacherRows.filter((row) => row.user_id).map((row) => [row.user_id as string, asId(row.id)]))
   const incidentById = new Map(incidents.map((row) => [asId(row.id), row]))
@@ -1211,6 +1289,7 @@ async function loadStaffState(
     teachers,
     rules,
     positiveRules,
+    ruleProposals,
     transactions,
     deductionRequests,
     additionRequests,
@@ -1505,6 +1584,43 @@ export function createSupabaseActions(
         p_description: input.description?.trim() || null,
       }),
     ),
+    proposeRule: async (input) => ({
+      id: asId(await mutate<number | string>('teacher_propose_rule', {
+        p_kind: input.kind,
+        p_title: input.title.trim(),
+        p_points: input.points,
+        p_description: input.description?.trim() || null,
+        p_is_discretionary: input.discretionary ?? false,
+      })),
+    }),
+    reviewRuleProposal: (input) => mutate<void>('admin_review_teacher_rule', {
+      p_proposal_id: input.proposalId,
+      p_approve: input.approve,
+      p_note: input.note?.trim() || null,
+    }),
+    updateBehaviorRule: async (input) => {
+      const result = await mutate<Record<string, unknown>>('admin_update_behavior_rule', {
+        p_rule_id: input.ruleId,
+        p_title: input.title.trim(),
+        p_points: input.points,
+        p_description: input.description?.trim() || null,
+      })
+      const id = result.id
+      if (typeof id !== 'string' && typeof id !== 'number') throw new Error('ฐานข้อมูลไม่ส่งรหัสเกณฑ์ฉบับใหม่กลับมา')
+      return { id: asId(id) }
+    },
+    updatePositiveRule: async (input) => {
+      const result = await mutate<Record<string, unknown>>('admin_update_positive_rule', {
+        p_rule_id: input.ruleId,
+        p_title: input.title.trim(),
+        p_points: input.points,
+        p_is_discretionary: input.discretionary,
+        p_description: input.description?.trim() || null,
+      })
+      const id = result.id
+      if (typeof id !== 'string' && typeof id !== 'number') throw new Error('ฐานข้อมูลไม่ส่งรหัสเกณฑ์ฉบับใหม่กลับมา')
+      return { id: asId(id) }
+    },
     removeBehaviorRule: async (ruleId) => normalizeRemoveRuleResult(
       await mutate<unknown>('admin_remove_behavior_rule', { p_rule_id: ruleId }),
     ),
@@ -1522,6 +1638,16 @@ export function createSupabaseActions(
       p_teacher_id: input.teacherId,
       p_classroom_ids: [...new Set(input.classroomIds)],
     }),
+    setTeacherSchoolwideScoring: (input) => input.enabled
+      ? mutate<void>('admin_set_score_all_classrooms_grant', {
+        p_user_id: input.teacherUserId,
+        p_term_id: input.termId,
+        p_reason: input.reason.trim(),
+      })
+      : mutate<void>('admin_revoke_score_all_classrooms_grant', {
+        p_grant_id: input.grantId,
+        p_reason: input.reason.trim(),
+      }),
     getGuardianContacts: async (taskId) => {
       const rows = await runRpc<GuardianContactRow[]>(client, 'get_guardian_contacts_for_task', {
         p_task_id: taskId,
@@ -1590,6 +1716,10 @@ export function createSupabaseActions(
       if (result.previousPath) {
         await client.storage.from(PROFILE_AVATAR_BUCKET).remove([result.previousPath])
       }
+      await refreshAfterMutation()
+    },
+    updateMyNickname: async (nickname) => {
+      await runRpc(client, 'update_my_student_nickname', { p_nickname: nickname.trim() || null })
       await refreshAfterMutation()
     },
     uploadMyAvatar: async (file) => {

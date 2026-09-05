@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { applyScoreDelta, formatThaiDate, type DemoState } from './domain'
+import { applyScoreDelta, formatThaiDate, studentDisplayName, type DemoState } from './domain'
 import { EvidenceSummary } from './EvidenceField'
 import type { AppDataActions } from './dataActions'
 import {
@@ -10,6 +10,7 @@ import {
 } from './adminWorkflows'
 import { EmptyState, Icon } from './ui'
 import { useDialogAccessibility } from './useDialogAccessibility'
+import { StudentAvatar } from './ProfileAvatar'
 
 export interface AdditionDecisionInput {
   approve: boolean
@@ -148,7 +149,7 @@ export function AdminReviewCenter({
           : 'requestedPoints' in item
             ? `${item.positiveRuleTitle ?? ''} ${item.reason}`
             : item.statement
-        return `${student?.name ?? ''} ${student?.studentCode ?? ''} ${requestText}`.toLocaleLowerCase('th').includes(normalizedSearch)
+        return `${student?.name ?? ''} ${student?.nickname ?? ''} ${student?.studentCode ?? ''} ${requestText}`.toLocaleLowerCase('th').includes(normalizedSearch)
       })
       .sort((left, right) => sort === 'newest'
         ? new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
@@ -321,9 +322,9 @@ export function AdminReviewCenter({
               const teacher = teacherById.get(item.teacherId)
               return (
                 <button type="button" key={item.id} onClick={() => openDeduction(item.id)}>
-                  <span className="review-avatar appeal">{initials(student?.name)}</span>
+                  {student ? <StudentAvatar student={student} className="review-avatar appeal" /> : <span className="review-avatar appeal">{initials()}</span>}
                   <span className="review-row-copy">
-                    <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                    <strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong>
                     <small>{student?.classroomName ?? 'ไม่ระบุห้อง'} • {teacher?.name ?? 'ไม่พบชื่อครู'}</small>
                     <span>{item.ruleTitle}</span>
                   </span>
@@ -338,9 +339,9 @@ export function AdminReviewCenter({
               const teacher = teacherById.get(item.teacherId)
               return (
                 <button type="button" key={item.id} onClick={() => openAddition(item.id)}>
-                  <span className="review-avatar">{initials(student?.name)}</span>
+                  {student ? <StudentAvatar student={student} className="review-avatar" /> : <span className="review-avatar">{initials()}</span>}
                   <span className="review-row-copy">
-                    <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                    <strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong>
                     <small>{student?.classroomName ?? 'ไม่ระบุห้อง'} • {teacher?.name ?? 'ไม่พบชื่อครู'}</small>
                     <span>{item.positiveRuleTitle ?? (item.reason || 'ไม่ได้ระบุรายละเอียด')}</span>
                   </span>
@@ -355,9 +356,9 @@ export function AdminReviewCenter({
               const source = transactionById.get(item.transactionId)
               return (
                 <button type="button" key={item.id} onClick={() => openAppeal(item.id)}>
-                  <span className="review-avatar appeal">{initials(student?.name)}</span>
+                  {student ? <StudentAvatar student={student} className="review-avatar appeal" /> : <span className="review-avatar appeal">{initials()}</span>}
                   <span className="review-row-copy">
-                    <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                    <strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong>
                     <small>{student?.classroomName ?? 'ไม่ระบุห้อง'} • ยื่น {formatThaiDate(item.createdAt)}</small>
                     <span>{item.statement}</span>
                   </span>
@@ -375,7 +376,7 @@ export function AdminReviewCenter({
           <div className="section-heading"><div><p className="eyebrow">ผลที่บันทึกแล้ว</p><h2 id="decided-appeals-title">ประวัติคำอุทธรณ์ล่าสุด</h2></div><span className="counter">{decidedAppeals.length}</span></div>
           <div className="record-list">{decidedAppeals.slice(0, 5).map((appeal) => {
             const student = studentById.get(appeal.studentId)
-            return <article className="record-row detailed-record" key={appeal.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><span>{appeal.status === 'accepted' ? `คืน ${appeal.restoredPoints ?? 0} คะแนน` : 'ไม่คืนคะแนน'} • พิจารณาครั้งที่ {appeal.reviewVersion ?? 1}</span>{appeal.decisionNote ? <small>{appeal.decisionNote}</small> : null}</div><button type="button" className="button ghost compact" disabled={busy} onClick={() => { setReopenAppealId(appeal.id); setReopenReason(''); setReopenError('') }}>เปิดพิจารณาใหม่</button></article>
+            return <article className="record-row detailed-record" key={appeal.id}>{student ? <StudentAvatar student={student} /> : null}<div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong><span>{appeal.status === 'accepted' ? `คืน ${appeal.restoredPoints ?? 0} คะแนน` : 'ไม่คืนคะแนน'} • พิจารณาครั้งที่ {appeal.reviewVersion ?? 1}</span>{appeal.decisionNote ? <small>{appeal.decisionNote}</small> : null}</div><button type="button" className="button ghost compact" disabled={busy} onClick={() => { setReopenAppealId(appeal.id); setReopenReason(''); setReopenError('') }}>เปิดพิจารณาใหม่</button></article>
           })}</div>
         </section>
       ) : null}
@@ -403,8 +404,8 @@ export function AdminReviewCenter({
               </header>
               <div className="phase2-detail-body">
                 <section className="review-student-summary appeal">
-                  <span className="review-avatar large appeal">{initials(student?.name)}</span>
-                  <div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
+                  {student ? <StudentAvatar student={student} className="review-avatar large appeal" /> : <span className="review-avatar large appeal">{initials()}</span>}
+                  <div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
                   <b>{student?.score ?? 0}<small>คะแนนปัจจุบัน</small></b>
                 </section>
                 <dl className="review-meta-grid">
@@ -455,8 +456,8 @@ export function AdminReviewCenter({
               </header>
               <div className="phase2-detail-body">
                 <section className="review-student-summary">
-                  <span className="review-avatar large">{initials(student?.name)}</span>
-                  <div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
+                  {student ? <StudentAvatar student={student} className="review-avatar large" /> : <span className="review-avatar large">{initials()}</span>}
+                  <div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
                   <b>{student?.score ?? 0}<small>คะแนนปัจจุบัน</small></b>
                 </section>
                 <dl className="review-meta-grid">
@@ -514,8 +515,8 @@ export function AdminReviewCenter({
               </header>
               <div className="phase2-detail-body">
                 <section className="review-student-summary appeal">
-                  <span className="review-avatar large appeal">{initials(student?.name)}</span>
-                  <div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
+                  {student ? <StudentAvatar student={student} className="review-avatar large appeal" /> : <span className="review-avatar large appeal">{initials()}</span>}
+                  <div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong><span>{student?.studentCode} • {student?.classroomName}</span></div>
                   <b>{student?.score ?? 0}<small>คะแนนปัจจุบัน</small></b>
                 </section>
                 <section className="appeal-source-card">

@@ -7,6 +7,7 @@ export interface Account {
   username: string
   password: string
   displayName: string
+  nickname?: string
   role: Role
   studentId?: string
   teacherId?: string
@@ -19,18 +20,25 @@ export interface Student {
   id: string
   studentCode: string
   name: string
+  nickname?: string
   classroomId: string
   classroomName: string
   gradeLevel?: string
   roomNumber?: string
   score: number
   status: 'active' | 'graduated'
+  avatarPreset?: string
+  avatarPath?: string
+  avatarUrl?: string
 }
 
 export interface Teacher {
   id: string
+  userId?: string
   name: string
   classroomIds: string[]
+  canScoreAllClassrooms?: boolean
+  scoreAllClassroomsGrantId?: string
 }
 
 export interface BehaviorRule {
@@ -55,6 +63,19 @@ export interface PositiveBehaviorRule {
   maxPoints: number
   discretionary: boolean
   active: boolean
+}
+
+export interface RuleProposal {
+  id: string
+  proposedBy: string
+  kind: 'deduction' | 'positive'
+  title: string
+  description?: string
+  points: number
+  discretionary: boolean
+  status: RequestStatus
+  reviewNote?: string
+  createdAt: string
 }
 
 export interface ScoreTransaction {
@@ -190,6 +211,7 @@ export interface DemoState {
   teachers: Teacher[]
   rules: BehaviorRule[]
   positiveRules: PositiveBehaviorRule[]
+  ruleProposals: RuleProposal[]
   transactions: ScoreTransaction[]
   deductionRequests: DeductionRequest[]
   additionRequests: AdditionRequest[]
@@ -206,6 +228,11 @@ export interface ScoreChange {
 
 export function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+export function studentDisplayName(student: Pick<Student, 'name' | 'nickname'>): string {
+  const nickname = student.nickname?.trim()
+  return nickname ? `${student.name} (${nickname})` : student.name
 }
 
 export function applyScoreDelta(score: number, requestedDelta: number): ScoreChange {

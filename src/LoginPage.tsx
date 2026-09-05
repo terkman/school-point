@@ -116,6 +116,8 @@ export function LoginPage({ state, mode = 'demo', onLogin, onAuthenticate, onAct
                   onChange={(event) => setPassword(event.target.value)}
                   autoComplete="one-time-code"
                   inputMode="numeric"
+                  pattern="[0-9]{8}"
+                  maxLength={8}
                   required
                 />
               </label>

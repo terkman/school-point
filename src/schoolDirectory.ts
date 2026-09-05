@@ -85,6 +85,7 @@ export interface ActivationCodeResult {
   username: string
   activationCode: string
   issuedAt: string
+  expiresAt?: string
 }
 
 export interface PasswordResetInput {
@@ -101,6 +102,7 @@ export interface CreateSchoolPersonResult {
   username: string
   activationCode?: string
   issuedAt?: string
+  expiresAt?: string
 }
 
 export interface CreateSchoolClassroomInput {

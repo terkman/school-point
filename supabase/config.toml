@@ -231,8 +231,9 @@ secure_password_change = true
 max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
-# Number of seconds before the email OTP expires (1 hour).
-otp_expiry = 600
+# Supabase-managed email OTPs remain short-lived. School activation/recovery
+# codes use the separately enforced policy in private.account_activations.
+otp_expiry = 3600
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -413,3 +414,8 @@ enabled = true
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+[functions.admin-directory]
+# Administrator actions validate the user's access token inside the function.
+# The one-time account-code exchange must also work before a user has a session.
+verify_jwt = false

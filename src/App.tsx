@@ -280,10 +280,28 @@ function SupabaseApp({ client }: { client: SupabaseClient }) {
   async function activate(username: string, activationCode: string) {
     setActivationLoginError('')
     setActivationError('')
-    const email = usernameToInternalEmail(username)
-    const { data, error } = await client.auth.verifyOtp({ email, token: activationCode.trim(), type: 'magiclink' })
-    if (error || !data.session) throw new Error('รหัสเปิดใช้ไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว')
-    setSession(data.session)
+    const { data, error } = await client.functions.invoke('admin-directory', {
+      body: { action: 'verify-account-code', input: { username: username.trim(), activationCode: activationCode.trim() } },
+    })
+    if (error || !data || data.ok !== true || !data.data?.accessToken || !data.data?.refreshToken) {
+      let message = 'รหัสใช้ครั้งเดียวไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว'
+      const context = error && 'context' in error ? error.context : undefined
+      if (context instanceof Response) {
+        try {
+          const payload = await context.clone().json() as { error?: unknown }
+          if (typeof payload.error === 'string' && payload.error.trim()) message = payload.error
+        } catch {
+          // Keep the generic one-time-code error for non-JSON failures.
+        }
+      }
+      throw new Error(message)
+    }
+    const { data: sessionData, error: sessionError } = await client.auth.setSession({
+      access_token: String(data.data.accessToken),
+      refresh_token: String(data.data.refreshToken),
+    })
+    if (sessionError || !sessionData.session) throw new Error('ตรวจรหัสสำเร็จ แต่เริ่มเซสชันตั้งรหัสผ่านไม่ได้ กรุณาให้ออกรหัสใหม่')
+    setSession(sessionData.session)
   }
 
   async function logout() {

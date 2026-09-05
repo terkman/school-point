@@ -4,9 +4,10 @@ import type {
   PaperDocumentRecord,
   PaperDocumentSnapshot,
 } from './dataActions'
-import { formatThaiDate, type Appeal, type DemoState, type ScoreTransaction, type Student } from './domain'
+import { formatThaiDate, studentDisplayName, type Appeal, type DemoState, type ScoreTransaction, type Student } from './domain'
 import type { PaperDocumentStatus, PaperDocumentType } from './adminDomain'
 import { EmptyState, Icon } from './ui'
+import { StudentAvatar } from './ProfileAvatar'
 
 interface AdminPaperCenterProps {
   state: DemoState
@@ -285,7 +286,7 @@ export function AdminPaperCenter({ state, actions }: AdminPaperCenterProps) {
   [state.students])
   const normalizedSearch = search.trim().toLocaleLowerCase('th')
   const filteredStudents = normalizedSearch
-    ? students.filter((student) => `${student.studentCode} ${student.name} ${student.classroomName}`.toLocaleLowerCase('th').includes(normalizedSearch)).slice(0, 20)
+    ? students.filter((student) => `${student.studentCode} ${student.name} ${student.nickname ?? ''} ${student.classroomName}`.toLocaleLowerCase('th').includes(normalizedSearch)).slice(0, 20)
     : students.slice(0, 20)
   const selectedStudent = students.find((student) => student.id === selectedStudentId)
   const studentTransactions = state.transactions.filter((transaction) => transaction.studentId === selectedStudentId)
@@ -426,8 +427,8 @@ export function AdminPaperCenter({ state, actions }: AdminPaperCenterProps) {
                 key={student.id}
                 onClick={() => chooseStudent(student.id)}
               >
-                <span className="student-avatar">{student.name.slice(0, 1)}</span>
-                <span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span>
+                <StudentAvatar student={student} className="student-avatar" />
+                <span><strong>{studentDisplayName(student)}</strong><small>{student.studentCode} • {student.classroomName}</small></span>
                 {selectedStudentId === student.id ? <Icon name="check" size={17} /> : null}
               </button>
             ))}

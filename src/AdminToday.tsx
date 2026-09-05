@@ -1,6 +1,7 @@
 import type { DemoState } from './domain'
-import { formatThaiDate } from './domain'
+import { formatThaiDate, studentDisplayName } from './domain'
 import { EmptyState, Icon } from './ui'
+import { StudentAvatar } from './ProfileAvatar'
 
 interface AdminTodayProps {
   state: DemoState
@@ -91,9 +92,9 @@ export function AdminToday({
                 const due = guardianFollowUpLabel(item.guardianNextReminderAt)
                 return (
                   <article key={item.id} className={due.overdue ? 'overdue' : ''}>
-                    <span className="followup-clock"><Icon name="history" /></span>
+                    {student ? <StudentAvatar student={student} className="followup-clock" /> : <span className="followup-clock"><Icon name="history" /></span>}
                     <div>
-                      <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                      <strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong>
                       <span>{student?.classroomName} • {item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span>
                       <small>{due.label}</small>
                     </div>
@@ -136,7 +137,7 @@ export function AdminToday({
               return (
                 <div role="row" key={transaction.id}>
                   <time>{formatThaiDate(transaction.occurredAt)}</time>
-                  <strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'}</strong>
+                  <strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'}</strong>
                   <span>{transaction.reason}</span>
                   <b className={positive ? 'positive' : 'negative'}>{positive ? '+' : ''}{transaction.appliedDelta}</b>
                   <small>{transaction.kind === 'addition' ? 'บันทึกแล้ว' : 'มีผลแล้ว'}</small>

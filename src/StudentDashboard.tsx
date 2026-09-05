@@ -88,6 +88,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   const [avatarCrop, setAvatarCrop] = useState<ProfileAvatarCrop>({ ...DEFAULT_PROFILE_AVATAR_CROP })
   const [historyLimit, setHistoryLimit] = useState(INITIAL_HISTORY_LIMIT)
   const student = state.students.find((item) => item.id === account.studentId)
+  const [nickname, setNickname] = useState(account.nickname ?? student?.nickname ?? '')
   const transactions = useMemo(
     () => state.transactions
       .filter((item) => item.studentId === student?.id)
@@ -99,6 +100,15 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
 
   if (!student) return <p>ไม่พบข้อมูลนักเรียน</p>
   const currentStudent = student
+
+  async function saveNickname(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!actions?.updateMyNickname) return
+    setAvatarBusy(true)
+    try { await actions.updateMyNickname(nickname); setAnnouncement('บันทึกชื่อเล่นแล้ว') }
+    catch (error) { setAnnouncement(error instanceof Error ? error.message : 'บันทึกชื่อเล่นไม่สำเร็จ') }
+    finally { setAvatarBusy(false) }
+  }
 
   function navigateStudentTab(nextTab: StudentTab) {
     setTab(nextTab)
@@ -313,6 +323,11 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
             <p className="eyebrow">รูปปัจจุบัน</p>
             <ProfileAvatar account={account} className="profile-avatar-preview" decorative={false} />
             <h2>{account.displayName}</h2>
+            <form onSubmit={saveNickname} className="profile-nickname-form">
+              <label htmlFor="student-nickname">ชื่อเล่น</label>
+              <input id="student-nickname" value={nickname} maxLength={40} onChange={(event) => setNickname(event.target.value)} placeholder="ยังไม่ได้ตั้งชื่อเล่น" />
+              <button className="button secondary compact" type="submit" disabled={avatarBusy || !actions?.updateMyNickname}>บันทึกชื่อเล่น</button>
+            </form>
             <p>{currentStudent.classroomName} • รหัสนักเรียน {currentStudent.studentCode}</p>
             {announcement ? <div className="profile-avatar-status" role="status">{announcement}</div> : null}
           </section>

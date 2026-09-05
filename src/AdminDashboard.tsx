@@ -3,6 +3,7 @@ import {
   applyScoreDelta,
   createId,
   formatThaiDate,
+  studentDisplayName,
   type Account,
   type BehaviorRule,
   type DemoState,
@@ -16,6 +17,9 @@ import type {
   CreatePositiveRuleInput,
   DeductionScope,
   RecordDeductionsResult,
+  ReviewRuleProposalInput,
+  UpdateBehaviorRuleInput,
+  UpdatePositiveRuleInput,
   UpdateTeacherClassroomsInput,
   UpdateTermScheduleInput,
 } from './dataActions'
@@ -44,6 +48,7 @@ import { AdminReviewCenter, type AdditionDecisionInput, type AppealDecisionInput
 import { AdminCaseCenter, type GuardianAttemptInput } from './AdminCaseCenter'
 import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt, validateAdminScoreAdjustment } from './adminWorkflows'
 import { AdminRuleCatalog } from './AdminRuleCatalog'
+import { StudentAvatar } from './ProfileAvatar'
 
 export type { AdminTab } from './adminRoute'
 
@@ -192,6 +197,7 @@ interface TeacherClassroomAssignmentEditorProps {
   classrooms: ClassroomGroup[]
   busy: boolean
   onSave: (input: UpdateTeacherClassroomsInput) => Promise<void>
+  onSetSchoolwideScoring?: (enabled: boolean) => Promise<void>
   termId: string
 }
 
@@ -200,14 +206,18 @@ export function TeacherClassroomAssignmentEditor({
   classrooms,
   busy,
   onSave,
+  onSetSchoolwideScoring = async () => undefined,
   termId,
 }: TeacherClassroomAssignmentEditorProps) {
   const [selectedIds, setSelectedIds] = useState(() => new Set(teacher.classroomIds))
   const [confirmEmpty, setConfirmEmpty] = useState(false)
+  const [schoolwideScoring, setSchoolwideScoring] = useState(Boolean(teacher.canScoreAllClassrooms))
   const [error, setError] = useState('')
   const originalIds = useMemo(() => new Set(teacher.classroomIds), [teacher.classroomIds])
-  const changed = selectedIds.size !== originalIds.size
+  const assignmentsChanged = selectedIds.size !== originalIds.size
     || [...selectedIds].some((classroomId) => !originalIds.has(classroomId))
+  const scopeChanged = schoolwideScoring !== Boolean(teacher.canScoreAllClassrooms)
+  const changed = assignmentsChanged || scopeChanged
   const allSelected = classrooms.length > 0 && classrooms.every((classroom) => selectedIds.has(classroom.id))
 
   function toggleClassroom(classroomId: string) {
@@ -229,17 +239,20 @@ export function TeacherClassroomAssignmentEditor({
 
   async function saveAssignments() {
     if (busy || !changed) return
-    if (!selectedIds.size && !confirmEmpty) {
+    if (assignmentsChanged && !selectedIds.size && !confirmEmpty) {
       setError('กรุณายืนยันก่อนนำสิทธิ์ห้องทั้งหมดออกจากบัญชีครู')
       return
     }
     setError('')
     try {
-      await onSave({
-        termId,
-        teacherId: teacher.id,
-        classroomIds: [...selectedIds],
-      })
+      if (assignmentsChanged) {
+        await onSave({
+          termId,
+          teacherId: teacher.id,
+          classroomIds: [...selectedIds],
+        })
+      }
+      if (scopeChanged) await onSetSchoolwideScoring(schoolwideScoring)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'ไม่สามารถบันทึกสิทธิ์ห้องได้')
     }
@@ -267,15 +280,19 @@ export function TeacherClassroomAssignmentEditor({
           ))}
         </div>
       ) : <EmptyState title="ยังไม่มีห้องเรียน" detail="นำเข้ารายชื่อนักเรียนและห้องเรียนก่อนกำหนดสิทธิ์ให้ครู" />}
-      {!selectedIds.size && changed ? (
+      <label className={schoolwideScoring ? 'confirmation-check schoolwide-score-toggle selected' : 'confirmation-check schoolwide-score-toggle'}>
+        <input type="checkbox" disabled={busy || !teacher.userId} checked={schoolwideScoring} onChange={(event) => { setSchoolwideScoring(event.target.checked); setError('') }} />
+        <span><strong>ให้คะแนนนักเรียนได้ทุกชั้น</strong><small>ใช้สำหรับครูประจำชั้น ครูยังต้องส่งคำขอเมื่อเพิ่มคะแนนหรือตัดตั้งแต่ 10 คะแนนขึ้นไป</small></span>
+      </label>
+      {!selectedIds.size && assignmentsChanged ? (
         <label className="confirmation-check">
           <input type="checkbox" disabled={busy} checked={confirmEmpty} onChange={(event) => { setConfirmEmpty(event.target.checked); setError('') }} />
           <span>ยืนยันให้นำสิทธิ์ห้องทั้งหมดออก ครูคนนี้จะยังเลือกชั้น ห้อง และนักเรียนไม่ได้</span>
         </label>
       ) : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <button className="button primary full" type="button" disabled={busy || !changed || (!selectedIds.size && !confirmEmpty)} onClick={() => void saveAssignments()}>
-        {busy ? 'กำลังบันทึกสิทธิ์…' : changed ? `บันทึกสิทธิ์ ${selectedIds.size} ห้อง` : 'สิทธิ์ห้องเป็นปัจจุบันแล้ว'}
+      <button className="button primary full" type="button" disabled={busy || !changed || (assignmentsChanged && !selectedIds.size && !confirmEmpty)} onClick={() => void saveAssignments()}>
+        {busy ? 'กำลังบันทึกสิทธิ์…' : changed ? 'บันทึกสิทธิ์ครู' : 'สิทธิ์ครูเป็นปัจจุบันแล้ว'}
       </button>
     </div>
   )
@@ -397,7 +414,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           approvedPoints: input.approvedPoints,
           note: normalizedNote || undefined,
         })
-        const studentName = student?.name ?? `นักเรียนรหัส ${request.studentId}`
+        const studentName = student ? studentDisplayName(student) : `นักเรียนรหัส ${request.studentId}`
         setAnnouncement(input.approve
           ? `อนุมัติคำขอเพิ่มคะแนนของ ${studentName} แล้ว`
           : `ปฏิเสธคำขอของ ${studentName} แล้ว คะแนนไม่เปลี่ยนแปลง`)
@@ -440,13 +457,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           additionSource: 'teacher_request',
         }, ...state.transactions],
       })
-      setAnnouncement(`อนุมัติ ${input.approvedPoints} คะแนนแล้ว คะแนนของ ${student.name} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
+      setAnnouncement(`อนุมัติ ${input.approvedPoints} คะแนนแล้ว คะแนนของ ${studentDisplayName(student)} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
     } else {
       onChange({
         ...state,
         additionRequests: state.additionRequests.map((item) => item.id === requestId ? { ...item, status: 'rejected', decidedAt: new Date().toISOString(), decisionNote: normalizedNote } : item),
       })
-      setAnnouncement(`ปฏิเสธคำขอของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
+      setAnnouncement(`ปฏิเสธคำขอของ ${studentDisplayName(student)} แล้ว คะแนนไม่เปลี่ยนแปลง`)
     }
   }
 
@@ -468,8 +485,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           note: normalizedNote || undefined,
         })
         setAnnouncement(input.approve
-          ? `อนุมัติตัด ${input.approvedPoints} คะแนนของ ${student.name} แล้ว`
-          : `ปฏิเสธคำขอตัดคะแนนของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
+          ? `อนุมัติตัด ${input.approvedPoints} คะแนนของ ${studentDisplayName(student)} แล้ว`
+          : `ปฏิเสธคำขอตัดคะแนนของ ${studentDisplayName(student)} แล้ว คะแนนไม่เปลี่ยนแปลง`)
       } catch (error) {
         setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถบันทึกผลการพิจารณาได้')
         throw error
@@ -487,7 +504,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           ? { ...item, status: 'rejected', decidedAt, decisionNote: normalizedNote }
           : item),
       })
-      setAnnouncement(`ปฏิเสธคำขอตัดคะแนนของ ${student.name} แล้ว คะแนนไม่เปลี่ยนแปลง`)
+      setAnnouncement(`ปฏิเสธคำขอตัดคะแนนของ ${studentDisplayName(student)} แล้ว คะแนนไม่เปลี่ยนแปลง`)
       return
     }
 
@@ -533,7 +550,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       }, ...state.transactions],
       seriousCases: newCase ? [newCase, ...state.seriousCases] : state.seriousCases,
     })
-    setAnnouncement(`อนุมัติตัด ${Math.abs(change.appliedDelta)} คะแนนแล้ว คะแนนของ ${student.name} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
+    setAnnouncement(`อนุมัติตัด ${Math.abs(change.appliedDelta)} คะแนนแล้ว คะแนนของ ${studentDisplayName(student)} เปลี่ยนจาก ${change.before} เป็น ${change.after}`)
   }
 
   async function decideAppeal(appealId: string, input: AppealDecisionInput) {
@@ -1052,6 +1069,112 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
   }
 
+  async function updateBehaviorRule(input: UpdateBehaviorRuleInput) {
+    if (mutationBusy) return
+    setBusyAction(`update-behavior-rule-${input.ruleId}`)
+    try {
+      if (actions) {
+        await actions.updateBehaviorRule(input)
+      } else {
+        const oldRule = state.rules.find((rule) => rule.id === input.ruleId)
+        if (!oldRule) throw new Error('ไม่พบเกณฑ์ที่ต้องการแก้ไข')
+        const severity = behaviorSeverityForPoints(input.points)
+        const nextRule: BehaviorRule = {
+          ...oldRule,
+          id: createId('rule-version'),
+          code: `D-V-${String(state.rules.length + 1).padStart(6, '0')}`,
+          title: input.title.trim(),
+          description: input.description?.trim(),
+          points: input.points,
+          severity,
+          guardianContactRequired: severity === 'serious' || severity === 'critical',
+          active: true,
+        }
+        onChange({ ...state, rules: [nextRule, ...state.rules.map((rule) => rule.id === input.ruleId ? { ...rule, active: false } : rule)] })
+      }
+      setAnnouncement('บันทึกเกณฑ์ฉบับใหม่แล้ว ประวัติเดิมยังคงใช้ข้อความและคะแนนเดิม')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function updatePositiveRule(input: UpdatePositiveRuleInput) {
+    if (mutationBusy) return
+    setBusyAction(`update-positive-rule-${input.ruleId}`)
+    try {
+      if (actions) {
+        await actions.updatePositiveRule(input)
+      } else {
+        const oldRule = state.positiveRules.find((rule) => rule.id === input.ruleId)
+        if (!oldRule) throw new Error('ไม่พบเกณฑ์ที่ต้องการแก้ไข')
+        const nextRule: PositiveBehaviorRule = {
+          ...oldRule,
+          id: createId('positive-rule-version'),
+          code: `P-V-${String(state.positiveRules.length + 1).padStart(6, '0')}`,
+          title: input.title.trim(),
+          description: input.description?.trim() ?? '',
+          defaultPoints: input.discretionary ? null : input.points,
+          maxPoints: input.points,
+          discretionary: input.discretionary,
+          active: true,
+        }
+        onChange({ ...state, positiveRules: [nextRule, ...state.positiveRules.map((rule) => rule.id === input.ruleId ? { ...rule, active: false } : rule)] })
+      }
+      setAnnouncement('บันทึกเกณฑ์ฉบับใหม่แล้ว ประวัติเดิมยังคงใช้ข้อความและคะแนนเดิม')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function reviewRuleProposal(input: ReviewRuleProposalInput) {
+    if (mutationBusy) return
+    setBusyAction(`review-rule-proposal-${input.proposalId}`)
+    try {
+      if (actions) {
+        await actions.reviewRuleProposal(input)
+      } else {
+        const proposal = state.ruleProposals.find((item) => item.id === input.proposalId)
+        if (!proposal) throw new Error('ไม่พบข้อเสนอเกณฑ์')
+        const nextState: DemoState = {
+          ...state,
+          ruleProposals: state.ruleProposals.map((item) => item.id === input.proposalId
+            ? { ...item, status: input.approve ? 'approved' : 'rejected', reviewNote: input.note }
+            : item),
+        }
+        if (input.approve && proposal.kind === 'deduction') {
+          const severity = behaviorSeverityForPoints(proposal.points)
+          nextState.rules = [{
+            id: createId('rule'),
+            code: `D-AUTO-${String(state.rules.length + 1).padStart(6, '0')}`,
+            category: 'เกณฑ์ที่ครูเสนอ',
+            title: proposal.title,
+            description: proposal.description,
+            points: proposal.points,
+            severity,
+            guardianContactRequired: severity === 'serious' || severity === 'critical',
+            active: true,
+          }, ...state.rules]
+        } else if (input.approve) {
+          nextState.positiveRules = [{
+            id: createId('positive-rule'),
+            code: `P-AUTO-${String(state.positiveRules.length + 1).padStart(6, '0')}`,
+            category: 'เกณฑ์ที่ครูเสนอ',
+            title: proposal.title,
+            description: proposal.description ?? '',
+            defaultPoints: proposal.discretionary ? null : proposal.points,
+            maxPoints: proposal.points,
+            discretionary: proposal.discretionary,
+            active: true,
+          }, ...state.positiveRules]
+        }
+        onChange(nextState)
+      }
+      setAnnouncement(input.approve ? 'อนุมัติและเปิดใช้เกณฑ์ที่ครูเสนอแล้ว' : 'บันทึกการไม่อนุมัติและแจ้งผลให้ครูแล้ว')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   async function removeBehaviorRule(rule: BehaviorRule) {
     if (mutationBusy) return
     setBusyAction(`remove-behavior-rule-${rule.id}`)
@@ -1182,6 +1305,44 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         : `นำสิทธิ์ห้องทั้งหมดออกจาก ${teacherName} แล้ว`)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกสิทธิ์ห้องได้'
+      setAnnouncement(message)
+      throw error
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function setTeacherSchoolwideScoring(teacherId: string, enabled: boolean) {
+    if (mutationBusy) return
+    const targetTeacher = state.teachers.find((teacher) => teacher.id === teacherId)
+    if (!targetTeacher?.userId) throw new Error('บัญชีครูยังไม่เชื่อมกับระบบเข้าสู่ระบบ')
+    if (!enabled && !targetTeacher.scoreAllClassroomsGrantId) return
+    setBusyAction('teacher-schoolwide-scoring')
+    setAnnouncement('')
+    try {
+      if (actions) {
+        await actions.setTeacherSchoolwideScoring({
+          teacherUserId: targetTeacher.userId,
+          termId: state.term.id,
+          enabled,
+          grantId: targetTeacher.scoreAllClassroomsGrantId,
+          reason: enabled
+            ? 'มอบสิทธิ์ให้ครูประจำชั้นให้คะแนนนักเรียนได้ทุกชั้น'
+            : 'ยกเลิกสิทธิ์ให้คะแนนนักเรียนทุกชั้น',
+        })
+      } else {
+        onChange({
+          ...state,
+          teachers: state.teachers.map((teacher) => teacher.id === teacherId
+            ? { ...teacher, canScoreAllClassrooms: enabled, scoreAllClassroomsGrantId: enabled ? createId('grant') : undefined }
+            : teacher),
+        })
+      }
+      setAnnouncement(enabled
+        ? `มอบสิทธิ์ให้ ${targetTeacher.name} ให้คะแนนนักเรียนได้ทุกชั้นแล้ว`
+        : `ยกเลิกสิทธิ์ข้ามชั้นของ ${targetTeacher.name} แล้ว`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกสิทธิ์ข้ามชั้นได้'
       setAnnouncement(message)
       throw error
     } finally {
@@ -1359,14 +1520,18 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         />
       ) : null}
 
-      {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} /> : null}
+      {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} studentProfiles={state.students} /> : null}
 
       {tab === 'rules' ? <AdminRuleCatalog
         deductionRules={state.rules}
         positiveRules={state.positiveRules}
+        proposals={state.ruleProposals}
         busy={mutationBusy}
         onCreateBehavior={createBehaviorRule}
         onCreatePositive={createPositiveRule}
+        onUpdateBehavior={updateBehaviorRule}
+        onUpdatePositive={updatePositiveRule}
+        onReviewProposal={reviewRuleProposal}
         onRemoveBehavior={removeBehaviorRule}
         onRemovePositive={removePositiveRule}
       /> : null}
@@ -1394,11 +1559,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             </label>
             {assignmentTeacher ? (
               <TeacherClassroomAssignmentEditor
-                key={`${assignmentTeacher.id}:${[...assignmentTeacher.classroomIds].sort().join(',')}`}
+                key={`${assignmentTeacher.id}:${[...assignmentTeacher.classroomIds].sort().join(',')}:${Boolean(assignmentTeacher.canScoreAllClassrooms)}`}
                 teacher={assignmentTeacher}
                 classrooms={assignmentClassrooms}
-                busy={busyAction === 'teacher-classrooms'}
+                busy={busyAction === 'teacher-classrooms' || busyAction === 'teacher-schoolwide-scoring'}
                 onSave={updateTeacherClassrooms}
+                onSetSchoolwideScoring={(enabled) => setTeacherSchoolwideScoring(assignmentTeacher.id, enabled)}
                 termId={state.term.id}
               />
             ) : <EmptyState title="ยังไม่มีข้อมูลครู" detail="นำเข้าข้อมูลครูก่อนกำหนดห้องที่รับผิดชอบ" />}
@@ -1432,7 +1598,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           {adminScoreAction === 'addition' ? (
           <form className="panel stack-form score-details-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการเพิ่มคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
-              <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminTargets.length === 1 ? adminTargets[0]?.name : 'กลุ่มนักเรียนที่เลือก'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
+              <div>{adminTargets.length === 1 && adminTargets[0] ? <StudentAvatar student={adminTargets[0]} className="large" /> : <span className="student-avatar large">{adminTargets.length}</span>}<div><strong>{adminTargets.length === 1 && adminTargets[0] ? studentDisplayName(adminTargets[0]) : 'กลุ่มนักเรียนที่เลือก'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
             </div>
             <PositiveRuleSelect rules={activePositiveRules} value={adminPositiveRuleId} disabled={adminAdditionBusy} onChange={(nextId) => { const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} />
@@ -1458,7 +1624,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                 <div className="review-roster">
                   {adminTargets.map((student) => {
                     const change = applyScoreDelta(student.score, points)
-                    return <div className="review-student" key={student.id}><span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
+                    return <div className="review-student" key={student.id}><StudentAvatar student={student} /><span><strong>{studentDisplayName(student)}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
                   })}
                 </div>
                 <dl className="review-facts"><div><dt>เกณฑ์</dt><dd>{adminPositiveRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(activityOccurredAt) ?? activityOccurredAt)}</dd></div><div><dt>รายละเอียดเพิ่มเติม</dt><dd>{reason.trim() || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</dd></div></dl>
@@ -1474,7 +1640,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           <form className="panel stack-form score-details-form admin-adjustment-form" onSubmit={adjustScoreDirectly}>
             <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>ปรับคะแนนโดยผู้ดูแล</h2></div><span className="badge status-pending">สร้างประวัติใหม่</span></div>
             {adminAdjustmentTarget ? <div className="selected-student-bar batch-target-bar">
-              <div><span className="student-avatar large">1</span><div><strong>{adminAdjustmentTarget.name}</strong><small>{adminAdjustmentTarget.studentCode} • {adminAdjustmentTarget.classroomName}</small></div></div>
+              <div><StudentAvatar student={adminAdjustmentTarget} className="large" /><div><strong>{studentDisplayName(adminAdjustmentTarget)}</strong><small>{adminAdjustmentTarget.studentCode} • {adminAdjustmentTarget.classroomName}</small></div></div>
               <div><span>คะแนนปัจจุบัน</span><b>{adminAdjustmentTarget.score}</b></div>
             </div> : <p className="form-error">กรุณากลับไปเลือกนักเรียน 1 คน</p>}
             <fieldset className="adjustment-direction-fieldset">
@@ -1505,7 +1671,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           <form className="panel stack-form score-details-form" onSubmit={deductPointsDirectly}>
             <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการตัดคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
-              <div><span className="student-avatar large">{adminTargets.length}</span><div><strong>{adminTargets.length === 1 ? adminTargets[0]?.name : 'กลุ่มนักเรียนที่เลือก'}</strong><small>ทุกคนจะใช้เกณฑ์ วันเวลา และรายละเอียดเหตุการณ์เดียวกัน</small></div></div>
+              <div>{adminTargets.length === 1 && adminTargets[0] ? <StudentAvatar student={adminTargets[0]} className="large" /> : <span className="student-avatar large">{adminTargets.length}</span>}<div><strong>{adminTargets.length === 1 && adminTargets[0] ? studentDisplayName(adminTargets[0]) : 'กลุ่มนักเรียนที่เลือก'}</strong><small>ทุกคนจะใช้เกณฑ์ วันเวลา และรายละเอียดเหตุการณ์เดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
             </div>
             <DeductionRuleSelect
@@ -1524,7 +1690,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
                 <div className="review-roster">
                   {adminTargets.map((student) => {
                     const change = applyScoreDelta(student.score, -(adminDeductionRule?.points ?? 0))
-                    return <div className="review-student" key={student.id}><span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
+                    return <div className="review-student" key={student.id}><StudentAvatar student={student} /><span><strong>{studentDisplayName(student)}</strong><small>{student.studentCode} • {student.classroomName}</small></span><b>{change.before} → {change.after}</b></div>
                   })}
                 </div>
                 <dl className="review-facts"><div><dt>เหตุผล</dt><dd>{adminDeductionRule?.title}</dd></div><div><dt>วันเวลา</dt><dd>{formatThaiDate(localDateTimeToIso(adminDeductionOccurredAt) ?? adminDeductionOccurredAt)}</dd></div><div><dt>รายละเอียดเพิ่มเติม</dt><dd>{adminDeductionNote.trim() || 'ไม่ได้ระบุรายละเอียดเพิ่มเติม'}</dd></div></dl>
@@ -1539,9 +1705,9 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </form>
           )}
           {adminScoreAction === 'adjustment' ? <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติปรับคะแนนโดยผู้ดูแล</h2></div><span className="counter">{adminAdjustments.length}</span></div>
-            {adminAdjustments.length ? <div className="record-list">{adminAdjustments.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • {transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta} คะแนน</strong><span>{transaction.reason}</span><small>{formatThaiDate(transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-pending">ปรับยอด</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการปรับคะแนน" detail="รายการแก้ยอดโดยผู้ดูแลจะแสดงที่นี่โดยไม่แก้ประวัติเดิม" />}
+            {adminAdjustments.length ? <div className="record-list">{adminAdjustments.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); return <article className="record-row detailed-record" key={transaction.id}>{student ? <StudentAvatar student={student} /> : null}<div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'} • {transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta} คะแนน</strong><span>{transaction.reason}</span><small>{formatThaiDate(transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-pending">ปรับยอด</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการปรับคะแนน" detail="รายการแก้ยอดโดยผู้ดูแลจะแสดงที่นี่โดยไม่แก้ประวัติเดิม" />}
           </section> : <section className="panel rules-panel"><div className="section-heading"><div><p className="eyebrow">ตรวจสอบย้อนหลัง</p><h2>ประวัติเพิ่มคะแนนโดยตรง</h2></div><span className="counter">{directAdditions.length}</span></div>
-            {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); const detail = transaction.internalReason?.trim() !== transaction.positiveRuleTitle?.trim() ? transaction.internalReason?.trim() : ''; return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={transaction.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
+            {directAdditions.length ? <div className="record-list">{directAdditions.slice(0, 20).map((transaction) => { const student = state.students.find((item) => item.id === transaction.studentId); const detail = transaction.internalReason?.trim() !== transaction.positiveRuleTitle?.trim() ? transaction.internalReason?.trim() : ''; return <article className="record-row detailed-record" key={transaction.id}>{student ? <StudentAvatar student={student} /> : null}<div><strong>{student ? studentDisplayName(student) : 'ไม่พบข้อมูลนักเรียน'} • +{transaction.appliedDelta} คะแนน</strong><span>{transaction.positiveRuleTitle ?? transaction.reason}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={transaction.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(transaction.activityOccurredAt ?? transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className="badge status-approved">บันทึกแล้ว</span></article> })}</div> : <EmptyState title="ยังไม่มีรายการเพิ่มโดยตรง" detail="รายการที่แอดมินเพิ่มพร้อมเกณฑ์และหลักฐานจะแสดงที่นี่" />}
           </section>}
           </>}
           </> : null}

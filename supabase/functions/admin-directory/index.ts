@@ -13,6 +13,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
 }
 
 const usernamePattern = /^[a-z0-9][a-z0-9._-]*[a-z0-9]$|^[a-z0-9]$/
@@ -95,24 +96,66 @@ function isoDate(value: unknown): string | null {
   return text
 }
 
+const ACTIVATION_CODE_TTL_MS = 24 * 60 * 60 * 1000
+const PASSWORD_RESET_CODE_TTL_MS = 60 * 60 * 1000
+const ACCOUNT_CODE_DIGITS = 8
+const ACCOUNT_CODE_LIMIT = 10 ** ACCOUNT_CODE_DIGITS
+
+function createAccountCode(): string {
+  const maximum = Math.floor(0x1_0000_0000 / ACCOUNT_CODE_LIMIT) * ACCOUNT_CODE_LIMIT
+  const values = new Uint32Array(1)
+  do crypto.getRandomValues(values)
+  while (values[0] >= maximum)
+  return String(values[0] % ACCOUNT_CODE_LIMIT).padStart(ACCOUNT_CODE_DIGITS, '0')
+}
+
+async function accountCodeDigest(secret: string, username: string, code: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(`${username}:${code}`))
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function createTemporaryActivationPassword(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const random = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
+  return `Sp1!${random}`
+}
+
 async function generateActivationCode(
   serviceClient: UntypedSupabaseClient,
+  secretKey: string,
+  actorUserId: string | null,
+  userId: string,
   username: string,
-  authDomain: string,
+  purpose: 'activation' | 'password-reset' = 'activation',
 ) {
-  const email = `${username}@${authDomain}`
-  const { data, error } = await serviceClient.auth.admin.generateLink({
-    type: 'magiclink',
-    email,
+  const activationCode = createAccountCode()
+  const tokenHash = await accountCodeDigest(secretKey, username, activationCode)
+  const issuedAt = new Date()
+  const expiresAt = new Date(issuedAt.getTime() + (purpose === 'password-reset' ? PASSWORD_RESET_CODE_TTL_MS : ACTIVATION_CODE_TTL_MS))
+  const { error } = await serviceClient.rpc('service_issue_school_account_code', {
+    p_actor_user_id: actorUserId,
+    p_user_id: userId,
+    p_token_hash_hex: tokenHash,
+    p_purpose: purpose,
+    p_expires_at: expiresAt.toISOString(),
   })
-  const activationCode = data?.properties?.email_otp
-  if (error || !activationCode) {
+  if (error) {
     throw new Error('สร้างรหัสเปิดใช้ครั้งเดียวไม่สำเร็จ กรุณาลองออกใหม่จากหน้าบัญชี')
   }
   return {
     username,
     activationCode,
-    issuedAt: new Date().toISOString(),
+    issuedAt: issuedAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
   }
 }
 
@@ -128,6 +171,65 @@ Deno.serve(async (request) => {
       throw new Error('บริการจัดการบัญชียังตั้งค่าไม่ครบ')
     }
     const authDomain = authEmailDomain()
+    const parsedBody = await request.json().catch(() => null)
+    if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+      return response(400, { ok: false, error: 'คำขอไม่ถูกต้อง' })
+    }
+    const body = parsedBody as JsonRecord
+    const action = String(body.action ?? '')
+    const input = body.input && typeof body.input === 'object' ? body.input as JsonRecord : {}
+    const serviceClient = createClient(supabaseUrl, secretKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+
+    if (action === 'verify-account-code') {
+      const username = usernameValue(input.username)
+      const activationCode = String(input.activationCode ?? '').trim()
+      if (!/^\d{8}$/.test(activationCode)) {
+        return response(400, { ok: false, error: 'รหัสใช้ครั้งเดียวไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว' })
+      }
+      const tokenHash = await accountCodeDigest(secretKey, username, activationCode)
+      const { data: consumed, error: consumeError } = await serviceClient.rpc('service_consume_school_account_code', {
+        p_username: username,
+        p_token_hash_hex: tokenHash,
+      })
+      const consumedRow = consumed && typeof consumed === 'object' ? consumed as JsonRecord : null
+      if (consumeError || consumedRow?.ok !== true) {
+        return response(400, { ok: false, error: 'รหัสใช้ครั้งเดียวไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว' })
+      }
+      const userId = String(consumedRow.userId ?? '')
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+        return response(400, { ok: false, error: 'ไม่สามารถเปิดใช้บัญชีได้ กรุณาให้ออกรหัสใหม่' })
+      }
+      const temporaryPassword = createTemporaryActivationPassword()
+      const { error: updateError } = await serviceClient.auth.admin.updateUserById(userId, {
+        password: temporaryPassword,
+        user_metadata: { username, must_change_password: true },
+      })
+      if (updateError) {
+        console.error('account-code password handoff failed', { userId, purpose: consumedRow.purpose })
+        return response(400, { ok: false, error: 'ไม่สามารถเปิดใช้บัญชีได้ กรุณาให้ออกรหัสใหม่' })
+      }
+      const signInClient = createClient(supabaseUrl, publishableKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      const { data: signInData, error: signInError } = await signInClient.auth.signInWithPassword({
+        email: `${username}@${authDomain}`,
+        password: temporaryPassword,
+      })
+      if (signInError || !signInData.session) {
+        console.error('account-code session handoff failed', { userId, purpose: consumedRow.purpose })
+        return response(400, { ok: false, error: 'ไม่สามารถเปิดใช้บัญชีได้ กรุณาให้ออกรหัสใหม่' })
+      }
+      return response(200, {
+        ok: true,
+        data: {
+          accessToken: signInData.session.access_token,
+          refreshToken: signInData.session.refresh_token,
+          purpose: consumedRow.purpose,
+        },
+      })
+    }
 
     const authorization = request.headers.get('Authorization') ?? ''
     const accessToken = authorization.replace(/^Bearer\s+/i, '').trim()
@@ -137,17 +239,10 @@ Deno.serve(async (request) => {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${accessToken}` } },
     })
-    const serviceClient = createClient(supabaseUrl, secretKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
     const { data: userData, error: userError } = await userClient.auth.getUser(accessToken)
     if (userError || !userData.user) {
       return response(401, { ok: false, error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' })
     }
-
-    const body = await request.json() as JsonRecord
-    const action = String(body.action ?? '')
-    const input = body.input && typeof body.input === 'object' ? body.input as JsonRecord : {}
 
     if (action === 'snapshot') {
       const { data, error } = await userClient.rpc('school_directory_snapshot')
@@ -255,7 +350,7 @@ Deno.serve(async (request) => {
 
       let activation
       try {
-        activation = await generateActivationCode(serviceClient, username, authDomain)
+        activation = await generateActivationCode(serviceClient, secretKey, userData.user.id, authData.user.id, username)
       } catch {
         activation = undefined
       }
@@ -315,12 +410,17 @@ Deno.serve(async (request) => {
 
     if (action === 'issue-activation') {
       const username = usernameValue(input.username)
-      const { error } = await serviceClient.rpc('service_get_activation_account', {
+      const { data: account, error } = await serviceClient.rpc('service_get_activation_account', {
         p_actor_user_id: userData.user.id,
         p_username: username,
       })
       if (error) throw new Error(error.message)
-      const activation = await generateActivationCode(serviceClient, username, authDomain)
+      const accountRow = account && typeof account === 'object' ? account as JsonRecord : null
+      const userId = String(accountRow?.userId ?? '')
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+        throw new Error('ข้อมูลบัญชีสำหรับเปิดใช้ไม่ถูกต้อง')
+      }
+      const activation = await generateActivationCode(serviceClient, secretKey, userData.user.id, userId, username)
       return response(200, { ok: true, data: activation })
     }
 
@@ -355,7 +455,7 @@ Deno.serve(async (request) => {
 
       let activation
       try {
-        activation = await generateActivationCode(serviceClient, accountUsername, authDomain)
+        activation = await generateActivationCode(serviceClient, secretKey, userData.user.id, userId, accountUsername, 'password-reset')
       } catch {
         throw new Error('รหัสผ่านเดิมถูกยกเลิกแล้ว แต่ยังสร้างรหัสกู้บัญชีไม่สำเร็จ กรุณาออกรหัสครั้งเดียวใหม่')
       }

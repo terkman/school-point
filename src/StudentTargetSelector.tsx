@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { Student } from './domain'
+import { studentDisplayName, type Student } from './domain'
+import { StudentAvatar } from './ProfileAvatar'
 import {
   buildClassroomGroups,
   resolveStudentTargets,
@@ -67,7 +68,7 @@ export function StudentTargetSelector({
   const roomStudents = selectedClassroom?.students ?? []
   const normalizedQuery = query.trim().toLocaleLowerCase('th')
   const visibleStudents = normalizedQuery
-    ? roomStudents.filter((student) => `${student.studentCode} ${student.name}`.toLocaleLowerCase('th').includes(normalizedQuery))
+    ? roomStudents.filter((student) => `${student.studentCode} ${student.name} ${student.nickname ?? ''}`.toLocaleLowerCase('th').includes(normalizedQuery))
     : roomStudents
   const selectedIds = value.scope === 'single'
     ? new Set(value.singleStudentId ? [value.singleStudentId] : [])
@@ -170,8 +171,8 @@ export function StudentTargetSelector({
             {visibleStudents.length ? visibleStudents.map((student) => (
               <label className={selectedIds.has(student.id) ? 'picker-check-row selected student-list-item' : 'picker-check-row student-list-item'} key={student.id}>
                 <input type={selectionMode === 'single' ? 'radio' : 'checkbox'} name={selectionMode === 'single' ? 'score-adjustment-student' : undefined} disabled={disabled} checked={selectedIds.has(student.id)} onChange={() => toggleStudent(student.id)} />
-                <span className="student-avatar">{student.name.slice(-2)}</span>
-                <span><strong>{student.name}</strong><small>{student.studentCode} • {student.classroomName}</small></span>
+                <StudentAvatar student={student} className="student-avatar" />
+                <span><strong>{studentDisplayName(student)}</strong><small>{student.studentCode} • {student.classroomName}</small></span>
                 <b>{student.score}<small> คะแนน</small></b>
               </label>
             )) : <p className="picker-empty">ไม่พบนักเรียนตามคำค้น</p>}

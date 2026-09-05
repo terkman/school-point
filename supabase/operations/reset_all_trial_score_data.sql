@@ -19,7 +19,7 @@
 --   -v confirm_reset_all_trial_score_data=RESET_ALL_TRIAL_SCORE_DATA \
 --   -v target_active_term_id=123 -v expected_database=postgres \
 --   -v expected_project_binding=local-school-point \
---   -v expected_migration_head=202608310003 \
+--   -v expected_migration_head=202609050004 \
 --   -v expected_active_enrollments=456 \
 --   -v backup_reference='backup-or-ticket-id' \
 --   -v operator_label='approved-operator' \

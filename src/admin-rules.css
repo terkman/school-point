@@ -31,6 +31,9 @@
 .rule-row-meta { display: flex; align-items: center; gap: 8px; }
 .rule-row-meta > b { min-width: 48px; text-align: right; font-size: 1rem; }
 .rule-row-meta > b.negative { color: #b43f46; }
+.rule-row-actions, .proposal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.proposal-actions input { min-width: min(320px, 100%); }
+.rule-proposal-review { margin-block: 0; }
 
 .adjustment-direction-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .adjustment-direction-fieldset legend { margin-bottom: 7px; color: var(--ink); font-size: .78rem; font-weight: 600; }
@@ -49,6 +52,10 @@
   .rule-form-grid { grid-template-columns: 1fr; }
   .rule-catalog-row { grid-template-columns: minmax(0, 1fr) auto; }
   .rule-catalog-row > button { grid-column: 1 / -1; width: 100%; }
+  .rule-row-actions { grid-column: 1 / -1; }
+  .rule-row-actions .button { flex: 1; }
+  .proposal-actions { justify-content: stretch; }
+  .proposal-actions input { width: 100%; }
 }
 
 @media (max-width: 420px) {

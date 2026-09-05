@@ -462,6 +462,12 @@ tbody tr:hover td { background: #fbfcfe; }
 .roster-row > b { color: var(--teal); }
 .student-avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #dce6f9; color: var(--navy); font-size: .7rem; font-weight: 900; }
 .student-avatar.large { width: 46px; height: 46px; }
+.student-name-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.student-name-cell > span:not(.avatar), .student-name-cell > div { min-width: 0; }
+.profile-avatar img, .student-avatar img, .review-avatar img, .case-queue-alert img, .followup-clock img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.schoolwide-score-toggle { margin-block: 14px; }
+.schoolwide-score-toggle.selected { border-color: var(--indigo); background: #eef3ff; }
+.schoolwide-score-toggle span { display: grid; gap: 3px; }
 .profile-avatar { overflow: hidden; flex: 0 0 auto; padding: 0; }
 .profile-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .profile-settings { display: grid; grid-template-columns: minmax(220px, .72fr) minmax(0, 1.8fr); gap: 18px; align-items: start; }

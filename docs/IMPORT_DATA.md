@@ -111,7 +111,7 @@ RPC ไม่เชื่อค่า `fingerprint` ที่มากับไ�
 
 หลัง backend ที่เชื่อถือได้สร้าง Supabase Auth user แล้ว ให้เรียก `public.admin_link_provisioned_account(username, user_id)` ด้วย `service_role` เพื่อผูกบัญชีเข้ากับ `profiles`, นักเรียน/บุคลากร และ username directory แบบ idempotent RPC นี้ไม่รับรหัสผ่าน รหัสเปิดใช้ หรือ token ใด ๆ และ frontend เรียกไม่ได้
 
-บัญชีใหม่ถูกผูกด้วย `activation_required = true` เสมอ ให้ backend สร้าง Auth user โดยยังไม่ตั้งรหัสผ่าน แล้วส่ง magic-link/OTP ครั้งเดียว หลังยืนยัน OTP ผู้ใช้ตั้งรหัสผ่านส่วนตัวและเข้าสู่ระบบใหม่ด้วยรหัสนั้นเพื่อรับ JWT ที่มี `amr.method = password` จากนั้น frontend จึงเรียก `public.complete_first_password_activation()` RPC จะตรวจ `auth.uid()`, สถานะโปรไฟล์ และ AMR ที่ Supabase ลงลายเซ็นไว้ก่อนปลด gate พร้อมเขียน audit ระหว่างนั้น session อ่านได้เฉพาะโปรไฟล์ของตนเองและเรียกข้อมูลโรงเรียน/RPC คะแนนไม่ได้ ห้ามใช้ `encrypted_password` หรือ `user_metadata` เป็นหลักฐานการเปิดใช้งาน
+บัญชีใหม่ถูกผูกด้วย `activation_required = true` เสมอ ให้ backend สร้าง Auth user โดยยังไม่ตั้งรหัสผ่าน แล้วออกรหัสใช้ครั้งเดียว ระบบเก็บเฉพาะ HMAC digest ใน `private.account_activations` และตรวจรหัส อายุ จำนวนครั้งที่ลอง และสถานะใช้แล้วผ่าน Edge Function ก่อนสร้างเซสชันตั้งรหัสผ่าน ผู้ใช้จึงตั้งรหัสผ่านส่วนตัวและเข้าสู่ระบบใหม่ด้วยรหัสนั้นเพื่อรับ JWT ที่มี `amr.method = password` จากนั้น frontend เรียก `public.complete_first_password_activation()` เพื่อปลด gate พร้อมเขียน audit ระหว่างนั้น session อ่านได้เฉพาะโปรไฟล์ของตนเองและเรียกข้อมูลโรงเรียน/RPC คะแนนไม่ได้ ห้ามใช้ `encrypted_password` หรือ `user_metadata` เป็นหลักฐานการเปิดใช้งาน
 
 ระบบยกเลิก `public.admin_mark_account_activated(user_id)` และคำสั่ง provisioning จะไม่เปิดบัญชีอัตโนมัติเมื่อพบ Auth user เดิม เพราะ Supabase อาจเก็บ password hash ภายในให้บัญชีที่สร้างโดยไม่ส่งรหัสผ่าน การรันซ้ำจึงทำเพียงผูกบัญชีแบบ idempotent และรักษาค่า `activation_required` เดิมไว้ การปลด gate ต้องเกิดจาก password session ที่ยืนยันแล้วเท่านั้น
 
@@ -173,7 +173,7 @@ npm run supabase:activation -- `
   --output private-data/activation-codes.json
 ```
 
-ไฟล์ activation codes มี username และ OTP จึงต้องอยู่ใต้ `private-data/` หรือ `imports/` เท่านั้น รหัสมีอายุตามค่า Auth ของ Supabase และใช้ได้ครั้งเดียว หน้าเว็บจะให้ผู้ใช้ตั้งรหัสผ่านส่วนตัว (อย่างน้อย 10 ตัวอักษร มีตัวอักษรภาษาอังกฤษและตัวเลข) เข้าสู่ระบบใหม่ด้วยรหัสนั้น แล้วเรียก activation RPC จาก password session จากนั้นฐานข้อมูลจึงเปิดสิทธิ์ ข้อความบน console ไม่มี OTP ห้ามแชร์ service-role key หรือเก็บไว้ใน `.env.example`, `VITE_*`, Google Sheets และ repository
+ไฟล์ activation codes มี username, รหัสใช้ครั้งเดียว, `issuedAt` และ `expiresAt` จึงต้องอยู่ใต้ `private-data/` หรือ `imports/` เท่านั้น รหัสเปิดใช้ครั้งแรกมีอายุ 24 ชั่วโมง ส่วนรหัสกู้รหัสผ่านมีอายุ 1 ชั่วโมง ทั้งสองค่าถูกบังคับฝั่งเซิร์ฟเวอร์จริง การออกรหัสใหม่ยกเลิกรหัสเก่า รหัสผิดติดต่อกัน 10 ครั้งทำให้รหัสถูกยกเลิก และฐานข้อมูลไม่เก็บรหัสแบบอ่านได้ หน้าเว็บจะให้ผู้ใช้ตั้งรหัสผ่านส่วนตัว (อย่างน้อย 10 ตัวอักษร มีตัวอักษรภาษาอังกฤษและตัวเลข) เข้าสู่ระบบใหม่ด้วยรหัสนั้น แล้วเรียก activation RPC จาก password session จากนั้นฐานข้อมูลจึงเปิดสิทธิ์ ห้ามแชร์ service-role key หรือเก็บรหัสใน `.env.example`, `VITE_*`, Google Sheets และ repository
 
 ## ตรวจสถานะ activation และซ่อมแบบมีหลักฐาน
 

@@ -18,6 +18,8 @@ import {
 } from './schoolDirectory'
 import { EmptyState, Icon } from './ui'
 import { useDialogAccessibility } from './useDialogAccessibility'
+import { studentDisplayName, type Student } from './domain'
+import { StudentAvatar } from './ProfileAvatar'
 
 type DirectorySection = 'students' | 'staff' | 'classrooms' | 'import'
 type EditorTarget =
@@ -32,6 +34,7 @@ interface SchoolDirectoryPanelProps {
   actions?: AppDataActions
   readOnly?: boolean
   initialSnapshot?: SchoolDirectorySnapshot
+  studentProfiles?: Student[]
 }
 
 const emptySnapshot: SchoolDirectorySnapshot = {
@@ -103,11 +106,12 @@ function ActivationDialog({
       <div className="activation-code-card">
         <span>ชื่อผู้ใช้</span>
         <strong>{result.username}</strong>
-        <span>รหัสเปิดใช้</span>
+        <span>{isPasswordReset ? 'รหัสกู้บัญชี' : 'รหัสเปิดใช้'}</span>
         <b>{result.activationCode}</b>
       </div>
       <p className="form-help">
-        ส่งรหัสนี้ให้เจ้าของบัญชีโดยตรง รหัสมีอายุ 1 ชั่วโมงและใช้ได้ครั้งเดียว
+        ส่งรหัสนี้ให้เจ้าของบัญชีโดยตรง รหัสมีอายุ {isPasswordReset ? '1 ชั่วโมง' : '24 ชั่วโมง'} และใช้ได้ครั้งเดียว
+        {result.expiresAt ? ` (หมดอายุ ${new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(result.expiresAt))})` : ''}
         {isPasswordReset ? ' รหัสผ่านเดิมใช้ไม่ได้แล้ว เจ้าของบัญชีต้องเลือก “เปิดใช้บัญชี / กู้รหัสผ่าน” เพื่อตั้งรหัสใหม่' : ' หลังจากนั้นผู้ใช้ต้องตั้งรหัสผ่านส่วนตัว'}
       </p>
       <div className="form-actions">
@@ -439,6 +443,7 @@ export function SchoolDirectoryPanel({
   actions,
   readOnly = false,
   initialSnapshot,
+  studentProfiles = [],
 }: SchoolDirectoryPanelProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot ?? emptySnapshot)
   const [section, setSection] = useState<DirectorySection>('students')
@@ -472,12 +477,13 @@ export function SchoolDirectoryPanel({
   }, [])
 
   const normalizedQuery = query.trim().toLocaleLowerCase('th')
+  const studentProfileById = useMemo(() => new Map(studentProfiles.map((student) => [student.id, student])), [studentProfiles])
   const students = useMemo(() => snapshot.students.filter((student) => {
     if (!showInactive && student.status !== 'active') return false
     if (!normalizedQuery) return true
-    return `${fullName(student)} ${student.studentCode} ${student.username} ${student.classroomName}`
+    return `${fullName(student)} ${studentProfileById.get(student.id)?.nickname ?? ''} ${student.studentCode} ${student.username} ${student.classroomName}`
       .toLocaleLowerCase('th').includes(normalizedQuery)
-  }), [normalizedQuery, showInactive, snapshot.students])
+  }), [normalizedQuery, showInactive, snapshot.students, studentProfileById])
   const staff = useMemo(() => snapshot.staff.filter((person) => {
     if (!showInactive && person.status !== 'active') return false
     if (!normalizedQuery) return true
@@ -497,6 +503,7 @@ export function SchoolDirectoryPanel({
         username: result.username,
         activationCode: result.activationCode,
         issuedAt: result.issuedAt,
+        expiresAt: result.expiresAt,
       })
     }
   }
@@ -591,7 +598,7 @@ export function SchoolDirectoryPanel({
         ) : section === 'students' ? (
           students.length ? <div className="directory-record-list">{students.map((student) => (
             <article className="directory-record" key={student.id}>
-              <div className="directory-record-main"><span className="student-avatar">{student.givenName.slice(0, 1)}</span><div><strong>{fullName(student)}</strong><span>{student.studentCode} • {student.classroomName || 'ยังไม่ระบุห้อง'}</span><small>ชื่อผู้ใช้ {student.username || 'ยังไม่มีบัญชี'}</small></div></div>
+              <div className="directory-record-main">{studentProfileById.get(student.id) ? <StudentAvatar student={studentProfileById.get(student.id)!} className="student-avatar" /> : <span className="student-avatar">{student.givenName.slice(0, 1)}</span>}<div><strong>{studentProfileById.get(student.id) ? studentDisplayName(studentProfileById.get(student.id)!) : fullName(student)}</strong><span>{student.studentCode} • {student.classroomName || 'ยังไม่ระบุห้อง'}</span><small>ชื่อผู้ใช้ {student.username || 'ยังไม่มีบัญชี'}</small></div></div>
               <div className="directory-record-status"><span className={`badge ${statusClass(student.status)}`}>{personStatusLabels[student.status]}</span>{student.activationRequired && student.accountActive ? <small>รอเปิดใช้บัญชี</small> : null}</div>
               <div className="inline-actions">
                 {!readOnly && student.activationRequired && student.accountActive ? <button className="button ghost compact" type="button" disabled={Boolean(busyUsername)} onClick={() => void issueCode(student.username)}>{busyUsername === student.username ? 'กำลังออก…' : 'ออกรหัสครั้งแรก'}</button> : null}

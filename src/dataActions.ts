@@ -252,6 +252,36 @@ export interface RemoveRuleResult {
   syncWarning?: MutationSyncWarning
 }
 
+export interface ProposeRuleInput {
+  kind: 'deduction' | 'positive'
+  title: string
+  points: number
+  description?: string
+  discretionary?: boolean
+}
+
+export interface UpdateBehaviorRuleInput extends CreateBehaviorRuleInput {
+  ruleId: string
+}
+
+export interface UpdatePositiveRuleInput extends CreatePositiveRuleInput {
+  ruleId: string
+}
+
+export interface ReviewRuleProposalInput {
+  proposalId: string
+  approve: boolean
+  note?: string
+}
+
+export interface SetTeacherSchoolwideScoringInput {
+  teacherUserId: string
+  termId: string
+  enabled: boolean
+  grantId?: string
+  reason: string
+}
+
 export interface UpdateTermScheduleInput {
   termId: string
   startsOn: string
@@ -392,11 +422,16 @@ export interface AppDataActions {
   adminAdjustScore: (input: AdminAdjustScoreInput) => Promise<AdminAdjustScoreResult>
   createBehaviorRule: (input: CreateBehaviorRuleInput) => Promise<CreateRuleResult>
   createPositiveRule: (input: CreatePositiveRuleInput) => Promise<CreateRuleResult>
+  proposeRule: (input: ProposeRuleInput) => Promise<{ id: string }>
+  reviewRuleProposal: (input: ReviewRuleProposalInput) => Promise<void>
+  updateBehaviorRule: (input: UpdateBehaviorRuleInput) => Promise<{ id: string }>
+  updatePositiveRule: (input: UpdatePositiveRuleInput) => Promise<{ id: string }>
   removeBehaviorRule: (ruleId: string) => Promise<RemoveRuleResult>
   removePositiveRule: (ruleId: string) => Promise<RemoveRuleResult>
   initializeTermScores: (termId: string) => Promise<void>
   updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<void>
   updateTeacherClassrooms: (input: UpdateTeacherClassroomsInput) => Promise<void>
+  setTeacherSchoolwideScoring: (input: SetTeacherSchoolwideScoringInput) => Promise<void>
   getGuardianContacts: (taskId: string) => Promise<GuardianContact[]>
   recordGuardianContactAttempt: (input: RecordGuardianContactAttemptInput) => Promise<RecordGuardianContactAttemptResult>
   completeGuardianContact: (input: CompleteGuardianContactInput) => Promise<void>
@@ -406,6 +441,7 @@ export interface AppDataActions {
   recordPaperDocumentEvent?: (input: RecordPaperDocumentEventInput) => Promise<PaperDocumentRecord>
   submitPaperAppeal?: (input: SubmitPaperAppealInput) => Promise<void>
   setMyAvatarPreset: (preset: string) => Promise<void>
+  updateMyNickname: (nickname: string) => Promise<void>
   uploadMyAvatar: (file: File) => Promise<void>
   activateTerm: (termId: string) => Promise<void>
   getSchoolDirectory: () => Promise<SchoolDirectorySnapshot>
