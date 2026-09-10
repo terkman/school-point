@@ -177,6 +177,32 @@ test.describe('demo acceptance smoke checks', () => {
     expect(errors).toEqual([])
   })
 
+  test('shows all current-score risk bands and keeps their roster schoolwide', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
+
+    const riskPanel = page.getByRole('region', { name: /ต่ำกว่าเกณฑ์ 80 คะแนน|ไม่มีนักเรียนต่ำกว่าเกณฑ์/ })
+    const riskBands = riskPanel.getByRole('group', { name: 'การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน' })
+    await expect(riskBands.getByRole('button')).toHaveCount(10)
+    await riskBands.getByRole('button', { name: /ช่วงคะแนน 90 ถึง 100/ }).click()
+
+    const riskRoster = riskPanel.getByRole('table', { name: 'นักเรียนช่วงคะแนน 90 ถึง 100' })
+    await expect(riskRoster).toBeVisible()
+    await expect(riskRoster.getByText('นักเรียนต่างห้องตัวอย่าง', { exact: true })).toBeVisible()
+    await page.getByRole('combobox', { name: 'ระดับชั้นสำหรับสถิติ' }).selectOption('M2')
+    await expect(riskRoster.getByText('นักเรียนต่างห้องตัวอย่าง', { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/risk=90-100/)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(riskBands).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+    await expectHealthyScreen(page)
+    expect(errors).toEqual([])
+  })
+
   test('carries a teacher rule proposal through admin approval and versioned editing', async ({ page }) => {
     const errors = collectBrowserErrors(page)
     const proposedTitle = 'ทิ้งขยะนอกจุดที่กำหนด'

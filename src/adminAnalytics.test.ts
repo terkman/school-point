@@ -80,6 +80,24 @@ describe('admin score analytics', () => {
     ])
   })
 
+  it('groups current scores for every active grade independently from historical filters', () => {
+    const state = analyticsState()
+    state.students.push(
+      { id: 'm3-risk', studentCode: '3001', name: 'นักเรียนเสี่ยง ม.3', classroomId: 'm3', classroomName: 'ม.3/1', gradeLevel: 'M3', score: 74, status: 'active' },
+      { id: 'inactive-risk', studentCode: '9999', name: 'นักเรียนจบแล้ว', classroomId: 'm3', classroomName: 'ม.3/1', gradeLevel: 'M3', score: 5, status: 'graduated' },
+    )
+
+    const summary = buildAdminAnalytics(state, { kind: 'deduction', gradeLevel: 'P1', month: '2026-07' })
+    const score70to79 = summary.currentScoreRisk.bands.find((band) => band.id === '70-79')
+    const score90to100 = summary.currentScoreRisk.bands.find((band) => band.id === '90-100')
+
+    expect(summary.currentScoreRisk.studentCount).toBe(4)
+    expect(summary.currentScoreRisk.belowThresholdCount).toBe(1)
+    expect(score70to79?.students.map((row) => row.student.id)).toEqual(['m3-risk'])
+    expect(score90to100?.studentCount).toBe(3)
+    expect(summary.currentScoreRisk.bands).toHaveLength(10)
+  })
+
   it('renders accessible filter controls, grade summaries, and an auditable detail table', () => {
     const markup = renderToStaticMarkup(createElement(AdminAnalyticsDashboard, { state: analyticsState() }))
 
@@ -90,6 +108,9 @@ describe('admin score analytics', () => {
     expect(markup).toContain('สรุปตามวันเกิดเหตุจริง')
     expect(markup).toContain('คะแนนเพิ่มและตัดทุกระดับชั้น')
     expect(markup).toContain('รายละเอียดคะแนน')
+    expect(markup).toContain('คะแนนปัจจุบันทุกระดับชั้น')
+    expect(markup).toContain('การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน')
+    expect(markup).toContain('90–100')
     expect(markup).toContain('นักเรียน ป.1')
   })
 })

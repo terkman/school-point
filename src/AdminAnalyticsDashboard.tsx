@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   buildAdminAnalytics,
+  CURRENT_SCORE_RISK_BANDS,
   type AnalyticsFilters,
   type AnalyticsKindFilter,
 } from './adminAnalytics'
@@ -27,12 +28,19 @@ function filtersFromLocation(): AnalyticsFilters {
   }
 }
 
-function replaceFilterLocation(filters: AnalyticsFilters) {
+function riskBandFromLocation(): string | null {
+  if (typeof window === 'undefined') return null
+  const riskBandId = new URLSearchParams(currentLogicalBrowserRoute().search).get('risk')
+  return CURRENT_SCORE_RISK_BANDS.some((band) => band.id === riskBandId) ? riskBandId : null
+}
+
+function replaceFilterLocation(filters: AnalyticsFilters, riskBandId: string | null) {
   if (typeof window === 'undefined') return
   const search = new URLSearchParams({ tab: 'overview' })
   if (filters.kind !== 'all') search.set('kind', filters.kind)
   if (filters.gradeLevel !== 'all') search.set('grade', filters.gradeLevel)
   if (filters.month !== 'all') search.set('month', filters.month)
+  if (riskBandId) search.set('risk', riskBandId)
   replaceLogicalBrowserRoute(`/admin/reports?${search.toString()}`)
 }
 
@@ -48,18 +56,32 @@ function barStyle(value: number, maximum: number): CSSProperties {
   return { width: `${value ? Math.max(3, Math.round((value / maximum) * 100)) : 0}%` }
 }
 
+function thresholdDifferenceLabel(value: number): string {
+  if (value < 0) return `ต่ำกว่าเกณฑ์ ${Math.abs(value)} คะแนน`
+  if (value === 0) return 'ถึงเกณฑ์พอดี'
+  return `สูงกว่าเกณฑ์ ${value} คะแนน`
+}
+
 export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
   const [filters, setFilters] = useState<AnalyticsFilters>(filtersFromLocation)
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null)
+  const [selectedRiskBandId, setSelectedRiskBandId] = useState<string | null>(riskBandFromLocation)
+  const [expandedRiskStudentId, setExpandedRiskStudentId] = useState<string | null>(null)
   const summary = useMemo(() => buildAdminAnalytics(state, filters), [filters, state])
   const selectedGradeLabel = summary.gradeOptions.find((option) => option.value === filters.gradeLevel)?.label
   const gradeMaximum = Math.max(1, ...summary.gradeRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const monthMaximum = Math.max(1, ...summary.monthRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const visibleTransactions = summary.transactions.slice(0, DETAIL_LIMIT)
+  const selectedRiskBand = summary.currentScoreRisk.bands.find((band) => band.id === selectedRiskBandId)
+  const selectedRiskTone = selectedRiskBand
+    ? summary.currentScoreRisk.bands.findIndex((band) => band.id === selectedRiskBand.id) + 1
+    : 0
 
   useEffect(() => {
     function readFilters() {
       setFilters(filtersFromLocation())
+      setSelectedRiskBandId(riskBandFromLocation())
+      setExpandedRiskStudentId(null)
     }
     window.addEventListener('popstate', readFilters)
     window.addEventListener('hashchange', readFilters)
@@ -73,13 +95,22 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
     const next = { ...filters, [key]: value }
     setExpandedStudentId(null)
     setFilters(next)
-    replaceFilterLocation(next)
+    replaceFilterLocation(next, selectedRiskBandId)
   }
 
   function resetFilters() {
     setExpandedStudentId(null)
+    setExpandedRiskStudentId(null)
+    setSelectedRiskBandId(null)
     setFilters(DEFAULT_FILTERS)
-    replaceFilterLocation(DEFAULT_FILTERS)
+    replaceFilterLocation(DEFAULT_FILTERS, null)
+  }
+
+  function selectRiskBand(riskBandId: string) {
+    const nextRiskBandId = selectedRiskBandId === riskBandId ? null : riskBandId
+    setExpandedRiskStudentId(null)
+    setSelectedRiskBandId(nextRiskBandId)
+    replaceFilterLocation(filters, nextRiskBandId)
   }
 
   return (
@@ -153,6 +184,114 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
           <span className={`analytics-metric-icon ${summary.netPoints < 0 ? 'deduction' : 'addition'}`}><Icon name="history" /></span>
           <div><strong>{signedPoints(summary.netPoints)}</strong><small>ผลต่างสุทธิ</small></div>
         </article>
+      </section>
+
+      <section className="analytics-panel analytics-risk-panel" aria-labelledby="current-risk-title">
+        <div className="analytics-risk-heading">
+          <div>
+            <p className="eyebrow">คะแนนปัจจุบันทุกระดับชั้น</p>
+            <h2 id="current-risk-title">
+              {summary.currentScoreRisk.belowThresholdCount
+                ? `${summary.currentScoreRisk.belowThresholdCount} คนต่ำกว่าเกณฑ์ 80 คะแนน`
+                : 'ไม่มีนักเรียนต่ำกว่าเกณฑ์ 80 คะแนน'}
+            </h2>
+            <p>เลือกช่วงคะแนนเพื่อดูรายชื่อ เรียงจากคะแนนต่ำที่สุดก่อน</p>
+          </div>
+          <div className="analytics-risk-summary" aria-label="สรุปความเสี่ยงจากคะแนนปัจจุบัน">
+            <span><strong>{summary.currentScoreRisk.studentCount}</strong> นักเรียนทั้งหมด</span>
+            <span className="is-danger"><strong>{summary.currentScoreRisk.belowThresholdCount}</strong> ต่ำกว่าเกณฑ์</span>
+            <span className="is-watch"><strong>{summary.currentScoreRisk.nearThresholdCount}</strong> ช่วง 80–89</span>
+          </div>
+        </div>
+
+        <p className="analytics-risk-note">
+          <Icon name="alert" size={17} /> แสดงคะแนนปัจจุบันของนักเรียนทุกระดับชั้นเสมอ ไม่เปลี่ยนตามตัวกรองประเภท ระดับชั้น หรือเดือนด้านบน
+        </p>
+
+        <div className="analytics-risk-bands" role="group" aria-label="การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน">
+          {summary.currentScoreRisk.bands.map((band, index) => {
+            const selected = band.id === selectedRiskBandId
+            return (
+              <button
+                aria-controls={selected ? 'analytics-risk-results' : undefined}
+                aria-label={`ช่วงคะแนน ${band.minScore} ถึง ${band.maxScore} ${band.riskLabel} ${band.studentCount} คน`}
+                aria-pressed={selected}
+                className={`analytics-risk-band risk-tone-${index + 1}`}
+                key={band.id}
+                type="button"
+                onClick={() => selectRiskBand(band.id)}
+              >
+                <span className="analytics-risk-band-label"><strong>{band.scoreLabel}</strong><small>{band.riskLabel}</small></span>
+                <span className="analytics-risk-band-count"><strong>{band.studentCount}</strong><small>คน • {band.percentage}%</small></span>
+                <span className="analytics-risk-band-meter" aria-hidden="true"><i style={{ width: `${band.percentage}%` }} /></span>
+              </button>
+            )
+          })}
+        </div>
+
+        {selectedRiskBand ? (
+          <div className={`analytics-risk-results risk-tone-${selectedRiskTone}`} id="analytics-risk-results">
+            <div className="analytics-risk-results-heading">
+              <div><p className="eyebrow">รายชื่อนักเรียนทุกระดับชั้น</p><h3>ช่วง {selectedRiskBand.scoreLabel} คะแนน • {selectedRiskBand.studentCount} คน</h3></div>
+              <button className="button ghost compact" type="button" onClick={() => selectRiskBand(selectedRiskBand.id)}>ซ่อนรายชื่อ</button>
+            </div>
+            {selectedRiskBand.students.length ? (
+              <div className="analytics-risk-roster" role="table" aria-label={`นักเรียนช่วงคะแนน ${selectedRiskBand.minScore} ถึง ${selectedRiskBand.maxScore}`}>
+                <div className="analytics-risk-columns" role="row">
+                  <span role="columnheader">นักเรียน</span>
+                  <span role="columnheader">ชั้น / ห้อง</span>
+                  <span role="columnheader">คะแนนปัจจุบัน</span>
+                  <span role="columnheader">เทียบเกณฑ์ 80</span>
+                  <span role="columnheader">การตัดคะแนนล่าสุด</span>
+                  <span className="sr-only" role="columnheader">เปิดประวัติ</span>
+                </div>
+                <div role="rowgroup">
+                  {selectedRiskBand.students.map((row) => {
+                    const expanded = expandedRiskStudentId === row.student.id
+                    const historyId = `analytics-risk-history-${row.student.id}`
+                    return (
+                      <article className={`analytics-risk-student${expanded ? ' is-expanded' : ''}`} key={row.student.id}>
+                        <div className="analytics-risk-row" role="row">
+                          <div className="student-name-cell" role="cell"><StudentAvatar student={row.student} /><span><strong>{studentDisplayName(row.student)}</strong><small>รหัส {row.student.studentCode}</small></span></div>
+                          <span className="analytics-risk-class" data-label="ชั้น / ห้อง" role="cell">{row.student.classroomName || 'ยังไม่ระบุห้อง'}</span>
+                          <strong className="analytics-risk-score" data-label="คะแนนปัจจุบัน" role="cell">{row.student.score}</strong>
+                          <span className={row.differenceFromThreshold < 0 ? 'analytics-risk-gap is-negative' : 'analytics-risk-gap is-positive'} data-label="เทียบเกณฑ์" role="cell">{thresholdDifferenceLabel(row.differenceFromThreshold)}</span>
+                          <div className="analytics-risk-latest" role="cell">
+                            {row.latestDeduction
+                              ? <><strong>{row.latestDeduction.transaction.reason}</strong><small>{formatThaiDate(row.latestDeduction.occurredAt, false)}</small></>
+                              : <span>ยังไม่มีรายการตัดคะแนน</span>}
+                          </div>
+                          <button
+                            aria-controls={historyId}
+                            aria-expanded={expanded}
+                            aria-label={`${expanded ? 'ซ่อน' : 'ดู'}ประวัติคะแนนของ ${studentDisplayName(row.student)}`}
+                            className="analytics-expand-button"
+                            type="button"
+                            onClick={() => setExpandedRiskStudentId(expanded ? null : row.student.id)}
+                          >
+                            <Icon name="chevronRight" size={19} />
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <div className="analytics-student-history" id={historyId}>
+                            <div className="analytics-history-heading"><strong>ประวัติคะแนนภาคเรียนปัจจุบัน</strong><small>{row.transactions.length} รายการ</small></div>
+                            {row.transactions.length ? row.transactions.map((item) => (
+                              <div className="analytics-history-row" key={item.transaction.id}>
+                                <time dateTime={item.occurredAt}>{formatThaiDate(item.occurredAt, false)}</time>
+                                <span>{item.transaction.reason}</span>
+                                <strong className={item.transaction.kind === 'deduction' ? 'analytics-negative' : 'analytics-positive'}>{item.transaction.kind === 'deduction' ? '−' : '+'}{item.points}</strong>
+                              </div>
+                            )) : <p className="analytics-history-empty">นักเรียนคนนี้ยังไม่มีรายการคะแนนในภาคเรียนปัจจุบัน</p>}
+                          </div>
+                        ) : null}
+                      </article>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : <EmptyState title="ไม่มีนักเรียนในช่วงคะแนนนี้" detail="เลือกช่วงคะแนนอื่นเพื่อดูรายชื่อ" />}
+          </div>
+        ) : null}
       </section>
 
       {selectedGradeLabel ? (
