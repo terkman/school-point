@@ -49,6 +49,9 @@ export function validateAppealDecision(input: {
   if (input.explanation.trim().length < MIN_REVIEW_NOTE_LENGTH) {
     return 'กรุณาเขียนคำชี้แจงให้นักเรียนเห็นอย่างน้อย 5 ตัวอักษร'
   }
+  if (input.accepted && input.maximumRestorablePoints < 1) {
+    return 'รายการนี้ไม่ได้ตัดคะแนนจริง จึงไม่มีคะแนนให้คืน'
+  }
   if (input.accepted && (!Number.isInteger(input.restoredPoints)
     || input.restoredPoints < 1
     || input.restoredPoints > input.maximumRestorablePoints)) {
@@ -96,4 +99,27 @@ export function guardianOutcomeLabel(channel: GuardianContactChannel, outcome: G
 
 export function guardianReminderDueAt(createdAt: string): Date {
   return new Date(new Date(createdAt).getTime() + GUARDIAN_REMINDER_HOURS * 60 * 60 * 1000)
+}
+
+type ReminderCase = Pick<DemoState['seriousCases'][number], 'createdAt' | 'guardianContactAttempts' | 'guardianNextReminderAt'>
+
+/** One deadline rule for both Today and the case queue, including legacy/demo cases. */
+export function caseGuardianReminderAt(item: ReminderCase): string | undefined {
+  if (item.guardianNextReminderAt && Number.isFinite(Date.parse(item.guardianNextReminderAt))) return item.guardianNextReminderAt
+  const attempts = (item.guardianContactAttempts ?? []).map((attempt) => Date.parse(attempt.createdAt)).filter(Number.isFinite)
+  const base = attempts.length ? Math.max(...attempts) : Date.parse(item.createdAt)
+  return Number.isFinite(base) ? new Date(base + GUARDIAN_REMINDER_HOURS * 60 * 60 * 1000).toISOString() : undefined
+}
+
+export function compareGuardianCases(left: DemoState['seriousCases'][number], right: DemoState['seriousCases'][number]): number {
+  const deadline = (item: DemoState['seriousCases'][number]) => {
+    if (item.guardianContactStatus !== 'pending') return Number.POSITIVE_INFINITY
+    const value = Date.parse(caseGuardianReminderAt(item) ?? '')
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
+  }
+  const a = deadline(left)
+  const b = deadline(right)
+  if (a !== b) return a < b ? -1 : 1
+  if (left.severity !== right.severity) return left.severity === 'critical' ? -1 : 1
+  return left.id.localeCompare(right.id)
 }

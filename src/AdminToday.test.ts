@@ -44,4 +44,16 @@ describe('admin today guardian reminders', () => {
     expect(markup).toContain('ครบกำหนดติดตาม')
     expect(markup).not.toContain('เหลือ 24 ชม.')
   })
+
+  it('counts an overdue legacy case without a stored reminder instead of claiming there is no work', () => {
+    const state = createDemoState()
+    const item = { ...state.seriousCases[0]!, guardianNextReminderAt: undefined, guardianContactAttempts: [], createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() }
+    const markup = renderToStaticMarkup(createElement(AdminToday, {
+      state,
+      pendingDeductions: [], pendingAdditions: [], openAppeals: [], openCases: [item],
+      onOpenScore: () => undefined, onOpenReviews: () => undefined, onOpenCases: () => undefined,
+    }))
+    expect(markup).toContain('ต้องติดตามวันนี้</small><strong>1</strong>')
+    expect(markup).not.toContain('ไม่มีเคสที่ต้องติดตามวันนี้')
+  })
 })

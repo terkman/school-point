@@ -36,8 +36,8 @@ export const adminRoutes: readonly AdminRouteDefinition[] = [
   { id: 'system-academic-years', pathname: '/admin/system/academic-years', legacyTab: 'manage' },
   { id: 'system-progression', pathname: '/admin/system/progression', legacyTab: 'manage' },
   { id: 'reports-overview', pathname: '/admin/reports', search: '?tab=overview', legacyTab: 'analytics' },
-  { id: 'reports-care', pathname: '/admin/reports', search: '?tab=care', legacyTab: 'overview' },
-  { id: 'reports-audit', pathname: '/admin/reports', search: '?tab=audit', legacyTab: 'overview' },
+  { id: 'reports-care', pathname: '/admin/reports', search: '?tab=care', legacyTab: 'analytics' },
+  { id: 'reports-audit', pathname: '/admin/reports', search: '?tab=audit', legacyTab: 'analytics' },
 ] as const
 
 const routeById = new Map(adminRoutes.map((route) => [route.id, route]))
@@ -89,14 +89,32 @@ export function resolveAdminRoute(pathname: string, search = ''): AdminRouteDefi
   return routeById.get('today')!
 }
 
-export function adminHref(routeId: AdminRouteId): string {
+export function adminHref(routeId: AdminRouteId, values: Record<string, string> = {}): string {
   const route = routeById.get(routeId)
   if (!route) return '/admin/today'
-  return `${route.pathname}${route.search ?? ''}`
+  const params = new URLSearchParams(route.search)
+  for (const [key, value] of Object.entries(values)) params.set(key, value)
+  const search = params.toString()
+  return `${route.pathname}${search ? `?${search}` : ''}`
 }
 
-export function adminHrefForTab(tab: AdminTab): string {
-  return adminHref(legacyRouteByTab[tab])
+export function adminHrefForTab(tab: AdminTab, values: Record<string, string> = {}): string {
+  return adminHref(legacyRouteByTab[tab], values)
+}
+
+export type AdminReviewType = 'deduction' | 'addition' | 'appeal'
+
+export function adminReviewType(search: string): AdminReviewType {
+  const type = new URLSearchParams(search).get('type')
+  return type === 'addition' || type === 'appeal' ? type : 'deduction'
+}
+
+/** Unimplemented report tabs resolve to the available overview, retaining its filters. */
+export function canonicalReportSearch(search: string): string | null {
+  const params = new URLSearchParams(search)
+  if (!['care', 'audit'].includes(params.get('tab') ?? '')) return null
+  params.set('tab', 'overview')
+  return `?${params.toString()}`
 }
 
 export function adminTabFromLocation(pathname: string, search = '', fallback: AdminTab = 'overview'): AdminTab {

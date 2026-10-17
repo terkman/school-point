@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { applyScoreDelta, formatThaiDate, studentDisplayName, type DemoState } from './domain'
 import { EvidenceSummary } from './EvidenceField'
 import type { AppDataActions } from './dataActions'
@@ -11,6 +11,8 @@ import {
 import { EmptyState, Icon } from './ui'
 import { useDialogAccessibility } from './useDialogAccessibility'
 import { StudentAvatar } from './ProfileAvatar'
+import { adminReviewType } from './adminRoute'
+import { useAdminSearchParams } from './useAdminSearchParams'
 
 export interface AdditionDecisionInput {
   approve: boolean
@@ -103,10 +105,15 @@ export function AdminReviewCenter({
     () => state.appeals.filter((item) => item.status === 'accepted' || item.status === 'rejected'),
     [state.appeals],
   )
-  const [tab, setTab] = useState<ReviewTab>('deduction')
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<'newest' | 'oldest'>('oldest')
+  const [params, updateParams] = useAdminSearchParams()
+  const tab = adminReviewType(params.toString())
+  const search = params.get('q') ?? ''
+  const sort = params.get('sort') === 'newest' ? 'newest' : 'oldest'
+  const setTab = (value: ReviewTab) => updateParams({ type: value })
+  const setSearch = (value: string) => updateParams({ q: value }, true)
+  const setSort = (value: 'oldest' | 'newest') => updateParams({ sort: value })
   const [selected, setSelected] = useState<SelectedReview>(null)
+  useEffect(() => setSelected(null), [tab])
   const [approvedPoints, setApprovedPoints] = useState(1)
   const [additionNote, setAdditionNote] = useState('')
   const [additionError, setAdditionError] = useState('')
@@ -134,7 +141,7 @@ export function AdminReviewCenter({
     ? state.appeals.find((item) => item.id === selected.id)
     : undefined
   const selectedAppealSource = selectedAppeal ? transactionById.get(selectedAppeal.transactionId) : undefined
-  const maximumRestorablePoints = Math.max(1, Math.abs(selectedAppealSource?.appliedDelta ?? 0))
+  const maximumRestorablePoints = Math.max(0, -(selectedAppealSource?.appliedDelta ?? 0))
   const busy = Boolean(busyAction)
 
   const visibleItems = useMemo(() => {
@@ -178,8 +185,8 @@ export function AdminReviewCenter({
     const appeal = state.appeals.find((item) => item.id === appealId)
     const source = appeal ? transactionById.get(appeal.transactionId) : undefined
     if (!appeal || !source) return
-    setRestorePoints(true)
-    setRestoredPoints(Math.max(1, Math.abs(source.appliedDelta)))
+    setRestorePoints(source.appliedDelta < 0)
+    setRestoredPoints(Math.max(0, -source.appliedDelta))
     setAppealExplanation('')
     setAppealError('')
     setSelected({ type: 'appeal', id: appealId })
@@ -362,7 +369,7 @@ export function AdminReviewCenter({
                     <small>{student?.classroomName ?? 'ไม่ระบุห้อง'} • ยื่น {formatThaiDate(item.createdAt)}</small>
                     <span>{item.statement}</span>
                   </span>
-                  <span className="review-points negative">-{Math.abs(source?.appliedDelta ?? 0)}</span>
+                  <span className="review-points negative">{Math.min(0, source?.appliedDelta ?? 0)}</span>
                   <Icon name="chevronRight" size={18} />
                 </button>
               )
@@ -521,12 +528,13 @@ export function AdminReviewCenter({
                 </section>
                 <section className="appeal-source-card">
                   <div><span>รายการที่อุทธรณ์</span><strong>{selectedAppealSource?.reason ?? 'ไม่พบรายการต้นทาง'}</strong><small>{selectedAppealSource ? formatThaiDate(selectedAppealSource.occurredAt) : ''}</small></div>
-                  <b>-{maximumRestorablePoints}</b>
+                  <b>{maximumRestorablePoints > 0 ? -maximumRestorablePoints : 0}</b>
                 </section>
                 <blockquote className="student-statement"><span>คำชี้แจงของนักเรียน</span>{selectedAppeal.statement}</blockquote>
+                {maximumRestorablePoints === 0 ? <p className="scope-note">รายการนี้ไม่ได้ตัดคะแนนจริง จึงไม่มีคะแนนให้คืน สามารถบันทึกคำชี้แจงโดยไม่คืนคะแนนได้</p> : null}
                 <fieldset className="appeal-choice">
                   <legend>ผลการพิจารณา</legend>
-                  <label className={restorePoints ? 'selected' : ''}><input type="radio" name="appeal-result" checked={restorePoints} disabled={busy} onChange={() => { setRestorePoints(true); setAppealError('') }} /><span><strong>คืนคะแนน</strong><small>คืนเต็มจำนวนหรือกำหนดบางส่วน</small></span></label>
+                  <label className={restorePoints ? 'selected' : ''}><input type="radio" name="appeal-result" checked={restorePoints} disabled={busy || maximumRestorablePoints === 0} onChange={() => { setRestorePoints(true); setAppealError('') }} /><span><strong>คืนคะแนน</strong><small>คืนเต็มจำนวนหรือกำหนดบางส่วน</small></span></label>
                   <label className={!restorePoints ? 'selected reject-choice' : 'reject-choice'}><input type="radio" name="appeal-result" checked={!restorePoints} disabled={busy} onChange={() => { setRestorePoints(false); setAppealError('') }} /><span><strong>ไม่คืนคะแนน</strong><small>คงรายการตัดคะแนนเดิมไว้</small></span></label>
                 </fieldset>
                 {restorePoints ? (

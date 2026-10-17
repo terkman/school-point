@@ -259,8 +259,13 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
       {tab === 'overview' ? (
         <>
           <section className="score-hero">
-            <div className="score-ring" style={{ '--score': `${currentStudent.score * 3.6}deg` } as React.CSSProperties}>
-              <div><strong>{currentStudent.score}</strong><span>/ 100</span></div>
+            <div
+              className={`score-ring ${currentStudent.score >= 80 ? 'tone-good' : currentStudent.score >= 50 ? 'tone-watch' : 'tone-low'}`}
+              style={{ '--score': `${Math.min(100, Math.max(0, currentStudent.score)) * 3.6}deg` } as React.CSSProperties}
+              role="img"
+              aria-label={`คะแนนความประพฤติ ${currentStudent.score} จาก 100`}
+            >
+              <div aria-hidden="true"><strong>{currentStudent.score}</strong><span>/ 100</span></div>
             </div>
             <div className="score-message">
               <span className="success-icon"><Icon name="shield" size={26} /></span>
@@ -294,7 +299,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
       {tab === 'appeals' ? (
         <div className="two-column">
           <section className="panel">
-            <div className="section-heading"><div><p className="eyebrow">ภายใน 7 วัน</p><h2>ยื่นคำอุทธรณ์</h2></div></div>
+            <div className="section-heading"><div><p className="eyebrow">ภายในกำหนดเวลาของแต่ละรายการ</p><h2>ยื่นคำอุทธรณ์</h2></div></div>
             {appealTarget ? (
               <form className="stack-form" onSubmit={submitAppeal}>
                 <div className="selected-record"><strong>{state.rules.find((item) => item.id === appealTarget.ruleId)?.title ?? appealTarget.reason}</strong><span>ตัด {Math.abs(appealTarget.appliedDelta)} คะแนน • หมดเขต {formatThaiDate(appealTarget.appealDeadline ?? appealDeadline(appealTarget.occurredAt))}</span></div>
@@ -302,7 +307,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
                 <StudentAppealError error={appealError} />
                 <div className="form-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => setAppealTarget(null)}>ยกเลิก</button><button className="button primary" type="submit" disabled={busy}>{busy ? 'กำลังส่ง…' : 'ส่งคำอุทธรณ์'}</button></div>
               </form>
-            ) : <EmptyState title="เลือกรายการจากประวัติคะแนน" detail="ปุ่มอุทธรณ์จะแสดงเฉพาะรายการตัดคะแนนที่ยังไม่เกิน 7 วัน" />}
+            ) : <EmptyState title="เลือกรายการจากประวัติคะแนน" detail="ปุ่มอุทธรณ์จะแสดงเฉพาะรายการตัดคะแนนที่ยังอยู่ภายในกำหนดเวลายื่นอุทธรณ์" />}
           </section>
           <section className="panel">
             <div className="section-heading"><div><p className="eyebrow">ติดตามผล</p><h2>คำอุทธรณ์ของฉัน</h2></div><span className="counter">{appeals.length}</span></div>

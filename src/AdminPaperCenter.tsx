@@ -4,7 +4,7 @@ import type {
   PaperDocumentRecord,
   PaperDocumentSnapshot,
 } from './dataActions'
-import { formatThaiDate, studentDisplayName, type Appeal, type DemoState, type ScoreTransaction, type Student } from './domain'
+import { appealDeadline, canAppeal, canAppealUntil, formatThaiDate, studentDisplayName, type Appeal, type DemoState, type ScoreTransaction, type Student } from './domain'
 import type { PaperDocumentStatus, PaperDocumentType } from './adminDomain'
 import { EmptyState, Icon } from './ui'
 import { StudentAvatar } from './ProfileAvatar'
@@ -41,7 +41,13 @@ function localDateTimeValue(date = new Date()): string {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }
 
-function buildLocalPaperDocument(
+function publicPaperReason(state: DemoState, transaction: ScoreTransaction): string {
+  if (transaction.kind !== 'deduction' || transaction.sourceAppealId || transaction.additionSource === 'appeal') return transaction.reason
+  // Older demo records stored an internal note in reason. Fail closed when its rule is unavailable.
+  return state.rules.find((rule) => rule.id === transaction.ruleId)?.title ?? 'รายการตัดคะแนน'
+}
+
+export function buildLocalPaperDocument(
   state: DemoState,
   student: Student,
   documentType: PaperDocumentType,
@@ -55,7 +61,7 @@ function buildLocalPaperDocument(
     .map((item) => ({
       id: item.id,
       occurredAt: item.occurredAt,
-      reason: item.reason,
+      reason: publicPaperReason(state, item),
       appliedDelta: item.appliedDelta,
       scoreBefore: item.scoreBefore,
       scoreAfter: item.scoreAfter,
@@ -81,9 +87,9 @@ function buildLocalPaperDocument(
       incident: {
         id: incident.incidentId ?? incident.id,
         occurredAt: incident.occurredAt,
-        reason: incident.reason,
+        reason: publicPaperReason(state, incident),
         appliedPoints: Math.abs(incident.appliedDelta),
-        appealDeadline: incident.appealDeadline ?? issuedAt,
+        appealDeadline: incident.appealDeadline ?? appealDeadline(incident.occurredAt).toISOString(),
       },
     } : {}),
     ...(appeal && incident ? {
@@ -295,7 +301,7 @@ export function AdminPaperCenter({ state, actions }: AdminPaperCenterProps) {
     transaction.kind === 'deduction'
     && transaction.incidentId
     && !appealByTransaction.has(transaction.id)
-    && (!transaction.appealDeadline || new Date(transaction.appealDeadline).getTime() >= Date.now())
+    && (transaction.appealDeadline ? canAppealUntil(transaction.appealDeadline) : canAppeal(transaction.occurredAt))
   ))
   const decidedAppeals = state.appeals.filter((appeal) => (
     appeal.studentId === selectedStudentId && ['accepted', 'rejected'].includes(appeal.status)
