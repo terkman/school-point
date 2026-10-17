@@ -14,6 +14,7 @@ import type {
   RequestPointAdditionsResult,
 } from './dataActions'
 import { requiresDeductionApproval } from './adminDomain'
+import { guardianReminderDueAt } from './adminWorkflows'
 import {
   localDateTimeToIso,
   toLocalDateTimeInputValue,
@@ -376,7 +377,8 @@ export function TeacherDashboard({
           scoreBefore: row.balanceBefore,
           scoreAfter: row.balanceAfter,
           ruleId: selectedRule.id,
-          reason: internalNote.trim() || selectedRule.title,
+          reason: selectedRule.title,
+          internalReason: internalNote.trim(),
           occurredAt: occurredAtIso,
           actorId: account.id,
           incidentId: row.incidentId,
@@ -391,6 +393,7 @@ export function TeacherDashboard({
             guardianContactRequired: selectedRule.guardianContactRequired,
             guardianContactStatus: selectedRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
             guardianTaskId: selectedRule.guardianContactRequired ? createId('guardian-task') : undefined,
+            guardianNextReminderAt: selectedRule.guardianContactRequired ? guardianReminderDueAt(occurredAtIso).toISOString() : undefined,
             createdAt: occurredAtIso,
             internalNote: `ติดตามเหตุการณ์: ${internalNote.trim() || selectedRule.title}`,
           }))
@@ -585,7 +588,7 @@ export function TeacherDashboard({
                 <div className="field-help"><strong>คะแนนรวมก่อน → หลัง</strong><span>ตัวเลขด้านบนคำนวณโดยไม่ให้คะแนนต่ำกว่า 0</span></div>
               </div>
               <label>รายละเอียดเหตุการณ์เพิ่มเติม (ไม่บังคับ)<textarea disabled={deductionBusy} value={internalNote} maxLength={2000} onChange={(event) => { setInternalNote(event.target.value); invalidateDeductionRequest() }} placeholder="หากมี สามารถระบุข้อเท็จจริง สถานที่ หรือบริบทเพิ่มเติมได้" /></label>
-              {selectedRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนโดยอัตโนมัติ</span></div> : null}
+              {selectedRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนหลังแอดมินอนุมัติ</span></div> : null}
 
               {reviewingDeduction ? (
                 <section className="deduction-review" aria-label="ตรวจสอบก่อนยืนยัน">

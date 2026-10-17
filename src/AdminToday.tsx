@@ -2,6 +2,9 @@ import type { DemoState } from './domain'
 import { formatThaiDate, studentDisplayName } from './domain'
 import { EmptyState, Icon } from './ui'
 import { StudentAvatar } from './ProfileAvatar'
+import { caseGuardianReminderAt, compareGuardianCases } from './adminWorkflows'
+import type { AdminReviewType } from './adminRoute'
+import { useCurrentTime } from './useCurrentTime'
 
 interface AdminTodayProps {
   state: DemoState
@@ -10,12 +13,12 @@ interface AdminTodayProps {
   openAppeals: DemoState['appeals']
   openCases: DemoState['seriousCases']
   onOpenScore: () => void
-  onOpenReviews: () => void
-  onOpenCases: () => void
+  onOpenReviews: (type?: AdminReviewType) => void
+  onOpenCases: (caseId?: string, filter?: 'due' | 'pending') => void
 }
 
-function todayLabel(): string {
-  return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long' }).format(new Date())
+function todayLabel(now: number): string {
+  return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeZone: 'Asia/Bangkok' }).format(new Date(now))
 }
 
 export function isGuardianReminderDue(guardianNextReminderAt?: string, now = Date.now()): boolean {
@@ -42,17 +45,22 @@ export function AdminToday({
   onOpenReviews,
   onOpenCases,
 }: AdminTodayProps) {
+  const now = useCurrentTime()
   const pendingGuardianCases = openCases.filter((item) => item.guardianContactStatus === 'pending')
-  const dueGuardianCases = pendingGuardianCases.filter((item) => isGuardianReminderDue(item.guardianNextReminderAt))
+  const dueGuardianCases = pendingGuardianCases
+    .filter((item) => isGuardianReminderDue(caseGuardianReminderAt(item), now))
+    .sort(compareGuardianCases)
   const reviewCount = pendingDeductions.length + pendingAdditions.length + openAppeals.length
-  const recentTransactions = state.transactions.slice(0, 5)
+  const recentTransactions = [...state.transactions]
+    .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
+    .slice(0, 5)
 
   return (
     <div className="admin-today">
       <header className="today-hero">
         <div>
           <h1><span className="desktop-only">ภาพรวม</span>วันนี้</h1>
-          <p>{todayLabel()}</p>
+          <p>{todayLabel(now)}</p>
         </div>
         <button className="today-score-cta" type="button" onClick={onOpenScore}>
           <span className="today-score-icon" aria-hidden="true">−</span>
@@ -62,17 +70,17 @@ export function AdminToday({
       </header>
 
       <section className="today-status-strip" aria-label="สรุปงานวันนี้">
-        <button type="button" className="urgent" onClick={onOpenCases}>
+        <button type="button" className="urgent" onClick={() => onOpenCases(undefined, 'due')}>
           <Icon name="calendar" />
           <span><small>ต้องติดตามวันนี้</small><strong>{dueGuardianCases.length}</strong></span>
           <Icon name="chevronRight" size={18} />
         </button>
-        <button type="button" onClick={onOpenCases}>
+        <button type="button" onClick={() => onOpenCases(undefined, 'pending')}>
           <Icon name="history" />
           <span><small>รอผู้ปกครองตอบกลับ</small><strong>{pendingGuardianCases.length}</strong></span>
           <Icon name="chevronRight" size={18} />
         </button>
-        <button type="button" onClick={onOpenReviews}>
+        <button type="button" onClick={() => onOpenReviews()}>
           <Icon name="shield" />
           <span><small>งานรอตรวจ</small><strong>{reviewCount}</strong></span>
           <Icon name="chevronRight" size={18} />
@@ -83,13 +91,13 @@ export function AdminToday({
         <section className="today-section today-followups">
           <div className="today-section-heading">
             <h2>ต้องติดตามวันนี้</h2>
-            <button type="button" onClick={onOpenCases}>ดูเคสทั้งหมด <Icon name="chevronRight" size={16} /></button>
+            <button type="button" onClick={() => onOpenCases()}>ดูเคสทั้งหมด <Icon name="chevronRight" size={16} /></button>
           </div>
           {dueGuardianCases.length ? (
             <div className="today-followup-list">
               {dueGuardianCases.slice(0, 3).map((item) => {
                 const student = state.students.find((entry) => entry.id === item.studentId)
-                const due = guardianFollowUpLabel(item.guardianNextReminderAt)
+                const due = guardianFollowUpLabel(caseGuardianReminderAt(item), now)
                 return (
                   <article key={item.id} className={due.overdue ? 'overdue' : ''}>
                     {student ? <StudentAvatar student={student} className="followup-clock" /> : <span className="followup-clock"><Icon name="history" /></span>}
@@ -98,7 +106,7 @@ export function AdminToday({
                       <span>{student?.classroomName} • {item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span>
                       <small>{due.label}</small>
                     </div>
-                    <button type="button" onClick={onOpenCases}>{due.overdue ? 'ติดตาม' : 'ดูเคส'} <Icon name="chevronRight" size={16} /></button>
+                    <button type="button" aria-label={`ติดตามเคส ${student ? studentDisplayName(student) : item.id}`} onClick={() => onOpenCases(item.id)}>{due.overdue ? 'ติดตาม' : 'ดูเคส'} <Icon name="chevronRight" size={16} /></button>
                   </article>
                 )
               })}
@@ -108,22 +116,22 @@ export function AdminToday({
 
         <section className="today-section today-review-queue">
           <div className="today-section-heading"><h2>งานรอตรวจ</h2></div>
-          <button type="button" onClick={onOpenReviews}>
+          <button type="button" onClick={() => onOpenReviews('deduction')}>
             <span className="queue-icon"><Icon name="score" /></span>
             <span><strong>คำขอตัดคะแนน</strong><small>ตั้งแต่ 10 คะแนนขึ้นไป</small></span>
             <b>{pendingDeductions.length}</b><Icon name="chevronRight" size={18} />
           </button>
-          <button type="button" onClick={onOpenReviews}>
+          <button type="button" onClick={() => onOpenReviews('addition')}>
             <span className="queue-icon"><Icon name="approval" /></span>
             <span><strong>คำขอเพิ่มคะแนน</strong><small>จากคุณครู</small></span>
             <b>{pendingAdditions.length}</b><Icon name="chevronRight" size={18} />
           </button>
-          <button type="button" onClick={onOpenReviews}>
+          <button type="button" onClick={() => onOpenReviews('appeal')}>
             <span className="queue-icon"><Icon name="shield" /></span>
             <span><strong>คำอุทธรณ์</strong><small>รอพิจารณา</small></span>
             <b>{openAppeals.length}</b><Icon name="chevronRight" size={18} />
           </button>
-          <button className="review-center-link" type="button" onClick={onOpenReviews}>เปิดศูนย์ตรวจสอบ <Icon name="chevronRight" size={16} /></button>
+          <button className="review-center-link" type="button" onClick={() => onOpenReviews()}>เปิดศูนย์ตรวจสอบ <Icon name="chevronRight" size={16} /></button>
         </section>
       </div>
 

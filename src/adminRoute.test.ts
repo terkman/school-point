@@ -6,6 +6,8 @@ import {
   isAdminPath,
   resolveAdminRoute,
   routeAfterRoleChange,
+  adminReviewType,
+  canonicalReportSearch,
 } from './adminRoute'
 
 describe('admin URL contract', () => {
@@ -43,5 +45,20 @@ describe('admin URL contract', () => {
     expect(routeAfterRoleChange('/admin/reports', 'director')).toBe('/')
     expect(routeAfterRoleChange('/admin/score', 'admin')).toBeNull()
     expect(routeAfterRoleChange('/', 'teacher')).toBeNull()
+  })
+
+  it('keeps the requested review category and case identity in shareable URLs', () => {
+    expect(adminHrefForTab('approvals', { type: 'addition' })).toBe('/admin/reviews?type=addition')
+    expect(adminHrefForTab('cases', { case: 'case/a?b' })).toBe('/admin/cases?case=case%2Fa%3Fb')
+    expect(adminReviewType('?type=appeal&q=student')).toBe('appeal')
+    expect(adminReviewType('?type=addition')).toBe('addition')
+    expect(adminReviewType('?type=unknown')).toBe('deduction')
+  })
+
+  it('redirects unavailable report tabs to analytics while preserving filters', () => {
+    expect(adminTabFromLocation('/admin/reports', '?tab=audit')).toBe('analytics')
+    expect(adminTabFromLocation('/admin/reports', '?tab=care')).toBe('analytics')
+    expect(canonicalReportSearch('?tab=audit&grade=M2&month=2026-10')).toBe('?tab=overview&grade=M2&month=2026-10')
+    expect(canonicalReportSearch('?tab=overview')).toBeNull()
   })
 })

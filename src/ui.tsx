@@ -142,17 +142,19 @@ export function AppShell<T extends string>({
             {items.map((item) => (
               <button
                 key={item.id}
+                type="button"
                 className={active === item.id ? 'nav-item active' : 'nav-item'}
                 onClick={() => onNavigate(item.id)}
                 aria-current={active === item.id ? 'page' : undefined}
+                title={item.label}
               >
                 <Icon name={item.icon} />
-                <span>{item.label}</span>
-                {item.count ? <b className="nav-count">{item.count}</b> : null}
+                <span>{item.label}{item.count ? <span className="sr-only"> {item.count} รายการ</span> : null}</span>
+                {item.count ? <b className="nav-count" aria-hidden="true">{item.count > 99 ? '99+' : item.count}</b> : null}
               </button>
             ))}
           </nav>
-          <button className="nav-item logout" onClick={onLogout}>
+          <button type="button" className="nav-item logout" onClick={onLogout} title="ออกจากระบบ">
             <Icon name="logout" />
             <span>ออกจากระบบ</span>
           </button>
@@ -161,10 +163,11 @@ export function AppShell<T extends string>({
           {children}
         </main>
       </div>
-      <nav className="mobile-nav" aria-label="เมนูมือถือ" style={{ gridTemplateColumns: `repeat(${Math.max(1, resolvedMobileItems.length)}, minmax(0, 1fr))` }}>
+      <nav className="mobile-nav" aria-label="เมนูมือถือ">
         {resolvedMobileItems.map((item) => (
           <button
             key={item.id}
+            type="button"
             className={active === item.id ? 'active' : ''}
             onClick={() => onNavigate(item.id)}
             aria-label={item.count ? `${item.label} ${item.count} รายการ` : item.label}

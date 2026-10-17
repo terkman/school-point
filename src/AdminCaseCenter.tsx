@@ -10,12 +10,15 @@ import {
 import {
   guardianOutcomeClosesNotification,
   guardianOutcomeLabel,
-  guardianReminderDueAt,
+  caseGuardianReminderAt,
+  compareGuardianCases,
   isCurrentGuardianContactsRequest,
   resolveOpenCaseSelection,
 } from './adminWorkflows'
 import { EmptyState, Icon, StatusBadge } from './ui'
 import { StudentAvatar } from './ProfileAvatar'
+import { useAdminSearchParams } from './useAdminSearchParams'
+import { useCurrentTime } from './useCurrentTime'
 
 export interface GuardianAttemptInput {
   clientRequestId?: string
@@ -58,11 +61,22 @@ function outcomeOptions(channel: GuardianContactChannel): Array<{ value: Guardia
 }
 
 export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onRecordGuardianAttempt, onUpdateCase }: AdminCaseCenterProps) {
+  const now = useCurrentTime()
+  const [params, updateParams] = useAdminSearchParams()
+  const filter = params.get('filter')
   const openCases = useMemo(
-    () => state.seriousCases.filter((item) => item.status !== 'resolved'),
-    [state.seriousCases],
+    () => state.seriousCases
+      .filter((item) => item.status !== 'resolved')
+      .filter((item) => {
+        if (filter !== 'pending' && filter !== 'due') return true
+        if (item.guardianContactStatus !== 'pending') return false
+        return filter === 'pending' || Date.parse(caseGuardianReminderAt(item) ?? '') <= now
+      })
+      .sort(compareGuardianCases),
+    [state.seriousCases, filter, now],
   )
-  const [selectedId, setSelectedId] = useState(openCases[0]?.id ?? '')
+  const requestedId = params.get('case') ?? ''
+  const selectedId = resolveOpenCaseSelection(openCases, requestedId)
   const [contacts, setContacts] = useState<GuardianContact[]>([])
   const [contactsLoading, setContactsLoading] = useState(false)
   const [channel, setChannel] = useState<GuardianContactChannel>('phone')
@@ -80,18 +94,18 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
   const transaction = selectedCase ? transactionById.get(selectedCase.transactionId) : undefined
   const busy = Boolean(busyAction)
   const attempts = selectedCase?.guardianContactAttempts ?? []
-  const nextReminderBase = attempts[0]?.createdAt ?? selectedCase?.createdAt ?? new Date().toISOString()
-  const nextReminder = selectedCase?.guardianNextReminderAt
-    ? new Date(selectedCase.guardianNextReminderAt)
-    : guardianReminderDueAt(nextReminderBase)
-  const reminderOverdue = nextReminder.getTime() <= Date.now()
+  const nextReminderAt = selectedCase ? caseGuardianReminderAt(selectedCase) : undefined
+  const nextReminder = nextReminderAt ? new Date(nextReminderAt) : null
+  const reminderOverdue = Boolean(nextReminder && nextReminder.getTime() <= now)
   const closesNotification = guardianOutcomeClosesNotification(channel, outcome)
 
   const caseCountLabel = `${openCases.length} เคสที่ต้องติดตาม`
 
   useEffect(() => {
-    const nextId = resolveOpenCaseSelection(openCases, selectedId)
-    if (nextId !== selectedId) setSelectedId(nextId)
+    if (!requestedId && selectedId) updateParams({ case: selectedId }, true)
+  }, [requestedId, selectedId, updateParams])
+
+  useEffect(() => {
     contactsRequestRef.current += 1
     guardianAttemptRequestRef.current = ''
     setContacts([])
@@ -108,7 +122,7 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
     const next = openCases.find((item) => item.id === caseId)
     contactsRequestRef.current += 1
     guardianAttemptRequestRef.current = ''
-    setSelectedId(caseId)
+    updateParams({ case: caseId })
     setContacts([])
     setChannel('phone')
     setOutcome('unanswered')
@@ -186,20 +200,24 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
           <div><p className="eyebrow">ติดตามกรณีร้ายแรง</p><h2 id="case-queue-title">{caseCountLabel}</h2></div>
           <span className="case-total">{openCases.length}</span>
         </header>
+        {filter === 'due' || filter === 'pending' ? (
+          <div className="case-queue-header">
+            <span>{filter === 'due' ? 'เฉพาะเคสครบกำหนดติดตาม' : 'เฉพาะเคสรอผู้ปกครองตอบกลับ'}</span>
+            <button type="button" className="button ghost" onClick={() => updateParams({ filter: null, case: null })}>แสดงทุกเคส</button>
+          </div>
+        ) : null}
+        {requestedId && requestedId !== selectedId ? <p className="privacy-note" role="status">ไม่พบเคสที่เลือกหรือเคสปิดแล้ว แสดงเคสที่ยังเปิดอยู่แทน</p> : null}
         {openCases.length ? (
           <div className="case-queue-list">
             {openCases.map((item) => {
               const caseStudent = studentById.get(item.studentId)
               const caseTransaction = transactionById.get(item.transactionId)
-              const lastAttempt = item.guardianContactAttempts?.[0]
-              const due = item.guardianNextReminderAt
-                ? new Date(item.guardianNextReminderAt)
-                : guardianReminderDueAt(lastAttempt?.createdAt ?? item.createdAt)
-              const isOverdue = item.guardianContactStatus === 'pending' && due.getTime() <= Date.now()
+              const due = Date.parse(caseGuardianReminderAt(item) ?? '')
+              const isOverdue = item.guardianContactStatus === 'pending' && due <= now
               return (
                 <button type="button" className={selectedCase?.id === item.id ? 'selected' : ''} key={item.id} onClick={() => selectCase(item.id)}>
                   {caseStudent ? <StudentAvatar student={caseStudent} className="case-queue-alert" /> : <span className="case-queue-alert"><Icon name="alert" size={20} /></span>}
-                  <span><strong>{caseStudent ? studentDisplayName(caseStudent) : 'ไม่พบข้อมูลนักเรียน'}</strong><small>{caseStudent?.classroomName} • {Math.abs(caseTransaction?.appliedDelta ?? 0)} คะแนน</small><em className={item.guardianContactStatus === 'completed' ? 'complete' : ''}>{isOverdue ? 'ครบกำหนดติดตามแล้ว' : item.guardianContactStatus === 'completed' ? 'แจ้งผู้ปกครองแล้ว' : 'รอแจ้งผู้ปกครอง'}</em></span>
+                  <span><strong>{caseStudent ? studentDisplayName(caseStudent) : 'ไม่พบข้อมูลนักเรียน'}</strong><small>{caseStudent?.classroomName} • {Math.abs(caseTransaction?.appliedDelta ?? 0)} คะแนน</small><em className={item.guardianContactStatus === 'completed' ? 'complete' : ''}>{isOverdue ? 'ครบกำหนดติดตามแล้ว' : item.guardianContactStatus === 'completed' ? 'แจ้งผู้ปกครองแล้ว' : item.guardianContactStatus === 'not_required' ? 'ไม่ต้องแจ้งผู้ปกครอง' : 'รอแจ้งผู้ปกครอง'}</em></span>
                   <Icon name="chevronRight" size={18} />
                 </button>
               )
@@ -218,12 +236,12 @@ export function AdminCaseCenter({ state, busyAction, onLoadGuardianContacts, onR
           {selectedCase.guardianContactStatus === 'pending' ? (
             <div className={reminderOverdue ? 'case-due-banner overdue' : 'case-due-banner'}>
               <Icon name="calendar" size={20} />
-              <span><strong>{reminderOverdue ? 'ถึงเวลาติดตามอีกครั้ง' : 'นัดเตือนครั้งถัดไป'}</strong><small>{formatThaiDate(nextReminder)}</small></span>
+              <span><strong>{reminderOverdue ? 'ถึงเวลาติดตามอีกครั้ง' : 'นัดเตือนครั้งถัดไป'}</strong><small>{nextReminder ? formatThaiDate(nextReminder) : 'ยังไม่กำหนดเวลาติดตาม'}</small></span>
             </div>
-          ) : <div className="case-due-banner completed"><Icon name="check" size={20} /><span><strong>แจ้งผู้ปกครองสำเร็จแล้ว</strong><small>{selectedCase.guardianContactCompletedAt ? formatThaiDate(selectedCase.guardianContactCompletedAt) : 'พร้อมดำเนินการปิดเคส'}</small></span></div>}
+          ) : selectedCase.guardianContactStatus === 'completed' ? <div className="case-due-banner completed"><Icon name="check" size={20} /><span><strong>แจ้งผู้ปกครองสำเร็จแล้ว</strong><small>{selectedCase.guardianContactCompletedAt ? formatThaiDate(selectedCase.guardianContactCompletedAt) : 'พร้อมดำเนินการปิดเคส'}</small></span></div> : <div className="case-due-banner"><Icon name="shield" size={20} /><span><strong>ไม่ต้องแจ้งผู้ปกครอง</strong><small>รายการนี้ไม่มีงานแจ้งผู้ปกครอง</small></span></div>}
 
           <div className="case-incident-summary">
-            <div><span>เหตุการณ์</span><strong>{transaction?.reason ?? selectedCase.internalNote}</strong><small>{transaction ? formatThaiDate(transaction.occurredAt) : formatThaiDate(selectedCase.createdAt)}</small></div>
+            <div><span>เหตุการณ์</span><strong>{transaction?.reason ?? selectedCase.internalNote}</strong>{transaction?.internalReason?.trim() ? <small>บันทึกภายใน: {transaction.internalReason}</small> : null}<small>{transaction ? formatThaiDate(transaction.occurredAt) : formatThaiDate(selectedCase.createdAt)}</small></div>
             <b>-{Math.abs(transaction?.appliedDelta ?? 0)}<small>คะแนน</small></b>
           </div>
 

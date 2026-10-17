@@ -36,9 +36,9 @@ export function DirectorDashboard({
         <>
           <section className="page-heading">
             <div><p className="eyebrow">มุมมองผู้อำนวยการ</p><h1>ภาพรวมระบบโรงเรียน</h1><p>ดูข้อมูลทั้งหมดได้โดยไม่มีสิทธิ์แก้ไขรายชื่อ สิทธิ์ผู้ใช้ หรือการตั้งค่าระบบ</p></div>
-            <span className="badge status-approved"><Icon name="eye" size={15} /> อ่านอย่างเดียว</span>
+            <span className="badge status-info"><Icon name="eye" size={15} /> อ่านอย่างเดียว</span>
           </section>
-          <section className="metric-grid">
+          <section className="metric-strip metric-grid" aria-label="สรุปภาพรวม">
             <div><span><Icon name="users" /></span><div><strong>{state.students.length}</strong><small>นักเรียนในภาคเรียนปัจจุบัน</small></div></div>
             <div><span><Icon name="approval" /></span><div><strong>{pendingAdditions.length}</strong><small>คำขอเพิ่มคะแนนรอพิจารณา</small></div></div>
             <div><span><Icon name="history" /></span><div><strong>{pendingAppeals.length}</strong><small>คำอุทธรณ์รอพิจารณา</small></div></div>

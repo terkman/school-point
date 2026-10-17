@@ -42,7 +42,7 @@ export function severityFromDeductionPoints(points: number): AdminSeverity {
   assertDeductionPoints(points)
   if (points <= 9) return 'low'
   if (points <= 24) return 'medium'
-  if (points <= 54) return 'serious'
+  if (points <= 49) return 'serious'
   return 'critical'
 }
 

@@ -58,6 +58,7 @@ export function replaceLogicalBrowserRoute(nextHref: string) {
   const current = currentLogicalBrowserRoute()
   if (`${current.pathname}${current.search}` === nextHref) return
   window.history.replaceState({}, '', browserHrefForLogicalRoute(nextHref, import.meta.env.BASE_URL))
+  window.dispatchEvent(new Event('school-point:routechange'))
 }
 
 export function pushLogicalBrowserRoute(nextHref: string) {
@@ -65,6 +66,7 @@ export function pushLogicalBrowserRoute(nextHref: string) {
   const current = currentLogicalBrowserRoute()
   if (`${current.pathname}${current.search}` === nextHref) return
   window.history.pushState({}, '', browserHrefForLogicalRoute(nextHref, import.meta.env.BASE_URL))
+  window.dispatchEvent(new Event('school-point:routechange'))
 }
 
 export function publicAssetUrl(path: string): string {

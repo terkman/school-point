@@ -1,25 +1,149 @@
+/*
+ * School Point canonical design tokens (all roles).
+ * Every other stylesheet must read colours, type and spacing from here.
+ * Legacy names (--teal, --indigo, --admin-*) are aliases kept for existing selectors.
+ * See docs/UI_DESIGN_SYSTEM.md for pairings and usage rules.
+ */
 :root {
-  --admin-navy-header: #062b66;
-  --admin-navy-text: #102a56;
-  --admin-teal-primary: #078b8e;
-  --admin-blue-workflow: #1769d2;
-  --admin-purple-appeal: #6d35d7;
-  --admin-amber-warning: #d97706;
-  --admin-red-critical: #dc2626;
-  --admin-surface: #ffffff;
-  --admin-selection: #eff6ff;
-  --admin-border: #d7e0ed;
-  --admin-muted-text: #60708c;
-  --admin-radius-sm: 6px;
-  --admin-radius-md: 8px;
-  --admin-radius-lg: 10px;
-  --admin-control-height: 44px;
-  --admin-space-1: 4px;
-  --admin-space-2: 8px;
-  --admin-space-3: 12px;
-  --admin-space-4: 16px;
-  --admin-space-5: 20px;
-  --admin-space-6: 24px;
-  --admin-space-8: 32px;
-  --admin-space-10: 40px;
+  /* Typography */
+  --font-sans: 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --text-xs: .75rem;      /* 12px meta, badge, nav labels (minimum) */
+  --text-sm: .875rem;     /* 14px controls labels, buttons, tables */
+  --text-md: .9375rem;    /* 15px body */
+  --text-input: 1rem;     /* 16px inputs/selects/textareas */
+  --text-lg: 1.125rem;    /* 18px h3 / card headings */
+  --text-xl: 1.25rem;     /* 20px h2 */
+  --text-2xl: 1.875rem;   /* 30px h1 desktop */
+  --text-2xl-mobile: 1.5rem; /* 24px h1 mobile */
+  --leading-body: 1.6;
+  --leading-tight: 1.3;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Neutrals */
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7f9fc;
+  --color-canvas: #ffffff;
+  --color-border: #dfe5ee;
+  --color-border-strong: #c5cfdd;
+  --color-heading: #202123;
+  --color-text: #202123;
+  --color-text-body: #33405a;
+  --color-text-muted: #526079;
+  --color-header: #102a56;
+  --color-header-text: #ffffff;
+  --color-header-muted: #c9d5ee;
+
+  /* Confirm / primary action (teal) */
+  --color-confirm: #0f766e;
+  --color-confirm-hover: #115e59;
+  --color-confirm-soft: #e6f6f3;
+  --color-confirm-text: #0b5d56;
+
+  /* Positive info (pale green / dark green) */
+  --color-success-soft: #ecfdf5;
+  --color-success-border: #a7e3cc;
+  --color-success-text: #065f46;
+
+  /* Review workflow (blue) */
+  --color-review: #1d4ed8;
+  --color-review-hover: #1e40af;
+  --color-review-soft: #eff4ff;
+  --color-review-border: #bfd0f7;
+  --color-review-text: #1e40af;
+
+  /* Appeals & rules (purple) */
+  --color-appeal: #6d28d9;
+  --color-appeal-hover: #5b21b6;
+  --color-appeal-soft: #f5f0ff;
+  --color-appeal-border: #d9c9fb;
+  --color-appeal-text: #5b21b6;
+
+  /* Warning (amber: pale background, dark text) */
+  --color-warning-soft: #fff7e6;
+  --color-warning-strong-soft: #fde68a;
+  --color-warning-border: #f3cf8b;
+  --color-warning-text: #92400e;
+
+  /* Critical / destructive only (red) */
+  --color-critical: #b91c1c;
+  --color-critical-hover: #991b1b;
+  --color-critical-soft: #fef2f2;
+  --color-critical-border: #f5c2c2;
+  --color-critical-text: #991b1b;
+
+  /* Selection, focus, disabled */
+  --color-selected-soft: #eff4ff;
+  --color-focus: #1d4ed8;
+  --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px var(--color-focus);
+  --color-disabled-bg: #eef1f5;
+  --color-disabled-border: #d5dce6;
+  --color-disabled-text: #66728a;
+
+  /* Spacing (8/12/16/24/32 rhythm) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --control-height: 44px;
+  --content-max: 1280px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, .04);
+  --shadow-overlay: 0 24px 72px rgba(9, 24, 58, .28);
+
+  /* Legacy aliases: shared role dashboards */
+  --navy: var(--color-header);
+  --navy-2: #173f7a;
+  --heading: var(--color-heading);
+  --primary: var(--color-review);
+  --blue: var(--color-review);
+  --indigo: var(--color-review);
+  --indigo-soft: var(--color-review-soft);
+  --teal: var(--color-confirm);
+  --teal-soft: var(--color-confirm-soft);
+  --amber: var(--color-warning-text);
+  --amber-soft: var(--color-warning-soft);
+  --coral: var(--color-critical);
+  --coral-soft: var(--color-critical-soft);
+  --ink: var(--color-text);
+  --muted: var(--color-text-muted);
+  --line: var(--color-border);
+  --line-strong: var(--color-border-strong);
+  --surface: var(--color-surface);
+  --canvas: var(--color-canvas);
+  --shadow: 0 12px 32px rgba(25, 46, 82, .08);
+
+  /* Legacy aliases: admin workspace */
+  --admin-navy-header: var(--color-header);
+  --admin-navy-text: var(--color-text);
+  --admin-teal-primary: var(--color-confirm);
+  --admin-blue-workflow: var(--color-review);
+  --admin-purple-appeal: var(--color-appeal);
+  --admin-amber-warning: var(--color-warning-text);
+  --admin-red-critical: var(--color-critical);
+  --admin-surface: var(--color-surface);
+  --admin-selection: var(--color-selected-soft);
+  --admin-border: var(--color-border);
+  --admin-muted-text: var(--color-text-muted);
+  --admin-radius-sm: var(--radius-sm);
+  --admin-radius-md: var(--radius-md);
+  --admin-radius-lg: var(--radius-lg);
+  --admin-control-height: var(--control-height);
+  --admin-space-1: var(--space-1);
+  --admin-space-2: var(--space-2);
+  --admin-space-3: var(--space-3);
+  --admin-space-4: var(--space-4);
+  --admin-space-5: var(--space-5);
+  --admin-space-6: var(--space-6);
+  --admin-space-8: var(--space-8);
+  --admin-space-10: var(--space-10);
 }

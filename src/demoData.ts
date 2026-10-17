@@ -1,4 +1,5 @@
 import type { DemoState } from './domain'
+import { guardianReminderDueAt } from './adminWorkflows'
 
 function daysAgo(days: number, hour = 9): string {
   const date = new Date()
@@ -304,6 +305,7 @@ export function createDemoState(): DemoState {
         guardianContactRequired: true,
         guardianContactStatus: 'pending',
         guardianTaskId: 'guardian-task-demo-01',
+        guardianNextReminderAt: guardianReminderDueAt(daysAgo(2, 10)).toISOString(),
         createdAt: daysAgo(5, 11),
         internalNote: 'ข้อมูลตัวอย่าง — นัดหมายทีมดูแลช่วยเหลือนักเรียน',
         followUpNote: 'ครูที่ปรึกษารวบรวมข้อมูลเบื้องต้นแล้ว',

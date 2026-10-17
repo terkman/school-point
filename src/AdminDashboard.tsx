@@ -46,7 +46,7 @@ import type { AdminTab } from './adminRoute'
 import { AdminToday } from './AdminToday'
 import { AdminReviewCenter, type AdditionDecisionInput, type AppealDecisionInput, type DeductionDecisionInput } from './AdminReviewCenter'
 import { AdminCaseCenter, type GuardianAttemptInput } from './AdminCaseCenter'
-import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt, validateAdminScoreAdjustment } from './adminWorkflows'
+import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt, validateAdminScoreAdjustment, validateAppealDecision } from './adminWorkflows'
 import { AdminRuleCatalog } from './AdminRuleCatalog'
 import { StudentAvatar } from './ProfileAvatar'
 
@@ -388,9 +388,9 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     { id: 'manage', label: 'ระบบ', icon: 'settings' },
   ]
 
-  function navigateAdmin(next: AdminTab) {
+  function navigateAdmin(next: AdminTab, values: Record<string, string> = {}) {
     setAnnouncement('')
-    setTab(next)
+    setTab(next, values)
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
 
@@ -560,6 +560,11 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     const source = state.transactions.find((item) => item.id === appeal.transactionId)
     const student = state.students.find((item) => item.id === appeal.studentId)
     if (!source || !student) throw new Error('ไม่พบรายการคะแนนต้นทางของคำอุทธรณ์')
+    const decisionError = validateAppealDecision({
+      ...input,
+      maximumRestorablePoints: Math.max(0, -source.appliedDelta),
+    })
+    if (decisionError) throw new Error(decisionError)
     if (actions) {
       setBusyAction(`appeal-${appealId}`)
       try {
@@ -877,7 +882,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           scoreBefore: row.balanceBefore,
           scoreAfter: row.balanceAfter,
           ruleId: adminDeductionRule.id,
-          reason: adminDeductionNote.trim() || adminDeductionRule.title,
+          reason: adminDeductionRule.title,
+          internalReason: adminDeductionNote.trim(),
           occurredAt: eventIso,
           actorId: account.id,
           incidentId: row.incidentId,
@@ -892,6 +898,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             guardianContactRequired: adminDeductionRule.guardianContactRequired,
             guardianContactStatus: adminDeductionRule.guardianContactRequired ? 'pending' as const : 'not_required' as const,
             guardianTaskId: adminDeductionRule.guardianContactRequired ? createId('guardian-task') : undefined,
+            guardianNextReminderAt: adminDeductionRule.guardianContactRequired ? guardianReminderDueAt(eventIso).toISOString() : undefined,
             createdAt: eventIso,
             internalNote: `ติดตามเหตุการณ์: ${adminDeductionNote.trim() || adminDeductionRule.title}`,
           }))
@@ -1485,8 +1492,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         openAppeals={openAppeals}
         openCases={openCases}
         onOpenScore={() => openAdminScore('deduction')}
-        onOpenReviews={() => navigateAdmin('approvals')}
-        onOpenCases={() => navigateAdmin('cases')}
+        onOpenReviews={(type) => navigateAdmin('approvals', type ? { type } : {})}
+        onOpenCases={(caseId, filter) => navigateAdmin('cases', caseId ? { case: caseId } : filter ? { filter } : {})}
       /> : null}
 
       {tab === 'analytics' ? (
