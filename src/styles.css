@@ -942,6 +942,13 @@ tbody tr:hover td { background: var(--color-surface-subtle); }
 .activation-code-card b { color: #124ca6; font: 700 1.8rem/1.1 var(--font-mono); letter-spacing: .12em; }
 
 .mobile-nav { display: none; }
+.mobile-more-overlay { display: none; }
+@media (max-width: 640px) {
+  .mobile-more-overlay { display: flex; position: fixed; inset: 0; z-index: 80; align-items: flex-end; background: rgb(16 42 86 / 35%); }
+  .mobile-more-dialog { width: 100%; max-height: 85dvh; overflow-y: auto; background: var(--color-surface, white); border-radius: 18px 18px 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .mobile-more-dialog .section-heading { margin-bottom: 12px; }
+  .mobile-more-dialog h2 { margin: 0; font-size: var(--text-lg); }
+}
 
 /* Login */
 .login-page { min-height: 100vh; background: white; }

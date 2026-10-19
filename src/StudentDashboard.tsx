@@ -23,12 +23,14 @@ import {
 } from './profileAvatars'
 import { AppShell, EmptyState, Icon, type NavItem } from './ui'
 import { HISTORY_PAGE_SIZE, INITIAL_HISTORY_LIMIT, visibleHistory } from './historyPagination'
+import { TermWorkspace, useTermActions } from './TermWorkspace'
 
-type StudentTab = 'overview' | 'history' | 'appeals' | 'profile'
+type StudentTab = 'overview' | 'history' | 'appeals' | 'profile' | 'terms'
 
 const navItems: NavItem<StudentTab>[] = [
   { id: 'overview', label: 'ภาพรวม', icon: 'home' },
   { id: 'history', label: 'ประวัติคะแนน', icon: 'history' },
+  { id: 'terms', label: 'แต่ละภาคเรียน', icon: 'calendar' },
   { id: 'appeals', label: 'การอุทธรณ์', icon: 'approval' },
   { id: 'profile', label: 'รูปโปรไฟล์', icon: 'users' },
 ]
@@ -78,6 +80,7 @@ export function StudentAppealError({ error }: { error: string }) {
 
 export function StudentDashboard({ account, state, onChange, actions, onLogout, initialTab = 'overview' }: StudentDashboardProps) {
   const [tab, setTab] = useState<StudentTab>(initialTab)
+  const termActions = useTermActions(state, account, actions, onChange)
   const [appealTarget, setAppealTarget] = useState<ScoreTransaction | null>(null)
   const [statement, setStatement] = useState('')
   const [appealError, setAppealError] = useState('')
@@ -251,7 +254,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={navigateStudentTab} onLogout={onLogout}>
       <div className="page-heading">
-        <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : tab === 'appeals' ? 'การอุทธรณ์' : 'รูปโปรไฟล์ของฉัน'}</h1></div>
+        <div><p className="eyebrow">พื้นที่ของนักเรียน</p><h1>{tab === 'overview' ? 'คะแนนของฉัน' : tab === 'history' ? 'ประวัติคะแนน' : tab === 'appeals' ? 'การอุทธรณ์' : tab === 'terms' ? 'คะแนนแต่ละภาคเรียน' : 'รูปโปรไฟล์ของฉัน'}</h1></div>
         <span className="class-chip">{currentStudent.classroomName} • {currentStudent.studentCode}</span>
       </div>
       <div className="sr-only" aria-live="polite">{announcement}</div>
@@ -399,6 +402,7 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
           onConfirm={() => void uploadAvatar()}
         />
       ) : null}
+      {tab === 'terms' ? <TermWorkspace account={account} termActions={termActions} reloadKey={`${state.term.id}:${state.transactions.length}`} /> : null}
     </AppShell>
   )
 }

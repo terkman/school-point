@@ -4,8 +4,9 @@ import { formatThaiDate, type Account, type DemoState } from './domain'
 import { SchoolDirectoryPanel } from './SchoolDirectoryPanel'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 import { HISTORY_PAGE_SIZE, INITIAL_HISTORY_LIMIT, visibleHistory } from './historyPagination'
+import { TermWorkspace, useTermActions } from './TermWorkspace'
 
-type DirectorTab = 'overview' | 'directory' | 'activity'
+type DirectorTab = 'overview' | 'directory' | 'activity' | 'terms'
 
 export function DirectorDashboard({
   account,
@@ -20,6 +21,8 @@ export function DirectorDashboard({
 }) {
   const [tab, setTab] = useState<DirectorTab>('overview')
   const [historyLimit, setHistoryLimit] = useState(INITIAL_HISTORY_LIMIT)
+  // Directors are read-only: no commit callback, so demo mutations fail safely.
+  const termActions = useTermActions(state, account, actions)
   const pendingAdditions = state.additionRequests.filter((item) => item.status === 'pending')
   const pendingAppeals = state.appeals.filter((item) => item.status === 'submitted' || item.status === 'reviewing')
   const openCases = state.seriousCases.filter((item) => item.status !== 'resolved')
@@ -28,6 +31,7 @@ export function DirectorDashboard({
     { id: 'overview', label: 'ภาพรวมโรงเรียน', icon: 'home' },
     { id: 'directory', label: 'รายชื่อทั้งหมด', icon: 'users' },
     { id: 'activity', label: 'ประวัติคะแนน', icon: 'history' },
+    { id: 'terms', label: 'ภาคเรียน', icon: 'calendar' },
   ]
 
   return (
@@ -73,6 +77,16 @@ export function DirectorDashboard({
             return <article className="record-row detailed-record" key={transaction.id}><div><strong>{student?.name ?? 'ไม่พบข้อมูลนักเรียน'} • {transaction.appliedDelta > 0 ? '+' : ''}{transaction.appliedDelta} คะแนน</strong><span>{transaction.reason}</span><small>{formatThaiDate(transaction.occurredAt)} • คะแนน {transaction.scoreBefore} → {transaction.scoreAfter}</small></div><span className={`badge ${transaction.appliedDelta < 0 ? 'status-rejected' : 'status-approved'}`}>{transaction.kind === 'deduction' ? 'ตัดคะแนน' : transaction.kind === 'addition' ? 'เพิ่มคะแนน' : transaction.kind === 'adjustment' ? 'ปรับโดยผู้ดูแล' : 'เปิดภาคเรียน'}</span></article>
           })}</div>{visibleTransactions.hasMore ? <div className="form-actions"><button type="button" className="button secondary" onClick={() => setHistoryLimit((current) => current + HISTORY_PAGE_SIZE)}>โหลดประวัติเพิ่ม</button></div> : null}</> : <EmptyState title="ยังไม่มีประวัติ" detail="ข้อมูลคะแนนจะปรากฏเมื่อมีการบันทึก" />}
         </section>
+      ) : null}
+
+      {tab === 'terms' ? (
+        <>
+          <section className="page-heading">
+            <div><p className="eyebrow">อ่านอย่างเดียว</p><h1>ภาคเรียนและการแก้ไขคะแนน</h1></div>
+            <span className="badge status-info"><Icon name="eye" size={15} /> อ่านอย่างเดียว</span>
+          </section>
+          <TermWorkspace account={account} termActions={termActions} reloadKey={`${state.term.id}:${state.transactions.length}`} />
+        </>
       ) : null}
     </AppShell>
   )

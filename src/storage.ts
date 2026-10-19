@@ -1,5 +1,6 @@
 import { createDemoState } from './demoData'
 import type { DemoState, Role } from './domain'
+import { normalizeTermRecords } from './termManagement'
 
 const STORAGE_KEY = 'school-point:demo:v2'
 const SESSION_KEY = 'school-point:session:v1'
@@ -15,10 +16,15 @@ export function loadDemoState(): DemoState {
     if (!raw) return createDemoState()
     const parsed = JSON.parse(raw) as DemoState
     if (parsed.version !== 2) return createDemoState()
-    return {
+    const next: DemoState = {
       ...parsed,
       deductionRequests: Array.isArray(parsed.deductionRequests) ? parsed.deductionRequests : [],
     }
+    // Older demo states have no term records; malformed ones are discarded.
+    const termRecords = normalizeTermRecords(parsed.termRecords)
+    if (termRecords) next.termRecords = termRecords
+    else delete next.termRecords
+    return next
   } catch {
     return createDemoState()
   }

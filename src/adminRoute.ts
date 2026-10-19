@@ -1,4 +1,4 @@
-export type AdminTab = 'overview' | 'analytics' | 'score' | 'directory' | 'rules' | 'paper' | 'approvals' | 'cases' | 'manage'
+export type AdminTab = 'overview' | 'analytics' | 'score' | 'directory' | 'rules' | 'paper' | 'approvals' | 'cases' | 'manage' | 'terms'
 
 export type AdminRouteId =
   | 'today'
@@ -33,7 +33,7 @@ export const adminRoutes: readonly AdminRouteDefinition[] = [
   { id: 'system-rules', pathname: '/admin/system/rules', legacyTab: 'rules' },
   { id: 'system-import', pathname: '/admin/system/import', legacyTab: 'manage' },
   { id: 'system-paper', pathname: '/admin/system/paper', legacyTab: 'paper' },
-  { id: 'system-academic-years', pathname: '/admin/system/academic-years', legacyTab: 'manage' },
+  { id: 'system-academic-years', pathname: '/admin/system/academic-years', legacyTab: 'terms' },
   { id: 'system-progression', pathname: '/admin/system/progression', legacyTab: 'manage' },
   { id: 'reports-overview', pathname: '/admin/reports', search: '?tab=overview', legacyTab: 'analytics' },
   { id: 'reports-care', pathname: '/admin/reports', search: '?tab=care', legacyTab: 'analytics' },
@@ -52,6 +52,7 @@ const legacyRouteByTab: Record<AdminTab, AdminRouteId> = {
   cases: 'cases',
   manage: 'system-staff',
   paper: 'system-paper',
+  terms: 'system-academic-years',
 }
 
 function normalizePathname(pathname: string): string {

@@ -10,6 +10,7 @@ import type {
   PaperDocumentType,
 } from './adminDomain'
 import type { SchoolImportPreview, SchoolImportResult } from './schoolImport'
+import type { TermManagementActions } from './termManagement'
 import type {
   ActivationCodeResult,
   CreateSchoolClassroomInput,
@@ -453,4 +454,9 @@ export interface AppDataActions {
   resetSchoolAccountPassword: (input: PasswordResetInput) => Promise<PasswordResetCodeResult>
   previewSchoolImport: (file: File) => Promise<SchoolImportPreview>
   applySchoolImport: (file: File, fingerprint: string) => Promise<SchoolImportResult>
+  /**
+   * Term lifecycle and original-term remediation. Optional: when a backend
+   * does not provide it, TermWorkspace shows a safe "unavailable" state.
+   */
+  termManagement?: TermManagementActions
 }

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useDialogAccessibility } from './useDialogAccessibility'
 import type { Account, DemoState, Severity } from './domain'
 import { ProfileAvatar } from './ProfileAvatar'
 import { dataMode } from './supabaseClient'
@@ -78,6 +79,7 @@ export function DemoBanner() {
 export interface NavItem<T extends string> {
   id: T
   label: string
+  mobileLabel?: string
   icon: IconName
   count?: number
 }
@@ -110,7 +112,9 @@ export function AppShell<T extends string>({
   onLogout,
   children,
 }: AppShellProps<T>) {
-  const resolvedMobileItems = mobileItems ?? items.slice(0, 4)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const hasMobileOverflow = !mobileItems && items.length > 4
+  const resolvedMobileItems = mobileItems ?? items.slice(0, hasMobileOverflow ? 3 : 4)
   return (
     <div className="app-root">
       <a className="skip-link" href="#main-content">ข้ามไปยังเนื้อหา</a>
@@ -174,13 +178,45 @@ export function AppShell<T extends string>({
             aria-current={active === item.id ? 'page' : undefined}
           >
             <Icon name={item.icon} size={19} />
-            <span>{item.label}</span>
+            <span>{item.mobileLabel ?? item.label}</span>
             {item.count ? <b className="mobile-nav-count" aria-hidden="true">{item.count > 99 ? '99+' : item.count}</b> : null}
           </button>
         ))}
+        {hasMobileOverflow ? <button type="button"
+          className={!resolvedMobileItems.some(item => item.id === active) ? 'active' : ''}
+          aria-haspopup="dialog" aria-expanded={mobileMenuOpen}
+          onClick={() => setMobileMenuOpen(true)}>
+          <Icon name="book" size={19} /><span>เพิ่มเติม</span>
+        </button> : null}
       </nav>
+      {mobileMenuOpen ? <MobileMenu items={items} active={active}
+        onClose={() => setMobileMenuOpen(false)}
+        onNavigate={(id) => { setMobileMenuOpen(false); onNavigate(id) }} /> : null}
     </div>
   )
+}
+
+function MobileMenu<T extends string>({ items, active, onClose, onNavigate }: {
+  items: NavItem<T>[]; active: T; onClose: () => void; onNavigate: (id: T) => void
+}) {
+  const dialogRef = useDialogAccessibility({ onClose })
+  useEffect(() => {
+    const viewport = window.matchMedia('(min-width: 641px)')
+    const closeOnDesktop = () => { if (viewport.matches) onClose() }
+    viewport.addEventListener('change', closeOnDesktop)
+    return () => viewport.removeEventListener('change', closeOnDesktop)
+  }, [onClose])
+  return <div className="mobile-more-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="mobile-more-dialog" role="dialog" aria-modal="true" aria-labelledby="mobile-menu-title" tabIndex={-1} ref={dialogRef}>
+      <div className="section-heading"><h2 id="mobile-menu-title">เมนูทั้งหมด</h2><button type="button" className="button secondary compact" onClick={onClose}>ปิดเมนู</button></div>
+      <nav className="nav-list" aria-label="เมนูทั้งหมด">
+        {items.map(item => <button key={item.id} type="button" className={`nav-item${item.id === active ? ' active' : ''}`}
+          aria-current={item.id === active ? 'page' : undefined} onClick={() => onNavigate(item.id)}>
+          <Icon name={item.icon} /><span>{item.label}</span>{item.count ? <b className="nav-count">{item.count}</b> : null}
+        </button>)}
+      </nav>
+    </section>
+  </div>
 }
 
 export function StatusBadge({ severity }: { severity: Severity }) {
