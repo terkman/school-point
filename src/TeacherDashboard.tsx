@@ -41,8 +41,9 @@ import {
   selectionForStudent,
 } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
+import { TermWorkspace, useTermActions } from './TermWorkspace'
 
-type TeacherTab = 'overview' | 'deduct' | 'request' | 'cases' | 'rules'
+type TeacherTab = 'overview' | 'deduct' | 'request' | 'cases' | 'rules' | 'terms'
 
 interface TeacherDashboardProps {
   account: Account
@@ -73,6 +74,7 @@ export function TeacherDashboard({
   onLogout,
 }: TeacherDashboardProps) {
   const [tab, setTab] = useState<TeacherTab>(initialTab)
+  const termActions = useTermActions(state, account, actions, onChange)
   const teacher = state.teachers.find((item) => item.id === account.teacherId)
   const assignedStudents = useMemo(
     () => state.students.filter((student) => student.status === 'active'
@@ -145,11 +147,12 @@ export function TeacherDashboard({
   const assignedCases = state.seriousCases.filter((item) => assignedStudents.some((student) => student.id === item.studentId))
   const teacherRuleProposals = state.ruleProposals.filter((item) => item.proposedBy === account.id)
   const navItems: NavItem<TeacherTab>[] = [
-    { id: 'overview', label: 'ห้องที่รับผิดชอบ', icon: 'users' },
+    { id: 'overview', label: 'ห้องที่รับผิดชอบ', mobileLabel: 'ห้องเรียน', icon: 'users' },
     { id: 'deduct', label: 'ตัดคะแนน', icon: 'score', count: teacherDeductionRequests.filter((item) => item.status === 'pending').length },
     { id: 'request', label: 'เพิ่มคะแนน', icon: 'plus', count: teacherRequests.filter((item) => item.status === 'pending').length },
     { id: 'cases', label: 'กรณีติดตาม', icon: 'alert', count: assignedCases.filter((item) => item.status !== 'resolved').length },
     { id: 'rules', label: 'เสนอเกณฑ์', icon: 'book', count: teacherRuleProposals.filter((item) => item.status === 'pending').length },
+    { id: 'terms', label: 'ภาคเรียนเดิม', icon: 'calendar' },
   ]
 
   if (!teacher) return <p>ไม่พบข้อมูลครู</p>
@@ -543,7 +546,7 @@ export function TeacherDashboard({
   return (
     <AppShell account={account} state={state} items={navItems} active={tab} onNavigate={navigateTeacherTab} onLogout={onLogout}>
       <div className="page-heading">
-        <div><p className="eyebrow">พื้นที่ของคุณครู</p><h1>{tab === 'overview' ? 'นักเรียนที่ดูแล' : tab === 'deduct' ? 'ตัดคะแนนนักเรียน' : tab === 'request' ? 'เพิ่มคะแนนนักเรียน' : tab === 'cases' ? 'กรณีติดตาม' : 'เสนอเกณฑ์คะแนน'}</h1></div>
+        <div><p className="eyebrow">พื้นที่ของคุณครู</p><h1>{tab === 'overview' ? 'นักเรียนที่ดูแล' : tab === 'deduct' ? 'ตัดคะแนนนักเรียน' : tab === 'request' ? 'เพิ่มคะแนนนักเรียน' : tab === 'cases' ? 'กรณีติดตาม' : tab === 'terms' ? 'ภาคเรียนและการแก้ไขคะแนน' : 'เสนอเกณฑ์คะแนน'}</h1></div>
         <span className="class-chip">{classrooms.length ? classChip : 'ยังไม่มอบหมายห้อง'}</span>
       </div>
       <div className="announcement" aria-live="polite">{announcement}</div>
@@ -706,6 +709,7 @@ export function TeacherDashboard({
           {assignedCases.length ? <div className="record-list">{assignedCases.map((item) => { const student = state.students.find((entry) => entry.id === item.studentId); return <article className="case-row" key={item.id}><div className="case-marker">{student ? <StudentAvatar student={student} /> : <Icon name="alert" />}</div><div><strong>{student ? studentDisplayName(student) : 'ไม่พบนักเรียน'}</strong><span>{item.internalNote}</span><small>เปิดเคสเมื่อ {formatThaiDate(item.createdAt)}</small></div><div><StatusBadge severity={item.severity} /><span className="badge status-pending">{item.guardianContactStatus === 'pending' ? 'รอติดต่อผู้ปกครอง' : 'กำลังติดตาม'}</span></div></article> })}</div> : <EmptyState title="ไม่มีกรณีร้ายแรงค้างอยู่" detail="เหตุการณ์ระดับร้ายแรงจะเปิดเป็นเคสติดตามอัตโนมัติ" />}
         </section>
       ) : null}
+      {tab === 'terms' ? <TermWorkspace account={account} termActions={termActions} reloadKey={`${state.term.id}:${state.transactions.length}`} /> : null}
       {rulesDialogTab ? <ScoreRulesDialog initialTab={rulesDialogTab} deductionRules={state.rules} positiveRules={state.positiveRules} onClose={() => setRulesDialogTab(null)} /> : null}
     </AppShell>
   )

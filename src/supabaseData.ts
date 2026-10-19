@@ -1,4 +1,5 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
+import { createSupabaseTermActions } from './supabaseTermManagement'
 import type {
   AdminAddPointsBulkResult,
   AdminAddPointsResult,
@@ -1415,6 +1416,7 @@ export function createSupabaseActions(
     return result
   }
   return {
+    termManagement: createSupabaseTermActions(client, refresh, onSyncWarning),
     uploadEvidenceFiles: async (files) => {
       const validationError = validateEvidenceFiles(files)
       if (validationError) throw new Error(validationError)

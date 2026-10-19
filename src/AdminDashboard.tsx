@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
+import { applyScoreDeltaInTerm } from './termScoreAdjustment'
 import {
   applyScoreDelta,
   createId,
@@ -49,6 +50,7 @@ import { AdminCaseCenter, type GuardianAttemptInput } from './AdminCaseCenter'
 import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianOutcomeLabel, guardianReminderDueAt, validateAdminScoreAdjustment, validateAppealDecision } from './adminWorkflows'
 import { AdminRuleCatalog } from './AdminRuleCatalog'
 import { StudentAvatar } from './ProfileAvatar'
+import { TermWorkspace, useTermActions } from './TermWorkspace'
 
 export type { AdminTab } from './adminRoute'
 
@@ -306,6 +308,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const directAdditions = state.transactions.filter((item) => item.additionSource === 'admin_direct')
   const adminAdjustments = state.transactions.filter((item) => item.kind === 'adjustment')
   const [tab, setTab] = useAdminRoute(initialTab)
+  const termActions = useTermActions(state, account, actions, onChange)
+  const termReloadKey = `${state.term.id}:${state.term.isActive}:${state.transactions.length}`
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('deduction')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students, 'selected'))
   const activePositiveRules = useMemo(
@@ -559,7 +563,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     if (!appeal || !['submitted', 'reviewing'].includes(appeal.status)) throw new Error('ไม่พบคำอุทธรณ์ หรือรายการนี้ได้รับการพิจารณาแล้ว')
     const source = state.transactions.find((item) => item.id === appeal.transactionId)
     const student = state.students.find((item) => item.id === appeal.studentId)
-    if (!source || !student) throw new Error('ไม่พบรายการคะแนนต้นทางของคำอุทธรณ์')
+    if (!source || (!actions && !student && source.termId === state.term.id)) throw new Error('ไม่พบรายการคะแนนต้นทางของคำอุทธรณ์')
     const decisionError = validateAppealDecision({
       ...input,
       maximumRestorablePoints: Math.max(0, -source.appliedDelta),
@@ -587,16 +591,16 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     const nextRestoredPoints = input.accepted ? input.restoredPoints : 0
     const priorRestoredPoints = appeal.restoredPoints ?? 0
     const requestedDelta = calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints)
-    const change = applyScoreDelta(student.score, requestedDelta)
+    const adjustment = applyScoreDeltaInTerm(state, appeal.studentId, source.termId, requestedDelta, decidedAt)
+    const change = adjustment.change
     const accepted = nextRestoredPoints > 0
     onChange({
-      ...state,
-      students: state.students.map((item) => item.id === student.id ? { ...item, score: change.after } : item),
+      ...adjustment.state,
       appeals: state.appeals.map((item) => item.id === appealId ? { ...item, status: accepted ? 'accepted' : 'rejected', restoredPoints: nextRestoredPoints, decisionNote: input.explanation, decidedAt, reviewVersion: (item.reviewVersion ?? 0) + 1 } : item),
       transactions: change.appliedDelta === 0 ? state.transactions : [{
         id: createId('tx'),
-        studentId: student.id,
-        termId: state.term.id,
+        studentId: appeal.studentId,
+        termId: source.termId,
         kind: change.appliedDelta < 0 ? 'deduction' : 'addition',
         requestedDelta,
         appliedDelta: change.appliedDelta,
@@ -1457,18 +1461,22 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   }
 
   return (
-    <AppShell account={account} state={state} items={navItems} mobileItems={mobileNavItems} active={tab === 'directory' || tab === 'rules' || tab === 'paper' ? 'manage' : tab} onNavigate={navigateAdmin} onLogout={onLogout}>
+    <AppShell account={account} state={state} items={navItems} mobileItems={mobileNavItems} active={tab === 'directory' || tab === 'rules' || tab === 'paper' || tab === 'terms' ? 'manage' : tab} onNavigate={navigateAdmin} onLogout={onLogout}>
       {tab !== 'overview' && tab !== 'analytics' && tab !== 'directory' ? <div className="page-heading">
-        <div><p className="eyebrow">ศูนย์ควบคุมระบบ</p><h1>{tab === 'score' ? 'จัดการคะแนน' : tab === 'approvals' ? 'งานรอตรวจ' : tab === 'cases' ? 'เคสร้ายแรง' : tab === 'paper' ? 'ศูนย์เอกสารกระดาษ' : 'จัดการระบบ'}</h1></div>
+        <div><p className="eyebrow">ศูนย์ควบคุมระบบ</p><h1>{tab === 'score' ? 'จัดการคะแนน' : tab === 'approvals' ? 'งานรอตรวจ' : tab === 'cases' ? 'เคสร้ายแรง' : tab === 'paper' ? 'ศูนย์เอกสารกระดาษ' : tab === 'terms' ? 'ภาคเรียนและการแก้ไขคะแนน' : 'จัดการระบบ'}</h1></div>
         <span className="class-chip">ผู้ดูแลระบบ • สิทธิ์ทั้งหมด</span>
       </div> : null}
       <div className="announcement" aria-live="polite">{announcement}</div>
 
-      {tab === 'manage' || tab === 'directory' || tab === 'rules' || tab === 'paper' ? (
+      {tab === 'manage' || tab === 'directory' || tab === 'rules' || tab === 'paper' || tab === 'terms' ? (
         <nav className="system-subnav" aria-label="เมนูจัดการระบบ">
           <button className={tab === 'manage' ? 'active' : ''} aria-current={tab === 'manage' ? 'page' : undefined} onClick={() => navigateAdmin('manage')}>
             <Icon name="settings" size={18} />
             <span><strong>สิทธิ์และภาคเรียน</strong><small>ครู ห้องเรียน และรอบปี</small></span>
+          </button>
+          <button className={tab === 'terms' ? 'active' : ''} aria-current={tab === 'terms' ? 'page' : undefined} onClick={() => navigateAdmin('terms')}>
+            <Icon name="calendar" size={18} />
+            <span><strong>ภาคเรียนและการแก้ไขคะแนน</strong><small>ประวัติ ปิดภาค และภาคเรียนเดิม</small></span>
           </button>
           <button className={tab === 'directory' ? 'active' : ''} aria-current={tab === 'directory' ? 'page' : undefined} onClick={() => navigateAdmin('directory')}>
             <Icon name="users" size={18} />
@@ -1528,6 +1536,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       ) : null}
 
       {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} studentProfiles={state.students} /> : null}
+
+      {tab === 'terms' ? <TermWorkspace account={account} termActions={termActions} reloadKey={termReloadKey} /> : null}
 
       {tab === 'rules' ? <AdminRuleCatalog
         deductionRules={state.rules}

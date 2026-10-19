@@ -1,3 +1,5 @@
+import type { DemoTermRecords } from './termManagement'
+
 export type Role = 'student' | 'teacher' | 'director' | 'admin'
 export type Severity = 'low' | 'medium' | 'serious' | 'critical'
 export type RequestStatus = 'pending' | 'approved' | 'rejected'
@@ -101,6 +103,8 @@ export interface ScoreTransaction {
   evidenceNote?: string
   internalReason?: string
   additionSource?: 'teacher_request' | 'admin_direct' | 'appeal'
+  /** Set only on remediation credits posted to a closed (original) term. */
+  remediationRequestId?: string
 }
 
 export interface AdditionRequest {
@@ -217,6 +221,11 @@ export interface DemoState {
   additionRequests: AdditionRequest[]
   appeals: Appeal[]
   seriousCases: SeriousCase[]
+  /**
+   * Demo-mode term history, closing snapshots and remediation cases. Optional so
+   * previously persisted demo states still load; see ensureTermRecords().
+   */
+  termRecords?: DemoTermRecords
 }
 
 export interface ScoreChange {

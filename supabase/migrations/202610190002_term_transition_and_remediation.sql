@@ -224,7 +224,6 @@ create table public.term_remediation_cases (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (source_term_id, student_id),
-  check (closing_balance < threshold),
   check ((status = 'passed') = (passed_at is not null))
 );
 
@@ -632,6 +631,7 @@ set search_path = ''
 as $$
 declare
   v_case public.term_remediation_cases%rowtype;
+  v_snapshot public.term_closing_snapshots%rowtype;
   v_status text;
 begin
   select case_row.* into v_case
@@ -640,7 +640,27 @@ begin
   for update;
 
   if not found then
-    return null;
+    -- A revised appeal may lower a previously passing closing balance. Keep
+    -- the original snapshot and open a new case instead of losing this pupil.
+    select snapshot.* into v_snapshot
+    from public.term_closing_snapshots snapshot
+    where snapshot.score_account_id = new.score_account_id;
+    if not found or new.balance_after >= v_snapshot.threshold then
+      return null;
+    end if;
+    insert into public.term_remediation_cases (
+      source_term_id, student_id, score_account_id, snapshot_id,
+      closing_balance, threshold, status
+    ) values (
+      v_snapshot.term_id, v_snapshot.student_id, new.score_account_id, v_snapshot.id,
+      v_snapshot.closing_balance, v_snapshot.threshold, 'open'
+    ) returning * into v_case;
+    perform private.write_audit(
+      'term_remediation_opened_after_adjustment', 'term_remediation_case', v_case.id::text,
+      null, jsonb_build_object('source_term_id', v_case.source_term_id,
+        'student_id', v_case.student_id, 'closing_balance', v_case.closing_balance,
+        'balance', new.balance_after, 'threshold', v_case.threshold, 'ledger_id', new.id)
+    );
   end if;
 
   v_status := case when new.balance_after >= v_case.threshold then 'passed' else 'open' end;
@@ -860,6 +880,9 @@ begin
     end if;
     if v_pending_deductions > 0 then
       v_blockers := array_append(v_blockers, 'PENDING_DEDUCTION_REQUESTS');
+    end if;
+    if v_missing_accounts > 0 then
+      v_blockers := array_append(v_blockers, 'CURRENT_TERM_MISSING_ACCOUNTS');
     end if;
   end if;
 

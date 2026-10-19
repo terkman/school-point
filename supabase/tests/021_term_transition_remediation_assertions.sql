@@ -1,6 +1,6 @@
 begin;
 
-select plan(14);
+select plan(16);
 
 -- ---------------------------------------------------------------------------
 -- Static contract checks
@@ -805,6 +805,66 @@ $$;
 reset role;
 
 select pass('director is read-only and application users are denied direct table access');
+
+do $$
+declare
+  v_account public.score_accounts%rowtype;
+begin
+  perform pg_temp.t21_act(pg_temp.t21_uid('admin'));
+  select * into strict v_account from public.score_accounts
+  where term_id = pg_temp.t21_id('term_1') and student_id = pg_temp.t21_id('student_2');
+  update public.score_accounts set balance = 75 where id = v_account.id;
+  insert into public.score_ledger (
+    score_account_id, student_id, term_id, entry_type, requested_delta, applied_delta,
+    balance_before, balance_after, reason, actor_snapshot
+  ) values (
+    v_account.id, v_account.student_id, v_account.term_id, 'appeal_adjustment', -25, -25, 100, 75,
+    'pgTAP21 late correction creates outstanding remediation', 'pgTAP'
+  );
+  if not exists (select 1 from public.term_remediation_cases
+      where score_account_id = v_account.id and closing_balance = 100 and status = 'open' and threshold = 80)
+     or (select balance from public.score_accounts
+         where term_id = pg_temp.t21_id('term_2') and student_id = pg_temp.t21_id('student_2')) <> 100 then
+    raise exception 'late correction lost the previously passing pupil or changed the current term';
+  end if;
+end;
+$$;
+select pass('a late correction opens remediation for a previously passing pupil without changing the closing or current balance');
+
+do $$
+declare
+  v_student bigint;
+  v_current public.academic_terms%rowtype;
+  v_prepared jsonb;
+  v_preview jsonb;
+  v_before bigint;
+begin
+  perform pg_temp.t21_act(pg_temp.t21_uid('admin'));
+  select * into strict v_current from public.academic_terms where id = pg_temp.t21_id('term_2');
+  select count(*) into v_before from public.term_closing_snapshots;
+  insert into public.students(student_code, given_name, family_name)
+  values ('PGTAP21-MISSING-ACCOUNT', 'Missing', 'Account') returning id into v_student;
+  insert into public.enrollments(term_id, classroom_id, student_id)
+  select v_current.id, classroom.id, v_student from public.classrooms classroom
+  where classroom.term_id = v_current.id and classroom.is_active order by classroom.id limit 1;
+  v_prepared := public.admin_prepare_next_term_v1(v_current.school_year, 3::smallint,
+    'pgTAP21 next with missing source account', v_current.ends_on + 1, v_current.ends_on + 31);
+  v_preview := public.admin_preview_term_transition_v1((v_prepared -> 'term' ->> 'id')::bigint);
+  if not (v_preview -> 'blockers' ? 'CURRENT_TERM_MISSING_ACCOUNTS') then
+    raise exception 'missing original account did not block the transition';
+  end if;
+  begin
+    perform public.admin_transition_term_v1(v_current.id, (v_prepared -> 'term' ->> 'id')::bigint, gen_random_uuid());
+    raise exception 'transition accepted an unknown closing balance';
+  exception when sqlstate '55000' then null;
+  end;
+  if (select count(*) from public.term_closing_snapshots) <> v_before
+     or (select status from public.academic_terms where id = v_current.id) <> 'active' then
+    raise exception 'blocked transition left partial closing data';
+  end if;
+end;
+$$;
+select pass('an unprepared original score account blocks closing without leaving partial state');
 
 select * from finish();
 
