@@ -58,6 +58,13 @@ describe('Supabase semester contract', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
+  it('accepts the current status when a retried request has already been approved', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { ok: true, replayed: true, requestId: 10, caseId: 8, status: 'approved' }, error: null })
+    const actions = createSupabaseTermActions({ rpc } as unknown as SupabaseClient, vi.fn())
+    await expect(actions.requestTermRemediation({ caseId: '8', points: 10, reason: 'กิจกรรมแก้คะแนนที่ส่งสำเร็จแล้ว',
+      activityOccurredAt: '2026-11-01T03:00:00Z', clientRequestId: '0b1930f3-b323-46ed-8040-7ba01176c98c' })).resolves.toMatchObject({ replayed: true, requestId: '10', status: 'approved' })
+  })
+
   it('maps the SQL transition counts without confusing old and new terms', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { ok: true, replayed: true, transitionId: 30, closedTermId: 1, activeTermId: 2,
       snapshotCount: 20, remediationCaseCount: 4, initializedAccountCount: 20, threshold: 80 }, error: null })

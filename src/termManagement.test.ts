@@ -50,8 +50,9 @@ describe('semester lifecycle and remediation policy', () => {
     const closed = demoTransitionTerm(prepared.state, admin, transitionInput).state
     closed.students[0]!.score = 95
     const sourceCase = closed.termRecords!.cases[0]!
-    const request = demoRequestTermRemediation(closed, teacher, { caseId: sourceCase.id, points: 50,
-      activityOccurredAt: new Date().toISOString(), reason: 'ทำกิจกรรมจิตอาสาตามแผนครบแล้ว', clientRequestId: '3913d844-0b18-4765-b254-729809d8faac' })
+    const creditInput = { caseId: sourceCase.id, points: 50,
+      activityOccurredAt: new Date().toISOString(), reason: 'ทำกิจกรรมจิตอาสาตามแผนครบแล้ว', clientRequestId: '3913d844-0b18-4765-b254-729809d8faac' }
+    const request = demoRequestTermRemediation(closed, teacher, creditInput)
     expect(() => demoRequestTermRemediation(request.state, teacher, { caseId: sourceCase.id, points: 10,
       activityOccurredAt: new Date().toISOString(), reason: 'ขอเพิ่มซ้ำระหว่างรออนุมัติ', clientRequestId: '6902c2dd-99b7-4f48-8931-a5b9fb12977e' })).toThrow()
     const decision = { requestId: request.result.requestId, approve: true, clientRequestId: '705141ee-fe28-42f0-9be4-34fc0ccdbdd3' }
@@ -60,6 +61,7 @@ describe('semester lifecycle and remediation policy', () => {
     expect(approved.state.students[0]!.score).toBe(95)
     expect(approved.state.termRecords!.snapshots[0]).toMatchObject({ closingScore: 70, latestScore: 100 })
     expect(demoReviewTermRemediation(approved.state, admin, decision).state).toBe(approved.state)
+    expect(demoRequestTermRemediation(approved.state, teacher, creditInput).result).toMatchObject({ replayed: true, status: 'approved' })
   })
 
   it('restricts student histories to their own records and retains departed pupils for the admin', () => {

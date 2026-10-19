@@ -7,14 +7,14 @@ begin;
 -- balance reaches the threshold stored on the case; the current term is never
 -- touched by remediation.
 --
--- Lock order used by every score path:
---   score account (row) -> academic term (row, FOR SHARE by trigger)
---   -> remediation case (row, by the sync trigger).
+-- Ordinary ensure_score_account paths take the term's shared lock before
+-- obtaining the account row lock. Updates/reviews of an existing account
+-- take account -> term (shared) -> remediation case (via the sync trigger).
 -- The term transition takes academic-term rows FOR UPDATE and never locks or
 -- writes the closing term's score accounts, so it cannot participate in a
 -- cycle with ordinary scoring. Remediation request creation locks only the
--- case (FOR SHARE); remediation review locks the account first and lets the
--- sync trigger lock the case, matching the order above.
+-- case (FOR SHARE); remediation review locks the closed-term account first
+-- and lets the sync trigger lock the case.
 
 -- ---------------------------------------------------------------------------
 -- Shared helpers
@@ -208,6 +208,10 @@ create table public.term_closing_snapshots (
     or (not account_missing and score_account_id is not null and closing_balance between 0 and 100)
   )
 );
+
+create unique index term_closing_snapshots_account_idx
+  on public.term_closing_snapshots(score_account_id)
+  where score_account_id is not null;
 
 create table public.term_remediation_cases (
   id bigint generated always as identity primary key,
@@ -518,8 +522,9 @@ for each row execute function private.guard_academic_term_lifecycle();
 -- ---------------------------------------------------------------------------
 -- Score write term guards
 -- ---------------------------------------------------------------------------
--- Score accounts only take the term row lock (account -> term order). They do
--- not reject here because ensure_score_account() proposes an insert even when
+-- INSERT takes the term's shared lock before conflict/account locking;
+-- UPDATE already holds its account row lock. Neither rejects here because
+-- ensure_score_account() proposes an insert even when
 -- the account already exists (ON CONFLICT DO NOTHING).
 create or replace function private.lock_score_account_term()
 returns trigger

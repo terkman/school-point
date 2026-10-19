@@ -227,7 +227,7 @@ export interface RequestTermRemediationResult {
   replayed: boolean
   requestId: string
   caseId: string
-  status: 'pending'
+  status: RequestStatus
 }
 
 export interface ReviewTermRemediationInput {
@@ -967,7 +967,7 @@ export function demoRequestTermRemediation(
   const replay = records.requests.find((item) => item.requestedByAccountId === account.id && item.clientRequestId === input.clientRequestId)
   if (replay) {
     if (replay.payloadKey !== key) fail('รหัสคำขอนี้ถูกใช้กับข้อมูลอื่นแล้ว กรุณาส่งใหม่')
-    return { state, result: { ok: true, replayed: true, requestId: replay.id, caseId: replay.caseId, status: 'pending' } }
+    return { state, result: { ok: true, replayed: true, requestId: replay.id, caseId: replay.caseId, status: replay.status } }
   }
   const item = records.cases.find((entry) => entry.id === input.caseId)
   if (!item) fail('ไม่พบเคสแก้ไขคะแนน')

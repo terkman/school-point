@@ -207,7 +207,7 @@ export function createSupabaseTermActions(
       })
       return { ...result, ok: result.ok === true, replayed: result.replayed === true,
         requestId: id(result.requestId), caseId: id(result.caseId),
-        status: status(result.status, ['pending']) } as Result<'requestTermRemediation'>
+        status: status(result.status, ['pending', 'approved', 'rejected']) } as Result<'requestTermRemediation'>
     },
     reviewTermRemediation: async (input) => {
       const result = await mutate<JsonRow>('review_term_remediation_v1', {
