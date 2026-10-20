@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { formatThaiDate, type Account, type DemoState } from './domain'
-import type { AppDataActions } from './dataActions'
+import type { AppDataActions, UpdateTermScheduleInput } from './dataActions'
 import {
   createDemoTermActions,
+  bangkokDate,
   REMEDIATION_THRESHOLD,
   remediationStatusLabel,
   suggestNextTerm,
@@ -24,9 +25,17 @@ import {
 import { localDateTimeToIso, toLocalDateTimeInputValue } from './teacherWorkflows'
 import { EmptyState, Icon } from './ui'
 import './term-workspace.css'
+import { validateTermSchedule } from './termSchedule'
 
 function newRequestId(): string {
   return globalThis.crypto.randomUUID()
+}
+
+function nextDate(value?: string): string | undefined {
+  if (!value) return undefined
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + 1)
+  return date.toISOString().slice(0, 10)
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -75,11 +84,12 @@ export interface TermWorkspaceProps {
   reloadKey?: string
   /** Called after a successful term transition (the app's current term changed). */
   onTermChanged?: () => void
+  onOpenTermSchedule?: () => void
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-export function TermWorkspace({ account, termActions, reloadKey = '', onTermChanged }: TermWorkspaceProps) {
+export function TermWorkspace({ account, termActions, reloadKey = '', onTermChanged, onOpenTermSchedule }: TermWorkspaceProps) {
   const [terms, setTerms] = useState<AcademicTermSummary[]>([])
   const [cases, setCases] = useState<RemediationCase[]>([])
   const [overviewState, setOverviewState] = useState<LoadState>('loading')
@@ -147,7 +157,8 @@ export function TermWorkspace({ account, termActions, reloadKey = '', onTermChan
     setAnnouncement('')
     try {
       const result = await run()
-      setAnnouncement(success(result))
+      const warning = result && typeof result === 'object' && 'syncWarning' in result && result.syncWarning
+      setAnnouncement(`${success(result)}${warning ? ' • บันทึกแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ กรุณาโหลดหน้าใหม่ก่อนดำเนินการต่อ' : ''}`)
       await loadOverview()
       setHistoryRefresh((value) => value + 1)
       return result
@@ -182,13 +193,35 @@ export function TermWorkspace({ account, termActions, reloadKey = '', onTermChan
         </section>
       ) : null}
 
+      {isAdmin ? (
+        <TermTransitionPanel
+          termActions={termActions}
+          activeTerm={activeTerm}
+          plannedTerm={plannedTerm}
+          busy={busy || (overviewState !== 'ready' ? 'overview' : '')}
+          reloadKey={`${reloadKey}:${terms.map((term) => `${term.id}:${term.status}:${term.startsOn}:${term.endsOn}`).join(',')}`}
+          onOpenTermSchedule={onOpenTermSchedule}
+          onUpdate={(input) => runMutation('schedule', () => termActions.updateTermSchedule(input), () => 'บันทึกวันเปิด–ปิดภาคเรียนที่เตรียมไว้แล้ว กรุณาตรวจความพร้อมอีกครั้ง')}
+          onPrepare={(input) => runMutation('prepare', () => termActions.prepareNextTerm(input), (result) => result.replayed
+            ? 'ภาคเรียนถัดไปถูกเตรียมไว้แล้ว ไม่มีการสร้างซ้ำ'
+            : `เตรียม${input.name}แล้ว คัดลอก ${result.classroomCount} ห้อง ${result.enrollmentCount} คน ${result.assignmentCount} การมอบหมายครู`)}
+          onTransition={async (input) => {
+            const result = await runMutation('transition', () => termActions.transitionTerm(input), (outcome) => outcome.replayed
+              ? 'การเปลี่ยนภาคเรียนนี้สำเร็จไปแล้วก่อนหน้า'
+              : `ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่แล้ว • บันทึกคะแนนปิดภาค ${outcome.snapshotCount} คน • ต้องแก้ไขคะแนน ${outcome.remediationCaseCount} คน • เริ่ม 100 คะแนน ${outcome.initializedAccounts} คน`)
+            if (result) onTermChanged?.()
+            return result
+          }}
+        />
+      ) : null}
+
       <RemediationPanel
         account={account}
         cases={cases}
         loading={overviewState === 'loading'}
         canRequest={canRequest}
         isAdmin={isAdmin}
-        busy={busy}
+        busy={busy || (overviewState !== 'ready' ? 'overview' : '')}
         sourceTermById={sourceTermById}
         onRequest={(item, input) => runMutation(`request:${item.caseId}`, () => termActions.requestTermRemediation({ ...input, caseId: item.caseId }), (result) => result.replayed
           ? `คำขอของ ${item.student.name} ถูกส่งไว้แล้ว`
@@ -223,25 +256,7 @@ export function TermWorkspace({ account, termActions, reloadKey = '', onTermChan
         ) : null}
       </section>
 
-      {isAdmin ? (
-        <TermTransitionPanel
-          termActions={termActions}
-          activeTerm={activeTerm}
-          plannedTerm={plannedTerm}
-          busy={busy}
-          reloadKey={`${reloadKey}:${terms.map((term) => `${term.id}:${term.status}`).join(',')}`}
-          onPrepare={(input) => runMutation('prepare', () => termActions.prepareNextTerm(input), (result) => result.replayed
-            ? 'ภาคเรียนถัดไปถูกเตรียมไว้แล้ว ไม่มีการสร้างซ้ำ'
-            : `เตรียม${input.name}แล้ว คัดลอก ${result.classroomCount} ห้อง ${result.enrollmentCount} คน ${result.assignmentCount} การมอบหมายครู`)}
-          onTransition={async (input) => {
-            const result = await runMutation('transition', () => termActions.transitionTerm(input), (outcome) => outcome.replayed
-              ? 'การเปลี่ยนภาคเรียนนี้สำเร็จไปแล้วก่อนหน้า'
-              : `ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่แล้ว • บันทึกคะแนนปิดภาค ${outcome.snapshotCount} คน • ต้องแก้ไขคะแนน ${outcome.remediationCaseCount} คน • เริ่ม 100 คะแนน ${outcome.initializedAccounts} คน`)
-            if (result) onTermChanged?.()
-            return result
-          }}
-        />
-      ) : null}
+
     </div>
   )
 }
@@ -276,7 +291,7 @@ function TermHistoryView({ account, history, state, error, onRetry }: {
         {history.closedAt ? <span>ปิดภาคเมื่อ {formatThaiDate(history.closedAt)}</span> : null}
         <span>เกณฑ์ผ่าน {history.threshold} คะแนน</span>
       </div>
-      {term.status === 'closed' ? <p className="scope-note"><Icon name="shield" size={18} /> คะแนนปิดภาคถูกบันทึกครั้งเดียวและไม่เปลี่ยนแปลง คะแนนล่าสุดอาจเพิ่มขึ้นจากกิจกรรมแก้ไขหรือผลอุทธรณ์ของภาคเรียนนี้เท่านั้น</p> : null}
+      {term.status === 'closed' ? <p className="scope-note"><Icon name="shield" size={18} /> คะแนนปิดภาคถูกบันทึกครั้งเดียวและไม่เปลี่ยนแปลง คะแนนล่าสุดอาจเปลี่ยนจากกิจกรรมแก้ไขหรือผลอุทธรณ์ของภาคเรียนนี้เท่านั้น</p> : null}
       {!isStudent && history.students.length > 8 ? (
         <label className="term-search">
           <span>ค้นหานักเรียน</span>
@@ -302,7 +317,7 @@ function TermStudentRow({ student, termStatus, openByDefault }: { student: TermS
           <small>{student.studentCode}{student.classroomName ? ` • ${student.classroomName}` : ''}{student.studentStatus === 'graduated' ? ' • จบการศึกษา' : ''}</small>
         </div>
         <dl className="term-score-pair">
-          {termStatus === 'closed' ? <div><dt>คะแนนปิดภาค</dt><dd>{student.closingScore ?? '—'}</dd></div> : null}
+          {termStatus === 'closed' ? <div><dt>คะแนนปิดภาค</dt><dd>{student.closingScore ?? 'ไม่มีบัญชีคะแนนตอนปิดภาค'}</dd></div> : null}
           <div><dt>{termStatus === 'closed' ? 'คะแนนล่าสุดของภาคนี้' : 'คะแนนปัจจุบัน'}</dt><dd>{student.latestScore ?? 'ยังไม่มีบัญชีคะแนน'}</dd></div>
         </dl>
         {student.remediation
@@ -356,15 +371,16 @@ function RemediationPanel({ account, cases, loading, canRequest, isAdmin, busy, 
   return (
     <section className="panel remediation-panel" aria-labelledby="remediation-title">
       <div className="section-heading">
-        <div><p className="eyebrow">ภาคเรียนเดิม</p><h2 id="remediation-title">{isStudent ? 'การแก้ไขคะแนนของฉัน' : 'นักเรียนที่ต้องแก้ไขคะแนนภาคเรียนเดิม'}</h2></div>
+        <div><p className="eyebrow">ภาคเรียนเดิม</p><h2 id="remediation-title">{isStudent ? 'กิจกรรมแก้คะแนนของฉัน' : 'กิจกรรมแก้คะแนนภาคเรียนเดิม'}</h2></div>
         <span className={`counter ${openCases.length ? 'danger' : ''}`}>{openCases.length}</span>
       </div>
       <p className="muted">คะแนนแก้ไขจะเพิ่มให้ภาคเรียนเดิมเท่านั้น ไม่กระทบคะแนนภาคเรียนปัจจุบัน และผ่านเกณฑ์อัตโนมัติเมื่อคะแนนภาคเรียนเดิมถึง {REMEDIATION_THRESHOLD} คะแนน</p>
+      <p className="form-help">ระบุวันที่ทำกิจกรรมจริงได้ แม้กิจกรรมนั้นทำในภาคเรียนใหม่ คะแนนปิดภาคเดิมเก็บไว้เป็นหลักฐาน ส่วนคะแนนล่าสุดหลังแก้จะแสดงแยกกัน</p>
       {cases.length > openCases.length ? (
         <label className="checkbox-row"><input type="checkbox" checked={showPassed} onChange={(event) => setShowPassed(event.target.checked)} /> แสดงเคสที่ผ่านเกณฑ์แล้ว ({cases.length - openCases.length})</label>
       ) : null}
       {loading && !cases.length ? <p className="muted" role="status">กำลังโหลดรายการ…</p> : null}
-      {!loading && !visible.length ? <EmptyState title={isStudent ? 'ไม่มีคะแนนภาคเรียนเดิมที่ต้องแก้ไข' : 'ไม่มีนักเรียนที่ค้างแก้ไขคะแนน'} detail="นักเรียนที่คะแนนปิดภาคต่ำกว่าเกณฑ์จะแสดงที่นี่ แม้จะไม่ได้อยู่ในรายชื่อภาคเรียนปัจจุบัน" /> : null}
+      {!loading && !visible.length ? <EmptyState title={isStudent ? 'ไม่มีคะแนนภาคเรียนเดิมที่ต้องแก้ไข' : 'ไม่มีนักเรียนที่ค้างแก้ไขคะแนน'} detail="เมื่อปิดภาคเรียน ระบบจะสร้างงานแก้ให้ผู้ที่คะแนนต่ำกว่า 80 อัตโนมัติ แม้ไม่ได้อยู่ในรายชื่อภาคเรียนใหม่" /> : null}
       <div className="record-list">
         {visible.map((item) => (
           <RemediationCaseRow
@@ -482,12 +498,14 @@ function RemediationRequestForm({ item, sourceTerm, busy, disabled, onCancel, on
 
   return (
     <form className="stack-form remediation-form" onSubmit={submit} noValidate>
+      <strong className="term-destination">เพิ่มคะแนนให้ {item.sourceTerm.name} เท่านั้น</strong>
+      <p className="form-help">ใช้วันที่ทำกิจกรรมจริง ไม่จำเป็นต้องย้อนหลังไปก่อนปิดภาคเรียนเดิม</p>
       <div className="remediation-form-grid">
         <label>คะแนนที่ขอเพิ่ม
           <input type="number" min={1} max={100} step={1} value={points} onChange={(event) => { setPoints(Math.trunc(Number(event.target.value))); invalidate() }} />
         </label>
         <label>วันเวลาที่ทำกิจกรรม
-          <input type="datetime-local" value={activityAt} onChange={(event) => { setActivityAt(event.target.value); invalidate() }} />
+          <input type="datetime-local" disabled={disabled} min={sourceTerm.startsOn ? toLocalDateTimeInputValue(new Date(`${sourceTerm.startsOn}T00:00:00+07:00`)) : undefined} max={toLocalDateTimeInputValue()} value={activityAt} onChange={(event) => { setActivityAt(event.target.value); setError(''); invalidate() }} />
         </label>
       </div>
       <label>รายละเอียดกิจกรรมแก้ไขพฤติกรรม
@@ -547,7 +565,7 @@ function ReviewControls({ item, request, busy, onReview }: {
   )
 }
 
-function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloadKey, onPrepare, onTransition }: {
+function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloadKey, onPrepare, onTransition, onUpdate, onOpenTermSchedule }: {
   termActions: TermManagementActions
   activeTerm?: AcademicTermSummary
   plannedTerm?: AcademicTermSummary
@@ -555,15 +573,23 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
   reloadKey: string
   onPrepare: (input: PrepareNextTermInput) => Promise<unknown>
   onTransition: (input: { currentTermId: string; nextTermId: string; clientRequestId: string }) => Promise<unknown>
+  onUpdate: (input: UpdateTermScheduleInput) => Promise<unknown>
+  onOpenTermSchedule?: () => void
 }) {
   const [preview, setPreview] = useState<TermTransitionPreview | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
+  const [earlyConfirmed, setEarlyConfirmed] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [transitionError, setTransitionError] = useState('')
   const transitionIds = useRef(new Map<string, string>())
   const previewSeq = useRef(0)
   const plannedTermId = plannedTerm?.id ?? ''
+  const today = bangkokDate(new Date().toISOString())
+  const opensEarly = Boolean(plannedTerm?.startsOn && plannedTerm.startsOn > today)
+  const checking = previewLoading || Boolean(previewError) || editing || Boolean(busy)
+  const canSubmit = Boolean(preview?.canTransition && confirmed && (!opensEarly || earlyConfirmed) && !checking)
 
   const loadPreview = useCallback(async () => {
     if (!plannedTermId) {
@@ -571,6 +597,8 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
       return
     }
     const seq = ++previewSeq.current
+    setConfirmed(false)
+    setEarlyConfirmed(false)
     setPreviewLoading(true)
     try {
       const next = await termActions.previewTermTransition(plannedTermId)
@@ -591,7 +619,7 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
   }, [loadPreview, reloadKey])
 
   async function transition() {
-    if (busy || !preview?.canTransition || !confirmed || !activeTerm || !plannedTerm) return
+    if (!canSubmit || !activeTerm || !plannedTerm) return
     const key = `${activeTerm.id}:${plannedTerm.id}`
     const clientRequestId = transitionIds.current.get(key) ?? newRequestId()
     transitionIds.current.set(key, clientRequestId)
@@ -609,23 +637,30 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
   return (
     <section className="panel term-transition-panel" aria-labelledby="term-transition-title">
       <div className="section-heading"><div><p className="eyebrow">สำหรับผู้ดูแลระบบ</p><h2 id="term-transition-title">เตรียมและเปลี่ยนภาคเรียน</h2></div></div>
-      {!activeTerm ? <EmptyState title="ยังไม่มีภาคเรียนที่กำลังใช้งาน" detail="เปิดใช้งานภาคเรียนจากหน้าสิทธิ์และภาคเรียนก่อน" /> : null}
+      <ol className="term-steps" aria-label="ขั้นตอนเปลี่ยนภาคเรียน"><li>เตรียมภาคเรียนถัดไป</li><li>ตรวจวันที่และรายชื่อ</li><li>ยืนยันเปิดใช้งานทันที</li></ol>
+      <p className="form-help">การเตรียมและตั้งวันเปิดยังไม่เปลี่ยนภาคเรียน ระบบจะเปลี่ยนเมื่อกดปุ่มยืนยันเปิดใช้งานเท่านั้น</p>
+      {!activeTerm ? <EmptyState title="ยังไม่มีภาคเรียนที่กำลังใช้งาน" detail="ตั้งค่าและเปิดใช้งานภาคเรียนปัจจุบันก่อน" /> : null}
+      {onOpenTermSchedule ? <div className="form-actions"><button type="button" className="button secondary compact" onClick={onOpenTermSchedule}>ตั้งค่าวันเปิด–ปิดและบัญชีคะแนนเทอมปัจจุบัน</button></div> : null}
       {activeTerm && !plannedTerm ? <PrepareNextTermForm activeTerm={activeTerm} busy={busy} onPrepare={onPrepare} /> : null}
       {activeTerm && plannedTerm ? (
         <div className="stack-form">
           <p>จาก <strong>{activeTerm.name}</strong> ไป <strong>{plannedTerm.name}</strong>{plannedTerm.startsOn && plannedTerm.endsOn ? ` (${formatThaiDate(plannedTerm.startsOn, false)} – ${formatThaiDate(plannedTerm.endsOn, false)})` : ''}</p>
+          {editing ? <PlannedTermScheduleForm key={`${plannedTerm.id}:${plannedTerm.startsOn}:${plannedTerm.endsOn}`} term={plannedTerm} activeTerm={activeTerm} busy={Boolean(busy)} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); await loadPreview() }} />
+            : <div className="form-actions"><button type="button" className="button secondary compact" disabled={Boolean(busy)} onClick={() => { setConfirmed(false); setEarlyConfirmed(false); setEditing(true) }}>แก้วันเปิด–ปิดภาคเรียนที่เตรียมไว้</button></div>}
           {previewLoading && !preview ? <p className="muted" role="status">กำลังตรวจความพร้อม…</p> : null}
           {previewError ? <div role="alert"><p className="form-error">{previewError}</p><div className="form-actions"><button type="button" className="button secondary" onClick={() => void loadPreview()}>ตรวจอีกครั้ง</button></div></div> : null}
           {preview ? (
             <>
               <div className="reset-preview term-preview-counts">
                 <span>นักเรียนภาคเรียนปัจจุบัน <strong>{preview.counts.currentStudents}</strong></span>
-                <span>ต่ำกว่า {preview.threshold} (ต้องแก้ไข) <strong>{preview.counts.belowThreshold}</strong></span>
+                <span>งานแก้คะแนนที่จะสร้างเมื่อปิดภาค (ต่ำกว่า {preview.threshold}) <strong>{preview.counts.belowThreshold}</strong></span>
                 <span>ยกไปภาคเรียนใหม่ <strong>{preview.counts.nextEnrolled}</strong></span>
                 <span>ไม่อยู่ในรายชื่อใหม่ <strong>{preview.counts.notCarriedOver}</strong></span>
                 <span>อุทธรณ์ค้าง (ยังพิจารณาได้หลังปิดภาค) <strong>{preview.counts.pendingAppeals}</strong></span>
-                <span>เคสแก้ไขเดิมที่ยังเปิด <strong>{preview.counts.openRemediationCases}</strong></span>
+                <span>งานแก้จากภาคเรียนก่อนที่ยังค้าง <strong>{preview.counts.openRemediationCases}</strong></span>
               </div>
+              <p className="form-help">งานแก้ที่จะสร้างเป็นคนละจำนวนกับงานเดิมที่ยังค้าง เมื่อปิดภาคเรียน นักเรียนที่ต่ำกว่า {preview.threshold} จะมีงานแก้ของภาคเรียนนี้ให้ติดตามต่อ</p>
+              <details className="term-preview-roster"><summary>ตรวจรายชื่อและคะแนนก่อนเปลี่ยนภาคเรียน ({preview.students.length} คน)</summary><ul>{preview.students.map((student) => <li key={student.studentId}><span>{student.studentCode} • {student.name} • {student.classroomName ?? 'ไม่ระบุห้อง'}</span><strong>{student.balance ?? 'ไม่มีบัญชีคะแนน'}{student.belowThreshold ? ' • ต้องแก้คะแนน' : ''}{!student.carriedToNextTerm ? ' • ไม่ยกไปเทอมใหม่' : ''}</strong></li>)}</ul></details>
               {preview.blockers.length ? (
                 <div role="alert" className="term-blockers">
                   <strong>ต้องแก้ไขก่อนเปลี่ยนภาคเรียน</strong>
@@ -633,14 +668,20 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
                   <div className="form-actions"><button type="button" className="button secondary compact" onClick={() => void loadPreview()} disabled={previewLoading}>ตรวจอีกครั้ง</button></div>
                 </div>
               ) : null}
+              <aside className={`term-transition-notice${opensEarly ? ' is-early' : ''}`}>
+                <strong>ปุ่มยืนยันจะปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่ทันที</strong>
+                <p>วันนี้ {formatThaiDate(today, false)} • กำหนดเปิด {plannedTerm.startsOn ? formatThaiDate(plannedTerm.startsOn, false) : 'ยังไม่ระบุ'}</p>
+                <p>คะแนนปิดภาคจะเก็บไว้เป็นหลักฐานที่คงเดิม และยังทำกิจกรรมแก้คะแนนภาคเรียนเดิมให้ถึง {preview.threshold} ได้ คะแนนล่าสุดหลังแก้แสดงแยกจากคะแนนปิดภาค โดยไม่กระทบเทอมใหม่</p>
+                {opensEarly ? <><p><strong>ยังไม่ถึงวันเริ่มภาคเรียนใหม่</strong> หากเปิดตอนนี้ จะลงเหตุการณ์ปกติของวันที่ก่อนวันเริ่มเทอมใหม่ไม่ได้ หากต้องการรอวันเปิด ให้คงสถานะเตรียมไว้ก่อน</p><label className="checkbox-row"><input type="checkbox" checked={earlyConfirmed} disabled={checking || !preview.canTransition} onChange={(event) => setEarlyConfirmed(event.target.checked)} /> เข้าใจผลกระทบและต้องการเปิดภาคเรียนใหม่ก่อนวันเริ่มที่กำหนด</label></> : null}
+              </aside>
               <label className="checkbox-row">
-                <input type="checkbox" checked={confirmed} disabled={!preview.canTransition || Boolean(busy)} onChange={(event) => setConfirmed(event.target.checked)} />
-                ตรวจรายชื่อแล้ว และยืนยันว่าจะปิด{activeTerm.name} บันทึกคะแนนปิดภาคแบบแก้ไขไม่ได้ และเริ่ม{plannedTerm.name}ที่ 100 คะแนน
+                <input type="checkbox" checked={confirmed} disabled={!preview.canTransition || checking} onChange={(event) => setConfirmed(event.target.checked)} />
+                ตรวจวันที่และรายชื่อแล้ว ยืนยันเก็บคะแนนปิดภาคของ{activeTerm.name} พร้อมงานแก้คะแนนเดิม และเริ่ม{plannedTerm.name}ที่ 100 คะแนนทันที
               </label>
               {transitionError ? <p className="form-error" role="alert">{transitionError}</p> : null}
               <div className="form-actions">
-                <button type="button" className="button warning" disabled={!preview.canTransition || !confirmed || Boolean(busy)} onClick={() => void transition()}>
-                  {busy === 'transition' ? 'กำลังเปลี่ยนภาคเรียน…' : 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่'}
+                <button type="button" className="button warning" disabled={!canSubmit} onClick={() => void transition()}>
+                  {busy === 'transition' ? 'กำลังเปลี่ยนภาคเรียน…' : 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่ทันที'}
                 </button>
               </div>
             </>
@@ -649,6 +690,30 @@ function TermTransitionPanel({ termActions, activeTerm, plannedTerm, busy, reloa
       ) : null}
     </section>
   )
+}
+
+function PlannedTermScheduleForm({ term, activeTerm, busy, onSave, onCancel }: {
+  term: AcademicTermSummary; activeTerm: AcademicTermSummary; busy: boolean
+  onSave: (input: UpdateTermScheduleInput) => Promise<void>; onCancel: () => void
+}) {
+  const [startsOn, setStartsOn] = useState(term.startsOn ?? '')
+  const [endsOn, setEndsOn] = useState(term.endsOn ?? '')
+  const [error, setError] = useState('')
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (busy) return
+    const validation = validateTermSchedule(startsOn, endsOn)
+    if (validation) { setError(validation); return }
+    if (activeTerm.endsOn && startsOn <= activeTerm.endsOn) { setError('วันเปิดภาคเรียนถัดไปต้องอยู่หลังวันปิดภาคเรียนปัจจุบัน'); return }
+    setError('')
+    try { await onSave({ termId: term.id, startsOn, endsOn }) } catch (error) { setError(errorMessage(error, 'บันทึกวันเปิด–ปิดไม่สำเร็จ')) }
+  }
+  return <form className="stack-form planned-term-form" aria-label="แก้วันเปิด–ปิดภาคเรียนที่เตรียมไว้" noValidate onSubmit={save}>
+    <strong>{term.name}</strong><p className="form-help">แก้ได้เฉพาะวันเปิด–ปิด ชื่อและรายชื่อที่เตรียมไว้ยังคงเดิม การบันทึกวันที่ยังไม่เปิดใช้งานภาคเรียน</p>
+    <div className="remediation-form-grid"><label>วันเปิดภาคเรียนที่เตรียมไว้<input type="date" disabled={busy} value={startsOn} min={nextDate(activeTerm.endsOn)} max={endsOn || undefined} onChange={(event) => { setStartsOn(event.target.value); setError('') }} /></label><label>วันปิดภาคเรียนที่เตรียมไว้<input type="date" disabled={busy} value={endsOn} min={startsOn || nextDate(activeTerm.endsOn)} onChange={(event) => { setEndsOn(event.target.value); setError('') }} /></label></div>
+    {error ? <p className="form-error" role="alert">{error}</p> : null}
+    <div className="form-actions"><button type="button" className="button secondary" disabled={busy} onClick={onCancel}>ยกเลิก</button><button type="submit" className="button primary" disabled={busy || (startsOn === term.startsOn && endsOn === term.endsOn)}>{busy ? 'กำลังบันทึก…' : 'บันทึกวันเปิด–ปิดที่เตรียมไว้'}</button></div>
+  </form>
 }
 
 function PrepareNextTermForm({ activeTerm, busy, onPrepare }: {
@@ -684,8 +749,8 @@ function PrepareNextTermForm({ activeTerm, busy, onPrepare }: {
       <p>สร้างภาคเรียนที่ {suggestion.semester}/{suggestion.schoolYear} และคัดลอกห้องเรียน รายชื่อนักเรียน และครูประจำห้องจาก{activeTerm.name} ตรวจสอบรายชื่อได้ก่อนเปลี่ยนภาคเรียนจริง</p>
       <label>ชื่อภาคเรียน<input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} /></label>
       <div className="remediation-form-grid">
-        <label>วันเปิดภาคเรียน<input type="date" value={startsOn} min={activeTerm.endsOn} onChange={(event) => setStartsOn(event.target.value)} /></label>
-        <label>วันปิดภาคเรียน<input type="date" value={endsOn} min={startsOn || activeTerm.endsOn} onChange={(event) => setEndsOn(event.target.value)} /></label>
+        <label>วันเปิดภาคเรียน<input type="date" disabled={Boolean(busy)} value={startsOn} min={nextDate(activeTerm.endsOn)} max={endsOn || undefined} onChange={(event) => setStartsOn(event.target.value)} /></label>
+        <label>วันปิดภาคเรียน<input type="date" disabled={Boolean(busy)} value={endsOn} min={startsOn || nextDate(activeTerm.endsOn)} onChange={(event) => setEndsOn(event.target.value)} /></label>
       </div>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="form-actions"><button type="submit" className="button primary" disabled={Boolean(busy)}>{busy === 'prepare' ? 'กำลังเตรียม…' : 'เตรียมภาคเรียนถัดไป'}</button></div>

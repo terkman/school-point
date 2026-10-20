@@ -1129,6 +1129,7 @@ tbody tr:hover td { background: var(--color-surface-subtle); }
   .system-subnav { width: 100%; }
   .system-subnav button { min-height: 58px; padding-inline: 9px; }
   .system-subnav button small { display: none; }
+  .system-subnav button strong { white-space: normal; overflow: visible; }
   .directory-hero .button { width: 100%; justify-content: center; }
   .directory-summary-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
   .directory-summary-grid > div { padding: 14px; }
@@ -1160,3 +1161,8 @@ tbody tr:hover td { background: var(--color-surface-subtle); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+/* Keep the scoring destination visible on phones as well as desktop. */
+.score-term-context { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 14px 16px; background: var(--color-review-soft, #f0f5ff); color: var(--color-text); }
+.score-term-context > strong { display: block; color: var(--color-heading); }
+.score-term-context p { margin: 6px 0; font-size: var(--text-sm); }
+.score-term-context .button { white-space: normal; text-align: left; }

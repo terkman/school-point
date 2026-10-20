@@ -6,6 +6,7 @@ import { TermWorkspace } from './TermWorkspace'
 import {
   demoGetTermHistory, demoListTermRemediations, demoPrepareNextTerm,
   demoRequestTermRemediation, demoReviewTermRemediation, demoTransitionTerm,
+  demoUpdateTermSchedule,
 } from './termManagement'
 
 const day = (offset: number) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10)
@@ -24,6 +25,20 @@ function setup() {
 }
 
 describe('semester lifecycle and remediation policy', () => {
+  it('edits planned dates without changing scores or history and rejects overlaps or closed-term edits', () => {
+    const { admin, teacher, prepared, transitionInput } = setup()
+    const input = { termId: prepared.result.termId, startsOn: day(2), endsOn: day(100) }
+    const updated = demoUpdateTermSchedule(prepared.state, admin, input)
+    expect(updated.state.termRecords!.terms.find((term) => term.id === input.termId)).toMatchObject({ startsOn: day(2), endsOn: day(100), status: 'planned' })
+    expect(updated.state.students).toBe(prepared.state.students)
+    expect(updated.state.transactions).toBe(prepared.state.transactions)
+    expect(updated.state.term).toBe(prepared.state.term)
+    expect(demoUpdateTermSchedule(updated.state, admin, input).state).toBe(updated.state)
+    expect(() => demoUpdateTermSchedule(prepared.state, teacher, input)).toThrow('ผู้ดูแล')
+    expect(() => demoUpdateTermSchedule(prepared.state, admin, { ...input, startsOn: day(-2) })).toThrow('ต้องอยู่หลัง')
+    const closed = demoTransitionTerm(updated.state, admin, transitionInput).state
+    expect(() => demoUpdateTermSchedule(closed, admin, { ...input, termId: transitionInput.currentTermId })).toThrow('ปิดแล้ว')
+  })
   it('replays preparation and transition without duplicating snapshots, opening entries, or cases', () => {
     const { admin, input, prepared, transitionInput } = setup()
     const replayPrepare = demoPrepareNextTerm(prepared.state, admin, input)

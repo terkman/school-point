@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MutationSyncWarning } from './dataActions'
+import { schoolServerError } from './serverErrors'
 import type {
   AcademicTermSummary, RemediationCase, RemediationRequestSummary,
   TermHistory, TermLedgerEntry, TermManagementActions, TermTransitionPreview,
@@ -146,7 +147,7 @@ export function createSupabaseTermActions(
 ): TermManagementActions {
   async function read<T>(name: string, parameters: Record<string, unknown> = {}): Promise<T> {
     const { data, error } = await client.rpc(name, parameters)
-    if (error) throw new Error(error.message)
+    if (error) throw new Error(schoolServerError(error))
     if (data === null || data === undefined) throw new Error('ฐานข้อมูลไม่ได้ส่งผลการดำเนินการภาคเรียนกลับมา')
     return data as T
   }
@@ -167,6 +168,12 @@ export function createSupabaseTermActions(
   }
 
   return {
+    updateTermSchedule: async (input) => {
+      const result = await mutate<JsonRow>('admin_update_term_schedule', {
+        p_term_id: input.termId, p_starts_on: input.startsOn, p_ends_on: input.endsOn,
+      })
+      return { ...result, updated: result.updated === true }
+    },
     listAcademicTerms: async () => rows(await read('list_academic_terms_v1')).map(term),
     getTermHistory: async (termId, studentId) => normalizeTermHistory(await read('get_term_history_v1', {
       p_term_id: termId, p_student_id: studentId ?? null,

@@ -81,6 +81,8 @@ export interface RuleProposal {
 }
 
 export interface ScoreTransaction {
+  /** Ledger category, including original-term remediation and appeal results. */
+  ledgerEntryType?: string
   id: string
   studentId: string
   termId: string

@@ -69,6 +69,8 @@ test('paper appeals honor stored deadlines and expire old records with no deadli
 
 test('teacher internal notes stay out of public paper output', async ({ page }) => {
   const state = createDemoState()
+  state.term.startsOn = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)
+  state.term.endsOn = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
   const note = 'E2E INTERNAL NOTE: ใช้ภายในเท่านั้น'
   await seed(page, state, 'teacher')
   await page.getByRole('button', { name: 'ตัดคะแนน' }).first().click()

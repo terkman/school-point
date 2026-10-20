@@ -46,9 +46,9 @@ async function seed(page: Page, state: DemoState, role: Role = 'admin') {
 async function workspace(page: Page, role: Role) {
   if (role === 'admin') {
     await page.getByRole('button', { name: 'จัดการระบบ', exact: true }).filter({ visible: true }).first().click()
-    await page.getByRole('button', { name: /ภาคเรียนและการแก้ไขคะแนน/ }).filter({ visible: true }).first().click()
+    await page.getByRole('button', { name: /ภาคเรียนและงานแก้คะแนน/ }).filter({ visible: true }).first().click()
   } else {
-    const label = role === 'teacher' ? 'ภาคเรียนเดิม' : role === 'student' ? 'แต่ละภาคเรียน' : 'ภาคเรียน'
+    const label = role === 'teacher' ? 'ภาคเรียน / แก้คะแนน' : role === 'student' ? 'แต่ละภาคเรียน' : 'ภาคเรียน'
     if (!(await page.getByRole('button', { name: label, exact: true }).filter({ visible: true }).count())) {
       await page.getByRole('button', { name: 'เพิ่มเติม', exact: true }).click()
     }
@@ -80,8 +80,8 @@ test('starts Term 2 at 100 and completes original-term remediation without chang
   await prepare.getByLabel('วันเปิดภาคเรียน', { exact: true }).fill(dateOffset(0))
   await prepare.getByLabel('วันปิดภาคเรียน', { exact: true }).fill(dateOffset(90))
   await prepare.getByRole('button', { name: 'เตรียมภาคเรียนถัดไป', exact: true }).click()
-  await page.getByRole('checkbox', { name: /ตรวจรายชื่อแล้ว/ }).check()
-  await page.getByRole('button', { name: 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่', exact: true }).click()
+  await page.getByRole('checkbox', { name: /ตรวจวันที่และรายชื่อแล้ว/ }).check()
+  await page.getByRole('button', { name: 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่ทันที', exact: true }).click()
   await expect(page.locator('.term-chip')).toContainText('2/2569')
   expect((await saved(page)).students.find(item => item.id === student.id)!.score).toBe(100)
   await page.reload()
@@ -136,11 +136,58 @@ test('blocks a transition with pending ordinary score requests and preserves the
   await form.getByLabel('วันปิดภาคเรียน', { exact: true }).fill(dateOffset(90))
   await form.getByRole('button', { name: 'เตรียมภาคเรียนถัดไป', exact: true }).click()
   await expect(page.getByText('ยังมีคำขอเพิ่มคะแนนรอพิจารณา', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่ทันที', exact: true })).toBeDisabled()
   const after = await saved(page)
   expect(after.term.id).toBe(state.term.id)
   expect(after.students[0]!.score).toBe(70)
   expect(after.termRecords!.snapshots).toHaveLength(0)
+})
+
+test('requires a separate early-opening acknowledgment and clears confirmations after editing prepared dates', async ({ page }) => {
+  const state = fixture()
+  const admin = state.accounts.find(account => account.role === 'admin')!
+  const prepared = demoPrepareNextTerm(state, admin, { schoolYear: 2569, semester: 2, name: 'ภาคเรียนที่ 2/2569', startsOn: dateOffset(7), endsOn: dateOffset(90) })
+  await seed(page, prepared.state)
+  await workspace(page, 'admin')
+  const confirm = page.getByRole('checkbox', { name: /ตรวจวันที่และรายชื่อแล้ว/ })
+  const early = page.getByRole('checkbox', { name: /เข้าใจผลกระทบและต้องการเปิด/ })
+  const activate = page.getByRole('button', { name: 'ปิดภาคเรียนเดิมและเปิดภาคเรียนใหม่ทันที', exact: true })
+  await confirm.check()
+  await expect(activate).toBeDisabled()
+  await early.check()
+  await expect(activate).toBeEnabled()
+  await page.getByRole('button', { name: 'แก้วันเปิด–ปิดภาคเรียนที่เตรียมไว้', exact: true }).click()
+  await expect(confirm).not.toBeChecked()
+  await expect(early).not.toBeChecked()
+  await expect(activate).toBeDisabled()
+  const edit = page.getByRole('form', { name: 'แก้วันเปิด–ปิดภาคเรียนที่เตรียมไว้', exact: true })
+  await edit.getByLabel('วันเปิดภาคเรียนที่เตรียมไว้', { exact: true }).fill(dateOffset(14))
+  await edit.getByRole('button', { name: 'บันทึกวันเปิด–ปิดที่เตรียมไว้', exact: true }).click()
+  await expect(edit).toHaveCount(0)
+  await expect(confirm).toBeEnabled()
+  await expect(confirm).not.toBeChecked()
+  await expect(activate).toBeDisabled()
+  const after = await saved(page)
+  expect(after.term.id).toBe(state.term.id)
+  expect(after.students[0]!.score).toBe(70)
+  expect(after.termRecords!.terms.find(term => term.id === prepared.result.termId)!.startsOn).toBe(dateOffset(14))
+})
+
+test('keeps closed-term statistics and scheduled empty months accessible after the term changes', async ({ page }) => {
+  const state = closedFixture()
+  const oldTerm = state.termRecords!.terms.find(term => term.id === 'term-2569-1')!
+  await seed(page, state)
+  await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
+  await page.getByLabel('ภาคเรียนสำหรับสถิติ', { exact: true }).selectOption(oldTerm.id)
+  await expect(page.locator('.analytics-hero .class-chip')).toContainText(oldTerm.name)
+  const month = page.getByLabel('เดือนเกิดเหตุ', { exact: true })
+  await month.selectOption(oldTerm.startsOn!.slice(0, 7))
+  await expect(month).toHaveValue(oldTerm.startsOn!.slice(0, 7))
+  await expect(page.locator('.analytics-metrics')).toContainText('0 รายการ')
+  await month.selectOption('all')
+  await expect(page.locator('.analytics-metrics')).toContainText('30')
+  await page.reload()
+  await expect(page.getByLabel('ภาคเรียนสำหรับสถิติ', { exact: true })).toHaveValue(oldTerm.id)
 })
 
 test('keeps outstanding pupils who left the new roster and restricts the director to reading', async ({ page }) => {
