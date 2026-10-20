@@ -2,7 +2,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AdminAnalyticsDashboard } from './AdminAnalyticsDashboard'
-import { analyticsMonthKey, buildAdminAnalytics } from './adminAnalytics'
+import { analyticsMonthKey, buildAdminAnalytics, historicalAnalyticsState } from './adminAnalytics'
+import type { TermHistory } from './termManagement'
 import { createDemoState } from './demoData'
 import type { DemoState, ScoreTransaction } from './domain'
 
@@ -44,7 +45,7 @@ describe('admin score analytics', () => {
     expect(summary.deductionPoints).toBe(9)
     expect(summary.additionPoints).toBe(3)
     expect(summary.netPoints).toBe(-6)
-    expect(summary.monthRows.map((row) => [row.month, row.deductionPoints, row.additionPoints])).toEqual([
+    expect(summary.monthRows.filter((row) => row.deductionCount || row.additionCount).map((row) => [row.month, row.deductionPoints, row.additionPoints])).toEqual([
       ['2026-07', 5, 3],
       ['2026-08', 4, 0],
     ])
@@ -67,6 +68,43 @@ describe('admin score analytics', () => {
 
   it('uses Bangkok time when assigning an event to a month', () => {
     expect(analyticsMonthKey('2026-06-30T18:30:00Z')).toBe('2026-07')
+  })
+
+  it('keeps scheduled empty months selectable and filters an inclusive Bangkok date range', () => {
+    const state = analyticsState()
+    const empty = buildAdminAnalytics(state, { kind: 'all', gradeLevel: 'all', month: '2026-06' })
+    expect(empty.totalEvents).toBe(0)
+    expect(empty.monthOptions.find((month) => month.value === '2026-06')?.label).toContain('ไม่มีรายการ')
+    const range = buildAdminAnalytics(state, { kind: 'all', gradeLevel: 'all', month: 'all', fromDate: '2026-07-01', toDate: '2026-07-01' })
+    expect(range.transactions.map((row) => row.transaction.id)).toEqual(['add-p1-jul'])
+  })
+
+  it('uses the historical roster and distinct closing/adjusted scores without inventing missing accounts', () => {
+    const state = analyticsState()
+    const history: TermHistory = {
+      term: { id: 'term-old', schoolYear: 2569, semester: 1, name: 'เทอมเดิม', status: 'closed', startsOn: '2026-05-01', endsOn: '2026-10-01' }, threshold: 80,
+      students: [{ studentId: 'left-school', studentCode: '0001', name: 'นักเรียนเทอมเดิม', studentStatus: 'graduated', classroomName: 'ป.3/1', gradeLevel: 'P3', enrolled: true, latestScore: 80, closingScore: 70, threshold: 80,
+        history: [{ id: 'old-deduction', termId: 'term-old', entryType: 'deduction', requestedDelta: -30, appliedDelta: -30, balanceBefore: 100, balanceAfter: 70, reason: 'เหตุการณ์เก่า', createdAt: '2026-10-02T09:00:00Z' },
+          { id: 'old-remedy', termId: 'term-old', entryType: 'remediation_credit', requestedDelta: 10, appliedDelta: 10, balanceBefore: 70, balanceAfter: 80, reason: 'กิจกรรมแก้', activityOccurredAt: '2026-11-03T09:00:00Z', createdAt: '2026-11-04T09:00:00Z' },
+          { id: 'appeal-redecision', termId: 'term-old', entryType: 'appeal_adjustment', requestedDelta: -3, appliedDelta: -3, balanceBefore: 83, balanceAfter: 80, reason: 'เปลี่ยนผลอุทธรณ์', createdAt: '2026-11-05T09:00:00Z' }] },
+        { studentId: 'missing', studentCode: '0002', name: 'ไม่มีบัญชี', studentStatus: 'active', enrolled: true, latestScore: null, closingScore: null, threshold: 80, history: [] }],
+    }
+    state.transactions.push(transaction({ id: 'old-deduction', studentId: 'left-school', termId: 'term-old', kind: 'deduction', appliedDelta: -30, occurredAt: '2026-09-15T09:00:00Z' }))
+    const projected = historicalAnalyticsState(state, history)
+    const summary = buildAdminAnalytics(projected, { kind: 'all', gradeLevel: 'P3', month: 'all' })
+    expect(summary.gradeOptions.map((row) => row.value)).toEqual(['P3', 'ไม่ระบุชั้น'])
+    expect(summary.scopeStudentCount).toBe(1)
+    expect(summary.studentRows[0].student).toMatchObject({ score: 80, closingScore: 70, gradeLevel: 'P3' })
+    expect(summary.transactions.find((row) => row.transaction.id === 'old-deduction')?.month).toBe('2026-09')
+    expect(summary.monthOptions.some((row) => row.value === '2026-11')).toBe(true)
+    expect(summary.remediationPoints).toBe(10)
+    expect(summary.deductionPoints).toBe(33)
+    expect(summary.additionPoints).toBe(10)
+    expect(summary.appealPoints).toBe(-3)
+    expect(summary.missingScoreCount).toBe(1)
+    expect(summary.currentScoreRisk.studentCount).toBe(1)
+    expect(projected.students.find((student) => student.id === 'missing')?.score).toBeNull()
+    expect(state.students[0].score).toBe(95)
   })
 
   it('keeps every active student in a selected grade and sorts numeric student codes', () => {

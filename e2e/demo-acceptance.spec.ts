@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { createDemoState } from '../src/demoData'
 
 const viewports = [
   { name: 'desktop', width: 1440, height: 900 },
@@ -49,6 +50,15 @@ async function signOutOfDemo(page: Page) {
 }
 
 test.describe('demo acceptance smoke checks', () => {
+  test.beforeEach(async ({ page }) => {
+    // Exercise normal scoring in an open term; expired-term date UX has separate coverage.
+    const state = createDemoState()
+    state.term.startsOn = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)
+    state.term.endsOn = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
+    await page.addInitScript((state) => {
+      if (!localStorage.getItem('school-point:demo:v2')) localStorage.setItem('school-point:demo:v2', JSON.stringify(state))
+    }, state)
+  })
   test('renders the login screen without a blank page, overlay, or browser errors at target viewports', async ({ page }) => {
     const errors = collectBrowserErrors(page)
 

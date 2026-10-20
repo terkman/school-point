@@ -7,6 +7,13 @@ const safeLedger = { id: 99, termId: 1, entryType: 'remediation_credit', request
 const rawStudent = { id: 7, studentId: 7, studentCode: '69007', title: 'ด.ช.', givenName: 'ตัวอย่าง', familyName: 'ทดสอบ', nickname: null, status: 'active' }
 
 describe('Supabase semester contract', () => {
+  it('edits prepared term dates through the existing RPC and preserves success on refresh failure', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { ok: true, updated: true, term_id: 2 }, error: null })
+    const actions = createSupabaseTermActions({ rpc } as unknown as SupabaseClient, vi.fn().mockRejectedValue(new Error('offline')))
+    const result = await actions.updateTermSchedule({ termId: '2', startsOn: '2026-11-02', endsOn: '2027-03-31' })
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('admin_update_term_schedule', { p_term_id: '2', p_starts_on: '2026-11-02', p_ends_on: '2027-03-31' })
+    expect(result).toMatchObject({ updated: true, syncWarning: { code: 'refresh_failed' } })
+  })
   it('keeps closing and adjusted balances distinct and normalizes student-safe history', () => {
     const value = normalizeTermHistory({ term, threshold: 80, closedAt: '2026-10-02T00:00:00Z', students: [{ ...rawStudent,
       classroom: { name: 'ป.1/1', gradeLevel: 'P1', roomNumber: '1' }, enrolled: true,
@@ -54,7 +61,7 @@ describe('Supabase semester contract', () => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'Permission denied' } })
     const refresh = vi.fn()
     const actions = createSupabaseTermActions({ rpc } as unknown as SupabaseClient, refresh)
-    await expect(actions.requestTermRemediation({ caseId: '8', points: 10, reason: 'กิจกรรมแก้คะแนน', activityOccurredAt: '2026-11-01T03:00:00Z', clientRequestId: '0b1930f3-b323-46ed-8040-7ba01176c98c' })).rejects.toThrow('Permission denied')
+    await expect(actions.requestTermRemediation({ caseId: '8', points: 10, reason: 'กิจกรรมแก้คะแนน', activityOccurredAt: '2026-11-01T03:00:00Z', clientRequestId: '0b1930f3-b323-46ed-8040-7ba01176c98c' })).rejects.toThrow('ไม่มีสิทธิ์')
     expect(refresh).not.toHaveBeenCalled()
   })
 

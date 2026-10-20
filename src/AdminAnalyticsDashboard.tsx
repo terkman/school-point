@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   buildAdminAnalytics,
+  historicalAnalyticsState,
+  type AnalyticsState,
   CURRENT_SCORE_RISK_BANDS,
   type AnalyticsFilters,
   type AnalyticsKindFilter,
@@ -9,6 +11,8 @@ import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browse
 import { formatThaiDate, studentDisplayName, type DemoState } from './domain'
 import { EmptyState, Icon } from './ui'
 import { StudentAvatar } from './ProfileAvatar'
+import type { AcademicTermSummary, TermHistory, TermManagementActions } from './termManagement'
+import { termStatusLabel } from './termManagement'
 
 const DEFAULT_FILTERS: AnalyticsFilters = {
   kind: 'all',
@@ -25,6 +29,8 @@ function filtersFromLocation(): AnalyticsFilters {
     kind: kind === 'deduction' || kind === 'addition' ? kind : 'all',
     gradeLevel: search.get('grade') || 'all',
     month: search.get('month') || 'all',
+    fromDate: search.get('from') || '',
+    toDate: search.get('to') || '',
   }
 }
 
@@ -37,9 +43,13 @@ function riskBandFromLocation(): string | null {
 function replaceFilterLocation(filters: AnalyticsFilters, riskBandId: string | null) {
   if (typeof window === 'undefined') return
   const search = new URLSearchParams({ tab: 'overview' })
+  const term = new URLSearchParams(currentLogicalBrowserRoute().search).get('term')
+  if (term) search.set('term', term)
   if (filters.kind !== 'all') search.set('kind', filters.kind)
   if (filters.gradeLevel !== 'all') search.set('grade', filters.gradeLevel)
   if (filters.month !== 'all') search.set('month', filters.month)
+  if (filters.fromDate) search.set('from', filters.fromDate)
+  if (filters.toDate) search.set('to', filters.toDate)
   if (riskBandId) search.set('risk', riskBandId)
   replaceLogicalBrowserRoute(`/admin/reports?${search.toString()}`)
 }
@@ -62,7 +72,95 @@ function thresholdDifferenceLabel(value: number): string {
   return `สูงกว่าเกณฑ์ ${value} คะแนน`
 }
 
-export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
+export function AdminAnalyticsDashboard({ state, termActions }: { state: DemoState; termActions?: TermManagementActions | null }) {
+  const [terms, setTerms] = useState<AcademicTermSummary[]>([])
+  const [selectedTermId, setSelectedTermId] = useState(() => new URLSearchParams(currentLogicalBrowserRoute().search).get('term') || state.term.id)
+  const [loaded, setLoaded] = useState<{ history: TermHistory; source: DemoState } | null>(null)
+  const [termError, setTermError] = useState('')
+  const [historyError, setHistoryError] = useState<{ termId: string; message: string } | null>(null)
+  const [notice, setNotice] = useState('')
+  const [retry, setRetry] = useState(0)
+  const cache = useRef(new Map<string, { history: TermHistory; source: DemoState }>())
+  const historical = selectedTermId !== state.term.id
+
+  useEffect(() => {
+    function readTerm() { setSelectedTermId(new URLSearchParams(currentLogicalBrowserRoute().search).get('term') || state.term.id) }
+    window.addEventListener('popstate', readTerm)
+    window.addEventListener('hashchange', readTerm)
+    return () => { window.removeEventListener('popstate', readTerm); window.removeEventListener('hashchange', readTerm) }
+  }, [state.term.id])
+
+  useEffect(() => {
+    if (!termActions) {
+      if (historical) {
+        setNotice('ระบบนี้ยังไม่รองรับสถิติย้อนหลัง แสดงภาคเรียนปัจจุบันแทน')
+        setSelectedTermId(state.term.id)
+        setHistoryError(null)
+        const search = new URLSearchParams(currentLogicalBrowserRoute().search)
+        search.delete('term')
+        replaceLogicalBrowserRoute(`/admin/reports?${search}`)
+      }
+      return
+    }
+    let cancelled = false
+    termActions.listAcademicTerms().then((next) => {
+      if (cancelled) return
+      const available = next.filter((term) => term.status !== 'planned' || term.id === state.term.id)
+      setTerms(available)
+      setTermError('')
+      if (!available.some((term) => term.id === selectedTermId)) {
+        setNotice('ไม่พบภาคเรียนที่เลือก แสดงภาคเรียนปัจจุบันแทน')
+        setSelectedTermId(state.term.id)
+        setHistoryError(null)
+        const search = new URLSearchParams(currentLogicalBrowserRoute().search)
+        search.delete('term')
+        replaceLogicalBrowserRoute(`/admin/reports?${search}`)
+      }
+    }, (error: unknown) => { if (!cancelled) setTermError(error instanceof Error ? error.message : 'โหลดรายชื่อภาคเรียนไม่สำเร็จ') })
+    return () => { cancelled = true }
+  }, [termActions, state.term.id, selectedTermId, historical, retry])
+
+  useEffect(() => {
+    if (!historical || !termActions) return
+    let cancelled = false
+    setHistoryError(null)
+    const cached = cache.current.get(selectedTermId)
+    if (cached?.source === state) { setLoaded(cached); return }
+    termActions.getTermHistory(selectedTermId).then((history) => {
+      if (cancelled) return
+      const value = { history, source: state }
+      cache.current.set(selectedTermId, value)
+      setLoaded(value)
+    }, (error: unknown) => { if (!cancelled) setHistoryError({ termId: selectedTermId, message: error instanceof Error ? error.message : 'โหลดสถิติภาคเรียนนี้ไม่สำเร็จ' }) })
+    return () => { cancelled = true }
+  }, [historical, selectedTermId, termActions, state, retry])
+
+  function selectTerm(value: string) {
+    setSelectedTermId(value)
+    setNotice('')
+    setHistoryError(null)
+    const search = new URLSearchParams({ tab: 'overview' })
+    if (value !== state.term.id) search.set('term', value)
+    replaceLogicalBrowserRoute(`/admin/reports?${search}`)
+  }
+  const termControl = <label>ภาคเรียน<select aria-label="ภาคเรียนสำหรับสถิติ" value={selectedTermId} onChange={(event) => selectTerm(event.target.value)} disabled={!termActions}>
+    {!terms.some((term) => term.id === state.term.id) ? <option value={state.term.id}>{state.term.label} • ปัจจุบัน</option> : null}
+    {terms.map((term) => <option key={term.id} value={term.id}>{term.name} • {termStatusLabel(term.status)}</option>)}
+    {historical && !terms.some((term) => term.id === selectedTermId) ? <option value={selectedTermId}>กำลังค้นหาภาคเรียน…</option> : null}
+  </select></label>
+  const historicalReady = loaded?.history.term.id === selectedTermId && loaded.source === state
+  const selectedHistory = historical && historicalReady ? loaded.history : null
+  const reportState = useMemo(() => selectedHistory ? historicalAnalyticsState(state, selectedHistory) : state, [state, selectedHistory])
+  const error = termError || (historyError?.termId === selectedTermId ? historyError.message : '') || (historical && !termActions ? 'ระบบนี้ยังไม่รองรับสถิติย้อนหลัง กรุณาเลือกภาคเรียนปัจจุบัน' : '')
+  return <>
+    {notice ? <p className="form-help" role="status">{notice}</p> : null}
+    {error ? <section className="panel" role="alert"><p className="form-error">{error}</p><button type="button" className="button secondary" onClick={() => { cache.current.delete(selectedTermId); setRetry((value) => value + 1) }}>ลองโหลดใหม่</button></section> : null}
+    {historical && !historicalReady ? <div className="analytics-dashboard"><h1>สถิติคะแนนเพิ่ม–ตัด</h1><fieldset className="analytics-filters"><legend>เลือกภาคเรียน</legend>{termControl}</fieldset>{!error ? <p role="status">กำลังโหลดสถิติของภาคเรียนที่เลือก…</p> : null}</div>
+      : <AnalyticsReport key={selectedTermId} state={reportState} historical={historical} termControl={termControl} />}
+  </>
+}
+
+function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsState; historical: boolean; termControl: ReactNode }) {
   const [filters, setFilters] = useState<AnalyticsFilters>(filtersFromLocation)
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null)
   const [selectedRiskBandId, setSelectedRiskBandId] = useState<string | null>(riskBandFromLocation)
@@ -76,6 +174,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
   const selectedRiskTone = selectedRiskBand
     ? summary.currentScoreRisk.bands.findIndex((band) => band.id === selectedRiskBand.id) + 1
     : 0
+  const invalidRange = Boolean(filters.fromDate && filters.toDate && filters.fromDate > filters.toDate)
 
   useEffect(() => {
     function readFilters() {
@@ -126,6 +225,11 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
 
       <fieldset className="analytics-filters">
         <legend>ตัวกรองสถิติ</legend>
+        {termControl}
+        <label>เดือนเกิดเหตุ<select aria-label="เดือนเกิดเหตุ" value={summary.monthOptions.some((option) => option.value === filters.month) ? filters.month : 'all'} onChange={(event) => updateFilter('month', event.target.value)}>
+          <option value="all">ทุกเดือนของภาคเรียน</option>
+          {summary.monthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select></label>
         <label>
           ประเภทคะแนน
           <select
@@ -149,23 +253,20 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
             {summary.gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
-        <label>
-          เดือนเกิดเหตุ
-          <select
-            aria-label="เดือนเกิดเหตุ"
-            value={summary.monthOptions.some((option) => option.value === filters.month) ? filters.month : 'all'}
-            onChange={(event) => updateFilter('month', event.target.value)}
-          >
-            <option value="all">ทุกเดือน</option>
-            {summary.monthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <label>ตั้งแต่วันที่<input type="date" aria-label="สถิติตั้งแต่วันที่" value={filters.fromDate || ''} max={filters.toDate || undefined} onChange={(event) => updateFilter('fromDate', event.target.value)} /></label>
+        <label>ถึงวันที่<input type="date" aria-label="สถิติถึงวันที่" value={filters.toDate || ''} min={filters.fromDate || undefined} onChange={(event) => updateFilter('toDate', event.target.value)} /></label>
         <button className="button secondary analytics-reset" type="button" onClick={resetFilters}>ล้างตัวกรอง</button>
       </fieldset>
+      {invalidRange ? <p className="form-error" role="alert">วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่มต้น กรุณาแก้ช่วงวันที่</p> : null}
 
       <p className="analytics-caveat">
         <Icon name="history" size={17} /> สรุปตามวันเกิดเหตุจริง ไม่ใช่วันที่นำเข้าหรือวันที่บันทึกข้อมูล
       </p>
+      <p className="form-help">เลือกเดือนได้ครบตามวันเปิด–ปิดภาคเรียน รวมเดือนที่ไม่มีรายการ และเดือนหลังปิดภาคที่มีกิจกรรมแก้คะแนน ช่วงวันที่ใช้ร่วมกับตัวกรองเดือนตามเวลาไทย</p>
+      {state.dateFallbackCount ? <p className="form-help" role="status">มี {state.dateFallbackCount} รายการที่ไม่พบวันเกิดเหตุเดิม จึงใช้วันที่บันทึกแทน</p> : null}
+      {historical ? <p className="form-help">ใช้รายชื่อและชั้นเรียนของภาคเรียนที่เลือก คะแนนปิดภาคเก็บไว้เป็นหลักฐาน ส่วนคะแนนล่าสุดรวมผลแก้ไขและอุทธรณ์แล้ว</p> : null}
+      {summary.missingScoreCount ? <p className="form-help">นักเรียน {summary.missingScoreCount} คนไม่มีบัญชีคะแนน จึงไม่รวมในการกระจายคะแนน และแสดงคะแนนเป็น —</p> : null}
+      <p className="form-help">สถิติรวมผลอุทธรณ์สุทธิ {signedPoints(summary.appealPoints)} คะแนน และกิจกรรมแก้คะแนนภาคเรียนเดิม {summary.remediationPoints} คะแนน ไม่รวมการเปิดบัญชีหรือปรับยอดโดยผู้ดูแล</p>
 
       <section className="analytics-metrics" aria-label="ตัวเลขสรุปคะแนน">
         <article>
@@ -189,7 +290,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
       <section className="analytics-panel analytics-risk-panel" aria-labelledby="current-risk-title">
         <div className="analytics-risk-heading">
           <div>
-            <p className="eyebrow">คะแนนปัจจุบันทุกระดับชั้น</p>
+            <p className="eyebrow">{historical ? 'คะแนนล่าสุดหลังแก้ของภาคเรียนที่เลือก' : 'คะแนนปัจจุบันทุกระดับชั้น'}</p>
             <h2 id="current-risk-title">
               {summary.currentScoreRisk.belowThresholdCount
                 ? `${summary.currentScoreRisk.belowThresholdCount} คนต่ำกว่าเกณฑ์ 80 คะแนน`
@@ -197,7 +298,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
             </h2>
             <p>เลือกช่วงคะแนนเพื่อดูรายชื่อ เรียงจากคะแนนต่ำที่สุดก่อน</p>
           </div>
-          <div className="analytics-risk-summary" aria-label="สรุปความเสี่ยงจากคะแนนปัจจุบัน">
+          <div className="analytics-risk-summary" aria-label={historical ? 'สรุปความเสี่ยงจากคะแนนล่าสุดของภาคเรียนที่เลือก' : 'สรุปความเสี่ยงจากคะแนนปัจจุบัน'}>
             <span><strong>{summary.currentScoreRisk.studentCount}</strong> นักเรียนทั้งหมด</span>
             <span className="is-danger"><strong>{summary.currentScoreRisk.belowThresholdCount}</strong> ต่ำกว่าเกณฑ์</span>
             <span className="is-watch"><strong>{summary.currentScoreRisk.nearThresholdCount}</strong> ช่วง 80–89</span>
@@ -205,10 +306,10 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
         </div>
 
         <p className="analytics-risk-note">
-          <Icon name="alert" size={17} /> แสดงคะแนนปัจจุบันของนักเรียนทุกระดับชั้นเสมอ ไม่เปลี่ยนตามตัวกรองประเภท ระดับชั้น หรือเดือนด้านบน
+          <Icon name="alert" size={17} /> แสดงคะแนน{historical ? 'ล่าสุดของภาคเรียนที่เลือก' : 'ปัจจุบัน'}ทุกระดับชั้น ไม่เปลี่ยนตามตัวกรองประเภท ระดับชั้น เดือน หรือช่วงวันที่ด้านบน
         </p>
 
-        <div className="analytics-risk-bands" role="group" aria-label="การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน">
+        <div className="analytics-risk-bands" role="group" aria-label={historical ? 'การกระจายคะแนนล่าสุดของภาคเรียนที่เลือกช่วงละ 10 คะแนน' : 'การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน'}>
           {summary.currentScoreRisk.bands.map((band, index) => {
             const selected = band.id === selectedRiskBandId
             return (
@@ -240,7 +341,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                 <div className="analytics-risk-columns" role="row">
                   <span role="columnheader">นักเรียน</span>
                   <span role="columnheader">ชั้น / ห้อง</span>
-                  <span role="columnheader">คะแนนปัจจุบัน</span>
+                  <span role="columnheader">{historical ? 'ปิดภาค / ล่าสุด' : 'คะแนนปัจจุบัน'}</span>
                   <span role="columnheader">เทียบเกณฑ์ 80</span>
                   <span role="columnheader">การตัดคะแนนล่าสุด</span>
                   <span className="sr-only" role="columnheader">เปิดประวัติ</span>
@@ -254,7 +355,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                         <div className="analytics-risk-row" role="row">
                           <div className="student-name-cell" role="cell"><StudentAvatar student={row.student} /><span><strong>{studentDisplayName(row.student)}</strong><small>รหัส {row.student.studentCode}</small></span></div>
                           <span className="analytics-risk-class" data-label="ชั้น / ห้อง" role="cell">{row.student.classroomName || 'ยังไม่ระบุห้อง'}</span>
-                          <strong className="analytics-risk-score" data-label="คะแนนปัจจุบัน" role="cell">{row.student.score}</strong>
+                          <strong className="analytics-risk-score" data-label={historical ? 'ปิดภาค / ล่าสุด' : 'คะแนนปัจจุบัน'} role="cell">{historical ? `${row.student.closingScore ?? '—'} / ` : ''}{row.student.score}</strong>
                           <span className={row.differenceFromThreshold < 0 ? 'analytics-risk-gap is-negative' : 'analytics-risk-gap is-positive'} data-label="เทียบเกณฑ์" role="cell">{thresholdDifferenceLabel(row.differenceFromThreshold)}</span>
                           <div className="analytics-risk-latest" role="cell">
                             {row.latestDeduction
@@ -274,14 +375,14 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                         </div>
                         {expanded ? (
                           <div className="analytics-student-history" id={historyId}>
-                            <div className="analytics-history-heading"><strong>ประวัติคะแนนภาคเรียนปัจจุบัน</strong><small>{row.transactions.length} รายการ</small></div>
+                            <div className="analytics-history-heading"><strong>ประวัติคะแนนภาคเรียนที่เลือก</strong><small>{row.transactions.length} รายการ</small></div>
                             {row.transactions.length ? row.transactions.map((item) => (
                               <div className="analytics-history-row" key={item.transaction.id}>
                                 <time dateTime={item.occurredAt}>{formatThaiDate(item.occurredAt, false)}</time>
                                 <span>{item.transaction.reason}</span>
                                 <strong className={item.transaction.kind === 'deduction' ? 'analytics-negative' : 'analytics-positive'}>{item.transaction.kind === 'deduction' ? '−' : '+'}{item.points}</strong>
                               </div>
-                            )) : <p className="analytics-history-empty">นักเรียนคนนี้ยังไม่มีรายการคะแนนในภาคเรียนปัจจุบัน</p>}
+                            )) : <p className="analytics-history-empty">นักเรียนคนนี้ยังไม่มีรายการคะแนนในภาคเรียนที่เลือก</p>}
                           </div>
                         ) : null}
                       </article>
@@ -319,7 +420,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
               <span role="columnheader">เพิ่ม</span>
               <span role="columnheader">ตัด</span>
               <span role="columnheader">สุทธิ</span>
-              <span role="columnheader">คะแนนปัจจุบัน</span>
+              <span role="columnheader">{historical ? 'ปิดภาค / ล่าสุด' : 'คะแนนปัจจุบัน'}</span>
               <span role="columnheader">รายการล่าสุด</span>
               <span role="columnheader" className="sr-only">เปิดประวัติ</span>
             </div>
@@ -337,7 +438,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                       <span className={`analytics-roster-number is-addition ${row.additionPoints ? 'analytics-positive' : 'is-zero'}`} role="cell" data-label="เพิ่ม">+{row.additionPoints}</span>
                       <span className={`analytics-roster-number is-deduction ${row.deductionPoints ? 'analytics-negative' : 'is-zero'}`} role="cell" data-label="ตัด">{deductedPoints(row.deductionPoints)}</span>
                       <span className={`analytics-roster-number is-net ${row.netPoints < 0 ? 'analytics-negative' : row.netPoints > 0 ? 'analytics-positive' : 'is-zero'}`} role="cell" data-label="สุทธิ">{signedPoints(row.netPoints)}</span>
-                      <span className={`analytics-current-score${row.student.score < 50 ? ' is-low' : ''}`} role="cell" data-label="คะแนนปัจจุบัน">{row.student.score}</span>
+                      <span className={`analytics-current-score${row.student.score !== null && row.student.score < 50 ? ' is-low' : ''}`} role="cell" data-label={historical ? 'ปิดภาค / ล่าสุด' : 'คะแนนปัจจุบัน'}>{historical ? `${row.student.closingScore ?? '—'} / ` : ''}{row.student.score ?? '—'}</span>
                       <div className="analytics-latest" role="cell">
                         {row.latest ? (
                           <><strong>{row.latest.transaction.reason}</strong><small>{formatThaiDate(row.latest.occurredAt, false)} • {row.totalEvents} รายการ</small></>
@@ -474,7 +575,7 @@ export function AdminAnalyticsDashboard({ state }: { state: DemoState }) {
                       <td>{formatThaiDate(row.occurredAt, false)}</td>
                       <td><div className="student-name-cell"><StudentAvatar student={row.student} /><span><strong>{studentDisplayName(row.student)}</strong><small>{row.student.studentCode}</small></span></div></td>
                       <td>{row.student.gradeLevel ? row.student.classroomName : '—'}</td>
-                      <td>{row.transaction.reason}</td>
+                      <td>{row.transaction.reason}{row.transaction.ledgerEntryType === 'remediation_credit' ? <small> • กิจกรรมแก้คะแนนภาคเรียนเดิม</small> : row.transaction.additionSource === 'appeal' ? <small> • ผลอุทธรณ์</small> : null}</td>
                       <td className={row.transaction.kind === 'deduction' ? 'analytics-negative' : 'analytics-positive'}>
                         {row.transaction.kind === 'deduction' ? '−' : '+'}{row.points}
                       </td>

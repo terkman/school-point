@@ -803,7 +803,7 @@ describe('Supabase score mutations', () => {
       evidenceNote: 'ทดสอบหลักฐาน',
       termId: '9',
     }))
-      .rejects.toThrow('permission denied')
+      .rejects.toThrow('ไม่มีสิทธิ์')
     expect(refresh).not.toHaveBeenCalled()
   })
 })

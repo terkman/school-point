@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { createSupabaseTermActions } from './supabaseTermManagement'
+import { schoolServerError } from './serverErrors'
 import type {
   AdminAddPointsBulkResult,
   AdminAddPointsResult,
@@ -858,6 +859,7 @@ async function loadStudentState(
       studentId,
       termId: asId(row.term_id),
       kind: ledgerKind(row.entry_type, row.applied_delta),
+      ledgerEntryType: row.entry_type,
       requestedDelta: row.requested_delta,
       appliedDelta: row.applied_delta,
       scoreBefore: row.balance_before,
@@ -1150,6 +1152,7 @@ async function loadStaffState(
       studentId: asId(row.student_id),
       termId: asId(row.term_id),
       kind: ledgerKind(row.entry_type, row.applied_delta),
+      ledgerEntryType: row.entry_type,
       requestedDelta: row.requested_delta,
       appliedDelta: row.applied_delta,
       scoreBefore: row.balance_before,
@@ -1309,7 +1312,7 @@ export async function loadSupabaseState(client: SupabaseClient, user: User): Pro
 
 async function runRpc<T>(client: SupabaseClient, name: string, parameters: Record<string, unknown>): Promise<T> {
   const { data, error } = await client.rpc(name, parameters)
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(schoolServerError(error))
   return data as T
 }
 

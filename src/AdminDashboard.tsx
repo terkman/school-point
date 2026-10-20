@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { applyScoreDeltaInTerm } from './termScoreAdjustment'
 import {
   applyScoreDelta,
@@ -30,7 +30,7 @@ import {
   type EvidenceAttachment,
 } from './evidence'
 import { validateTermSchedule } from './termSchedule'
-import { localDateTimeToIso, toLocalDateTimeInputValue, validatePositiveRulePoints } from './teacherWorkflows'
+import { localDateTimeToIso, validatePositiveRulePoints } from './teacherWorkflows'
 import {
   DeductionRuleSelect,
   PositiveRuleSelect,
@@ -51,6 +51,9 @@ import { calculateAppealAdjustment, guardianOutcomeClosesNotification, guardianO
 import { AdminRuleCatalog } from './AdminRuleCatalog'
 import { StudentAvatar } from './ProfileAvatar'
 import { TermWorkspace, useTermActions } from './TermWorkspace'
+import { ScoreTermContext } from './ScoreTermContext'
+import { scoreEntryDateBounds, validateScoreEntryDate } from './scoreEntryDates'
+import type { AcademicTermSummary } from './termManagement'
 
 export type { AdminTab } from './adminRoute'
 
@@ -84,9 +87,11 @@ interface TermScheduleFormProps {
   activating: boolean
   onSave: (input: UpdateTermScheduleInput) => Promise<void>
   onActivate: (termId: string) => Promise<void>
+  plannedStartsOn?: string
+  onOpenTerms?: () => void
 }
 
-export function TermScheduleForm({ term, busy, activating, onSave, onActivate }: TermScheduleFormProps) {
+export function TermScheduleForm({ term, busy, activating, onSave, onActivate, plannedStartsOn, onOpenTerms }: TermScheduleFormProps) {
   const [startsOn, setStartsOn] = useState(term.startsOn ?? '')
   const [endsOn, setEndsOn] = useState(term.endsOn ?? '')
   const [error, setError] = useState('')
@@ -101,6 +106,10 @@ export function TermScheduleForm({ term, busy, activating, onSave, onActivate }:
     const validationError = validateTermSchedule(startsOn, endsOn)
     if (validationError) {
       setError(validationError)
+      return
+    }
+    if (plannedStartsOn && endsOn >= plannedStartsOn) {
+      setError('วันปิดภาคเรียนปัจจุบันซ้อนกับวันเริ่มภาคเรียนถัดไป กรุณาแก้วันที่ของภาคเรียนถัดไปก่อน')
       return
     }
     if (unchanged) return
@@ -125,12 +134,14 @@ export function TermScheduleForm({ term, busy, activating, onSave, onActivate }:
   return (
     <form className="panel stack-form term-schedule-form" onSubmit={saveSchedule} noValidate>
       <div className="section-heading">
-        <div><p className="eyebrow">ปฏิทินภาคเรียน</p><h2>กำหนดวันเปิด–ปิด</h2></div>
+        <div><p className="eyebrow">{term.label}</p><h2>ตั้งค่าวันเปิด–ปิดภาคเรียนปัจจุบัน</h2></div>
         <span className={`badge ${term.isActive ? 'status-approved' : 'status-pending'}`}>
           {term.isActive ? 'กำลังใช้งาน' : 'เตรียมเปิดใช้'}
         </span>
       </div>
-      <p id="term-schedule-help" className="form-help">ปรับวันที่ได้เองเมื่อปฏิทินโรงเรียนเปลี่ยน การแก้ไขในระบบจริงจะถูกเก็บในประวัติตรวจสอบ</p>
+      <p id="term-schedule-help" className="form-help">ส่วนนี้แก้วันที่ของ {term.label} เท่านั้น การแก้วันที่ไม่ได้สร้างหรือเปิดภาคเรียนถัดไป และไม่เปลี่ยนวันเกิดเหตุในประวัติเดิม หากลดช่วงวัน ควรตรวจรายการที่บันทึกไว้แล้วด้วย</p>
+      {plannedStartsOn ? <p className="form-help">ภาคเรียนถัดไปเตรียมเริ่ม {formatThaiDate(plannedStartsOn, false)} วันปิดภาคเรียนนี้ต้องอยู่ก่อนวันดังกล่าว</p> : null}
+      {onOpenTerms ? <button className="button secondary" type="button" onClick={onOpenTerms}>ไปเตรียมและเปิดภาคเรียนถัดไป</button> : null}
       <div className="date-field-grid">
         <label>วันเปิดภาคเรียน
           <input
@@ -309,7 +320,22 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const adminAdjustments = state.transactions.filter((item) => item.kind === 'adjustment')
   const [tab, setTab] = useAdminRoute(initialTab)
   const termActions = useTermActions(state, account, actions, onChange)
-  const termReloadKey = `${state.term.id}:${state.term.isActive}:${state.transactions.length}`
+  const termReloadKey = `${state.term.id}:${state.term.isActive}:${state.term.startsOn}:${state.term.endsOn}:${state.transactions.length}`
+  const [plannedTerm, setPlannedTerm] = useState<AcademicTermSummary | undefined>()
+  const [plannedLoading, setPlannedLoading] = useState(false)
+  const [plannedError, setPlannedError] = useState('')
+  const [plannedRetry, setPlannedRetry] = useState(0)
+  useEffect(() => {
+    if (tab !== 'manage' || !termActions) return
+    let cancelled = false
+    setPlannedLoading(true)
+    termActions.listAcademicTerms().then((terms) => {
+      if (cancelled) return
+      setPlannedTerm(terms.find((term) => term.status === 'planned' && term.id !== state.term.id))
+      setPlannedError('')
+    }, () => { if (!cancelled) setPlannedError('โหลดข้อมูลภาคเรียนถัดไปไม่สำเร็จ กรุณาเปิดหน้าภาคเรียนเพื่อตรวจวันที่ก่อนแก้ไข') }).finally(() => { if (!cancelled) setPlannedLoading(false) })
+    return () => { cancelled = true }
+  }, [tab, termActions, state, plannedRetry])
   const [adminScoreAction, setAdminScoreAction] = useState<ScoreAction>('deduction')
   const [adminSelection, setAdminSelection] = useState(() => createInitialStudentSelection(state.students, 'selected'))
   const activePositiveRules = useMemo(
@@ -329,7 +355,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const initialPositiveRule = activePositiveRules[0]
   const [adminPositiveRuleId, setAdminPositiveRuleId] = useState(initialPositiveRule?.id ?? '')
   const [points, setPoints] = useState(initialPositiveRule?.defaultPoints ?? 1)
-  const [activityOccurredAt, setActivityOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [activityOccurredAt, setActivityOccurredAt] = useState(() => scoreEntryDateBounds(state.term).initialValue)
   const [reason, setReason] = useState('')
   const [adminEvidenceNote, setAdminEvidenceNote] = useState('')
   const [adminEvidenceFiles, setAdminEvidenceFiles] = useState<File[]>([])
@@ -338,7 +364,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminAdditionResult, setAdminAdditionResult] = useState<AdminAddPointsBulkResult | null>(null)
   const [adminAdditionReview, setAdminAdditionReview] = useState(false)
   const [adminDeductionRuleId, setAdminDeductionRuleId] = useState(activeDeductionRules[0]?.id ?? '')
-  const [adminDeductionOccurredAt, setAdminDeductionOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [adminDeductionOccurredAt, setAdminDeductionOccurredAt] = useState(() => scoreEntryDateBounds(state.term).initialValue)
   const [adminDeductionNote, setAdminDeductionNote] = useState('')
   const [adminDeductionReview, setAdminDeductionReview] = useState(false)
   const [adminConfirmSeriousBulk, setAdminConfirmSeriousBulk] = useState(false)
@@ -346,11 +372,21 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
   const [adminDeductionResult, setAdminDeductionResult] = useState<RecordDeductionsResult | null>(null)
   const [adminAdjustmentDirection, setAdminAdjustmentDirection] = useState<'increase' | 'decrease'>('increase')
   const [adminAdjustmentPoints, setAdminAdjustmentPoints] = useState(1)
-  const [adminAdjustmentOccurredAt, setAdminAdjustmentOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [adminAdjustmentOccurredAt, setAdminAdjustmentOccurredAt] = useState(() => scoreEntryDateBounds(state.term).initialValue)
   const [adminAdjustmentReason, setAdminAdjustmentReason] = useState('')
   const [adminAdjustmentReview, setAdminAdjustmentReview] = useState(false)
   const [adminAdjustmentRequestId, setAdminAdjustmentRequestId] = useState(() => newRequestId())
   const [adminAdjustmentResult, setAdminAdjustmentResult] = useState<AdminAdjustScoreResult | null>(null)
+  const scoreDates = scoreEntryDateBounds(state.term)
+  useEffect(() => {
+    const initialValue = scoreEntryDateBounds(state.term).initialValue
+    setActivityOccurredAt(initialValue)
+    setAdminDeductionOccurredAt(initialValue)
+    setAdminAdjustmentOccurredAt(initialValue)
+    setAdminAdditionReview(false)
+    setAdminDeductionReview(false)
+    setAdminAdjustmentReview(false)
+  }, [state.term.id, state.term.startsOn, state.term.endsOn, state.term.isActive])
   const [adminScoreStage, setAdminScoreStage] = useState<'select' | 'details'>('select')
   const [announcement, setAnnouncement] = useState('')
   const [busyAction, setBusyAction] = useState('')
@@ -697,6 +733,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     event.preventDefault()
     if (mutationBusy) return
     const activityIso = localDateTimeToIso(activityOccurredAt)
+    const dateError = validateScoreEntryDate(activityIso, state.term)
+    if (dateError) { setAnnouncement(dateError); return }
     if (!adminPositiveRule || !adminPointValidation.valid || !activityIso) {
       setAnnouncement(adminPointValidation.message ?? 'กรุณาเลือกเหตุผลในการเพิ่มคะแนนและวันทำกิจกรรม')
       return
@@ -831,6 +869,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     event.preventDefault()
     if (mutationBusy) return
     const eventIso = localDateTimeToIso(adminDeductionOccurredAt)
+    const dateError = validateScoreEntryDate(eventIso, state.term)
+    if (dateError) { setAnnouncement(dateError); return }
     if (!adminDeductionRule || !eventIso) {
       setAnnouncement('กรุณาเลือกเหตุผลในการตัดคะแนนและวันเวลาเกิดเหตุ')
       return
@@ -948,6 +988,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     event.preventDefault()
     if (mutationBusy) return
     const occurredAt = localDateTimeToIso(adminAdjustmentOccurredAt)
+    const dateError = validateScoreEntryDate(occurredAt, state.term)
+    if (dateError) { setAnnouncement(dateError); return }
     const validationError = validateAdminScoreAdjustment({
       delta: adminAdjustmentDelta,
       occurredAt: occurredAt ?? '',
@@ -1220,13 +1262,13 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
   async function resetTermScores() {
     if (mutationBusy || state.term.resetCompletedAt) return
-    const confirmed = window.confirm(`ยืนยันเริ่มคะแนน ${state.term.label} ที่ 100 สำหรับนักเรียน ${state.students.length} คน? เคสติดตามที่ยังไม่เสร็จจะยังคงอยู่`)
+    const confirmed = window.confirm(`ตรวจและสร้างบัญชีคะแนนที่ยังขาดใน ${state.term.label} ที่ 100 คะแนน โดยคงคะแนนและประวัติของบัญชีที่มีอยู่แล้ว ยืนยันดำเนินการหรือไม่?`)
     if (!confirmed) return
     if (actions) {
       setBusyAction('initialize-term')
       try {
         await actions.initializeTermScores(state.term.id)
-        setAnnouncement(`เตรียมคะแนนเริ่มต้น 100 สำหรับ ${state.term.label} เรียบร้อยแล้ว และคงเคสติดตามไว้ต่อเนื่อง`)
+        setAnnouncement(`สร้างบัญชีคะแนนที่ยังขาดสำหรับ ${state.term.label} แล้ว คะแนนและประวัติของบัญชีเดิมคงอยู่`)
       } catch (error) {
         setAnnouncement(error instanceof Error ? error.message : 'ไม่สามารถเตรียมคะแนนภาคเรียนได้')
       } finally {
@@ -1235,26 +1277,12 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       return
     }
     const occurredAt = new Date().toISOString()
-    const resetTransactions = state.students.map((student) => ({
-      id: createId('reset'),
-      studentId: student.id,
-      termId: state.term.id,
-      kind: 'reset' as const,
-      requestedDelta: 100 - student.score,
-      appliedDelta: 100 - student.score,
-      scoreBefore: student.score,
-      scoreAfter: 100,
-      reason: `เปิดคะแนนประจำ${state.term.label}`,
-      occurredAt,
-      actorId: account.id,
-    }))
+    // Demo students already have score accounts. Match the server's idempotent initializer.
     onChange({
       ...state,
       term: { ...state.term, resetCompletedAt: occurredAt },
-      students: state.students.map((student) => ({ ...student, score: 100 })),
-      transactions: [...resetTransactions, ...state.transactions],
     })
-    setAnnouncement(`รีเซ็ตคะแนนเป็น 100 แล้ว และคงเคสติดตาม ${openCases.length} เคสไว้ต่อเนื่อง`)
+    setAnnouncement('ตรวจบัญชีคะแนนแล้ว บัญชีที่มีอยู่คงคะแนนและประวัติเดิมทั้งหมด')
   }
 
   async function updateTermSchedule(input: UpdateTermScheduleInput) {
@@ -1262,7 +1290,11 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     setBusyAction('term-schedule')
     setAnnouncement('')
     try {
-      if (actions) {
+      let refreshWarning = false
+      if (termActions) {
+        const result = await termActions.updateTermSchedule(input)
+        refreshWarning = Boolean(result.syncWarning)
+      } else if (actions) {
         await actions.updateTermSchedule(input)
       } else {
         onChange({
@@ -1270,7 +1302,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           term: { ...state.term, startsOn: input.startsOn, endsOn: input.endsOn },
         })
       }
-      setAnnouncement(`บันทึกวันเปิด–ปิด ${state.term.label} เรียบร้อยแล้ว`)
+      setAnnouncement(`บันทึกวันเปิด–ปิด ${state.term.label} เรียบร้อยแล้ว${refreshWarning ? ' แต่โหลดข้อมูลล่าสุดไม่สำเร็จ กรุณาโหลดหน้าใหม่ก่อนดำเนินการต่อ' : ''}`)
     } finally {
       setBusyAction('')
     }
@@ -1472,11 +1504,11 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         <nav className="system-subnav" aria-label="เมนูจัดการระบบ">
           <button className={tab === 'manage' ? 'active' : ''} aria-current={tab === 'manage' ? 'page' : undefined} onClick={() => navigateAdmin('manage')}>
             <Icon name="settings" size={18} />
-            <span><strong>สิทธิ์และภาคเรียน</strong><small>ครู ห้องเรียน และรอบปี</small></span>
+            <span><strong>สิทธิ์และเทอมปัจจุบัน</strong><small>ครู ห้องเรียน และวันเปิด–ปิดเทอมนี้</small></span>
           </button>
           <button className={tab === 'terms' ? 'active' : ''} aria-current={tab === 'terms' ? 'page' : undefined} onClick={() => navigateAdmin('terms')}>
             <Icon name="calendar" size={18} />
-            <span><strong>ภาคเรียนและการแก้ไขคะแนน</strong><small>ประวัติ ปิดภาค และภาคเรียนเดิม</small></span>
+            <span><strong>ภาคเรียนและงานแก้คะแนน</strong><small>เตรียมเทอมถัดไป ประวัติ และกิจกรรมแก้คะแนน</small></span>
           </button>
           <button className={tab === 'directory' ? 'active' : ''} aria-current={tab === 'directory' ? 'page' : undefined} onClick={() => navigateAdmin('directory')}>
             <Icon name="users" size={18} />
@@ -1506,7 +1538,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'analytics' ? (
         <Suspense fallback={<div className="panel"><p className="form-help">กำลังโหลดสถิติคะแนน…</p></div>}>
-          <AdminAnalyticsDashboard state={state} />
+          <AdminAnalyticsDashboard state={state} termActions={termActions} />
         </Suspense>
       ) : null}
 
@@ -1537,7 +1569,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
 
       {tab === 'directory' ? <SchoolDirectoryPanel actions={actions} studentProfiles={state.students} /> : null}
 
-      {tab === 'terms' ? <TermWorkspace account={account} termActions={termActions} reloadKey={termReloadKey} /> : null}
+      {tab === 'terms' ? <TermWorkspace account={account} termActions={termActions} reloadKey={termReloadKey} onOpenTermSchedule={() => navigateAdmin('manage')} /> : null}
 
       {tab === 'rules' ? <AdminRuleCatalog
         deductionRules={state.rules}
@@ -1613,7 +1645,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             <Icon name="chevronRight" size={17} /> เปลี่ยนนักเรียน
           </button>
           {adminScoreAction === 'addition' ? (
-          <form className="panel stack-form score-details-form" onSubmit={addPointsDirectly}><div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการเพิ่มคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
+          <form className="panel stack-form score-details-form" onSubmit={addPointsDirectly}>
+            <ScoreTermContext term={state.term} onOpenTerms={() => navigateAdmin('terms')} /><div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการเพิ่มคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div>{adminTargets.length === 1 && adminTargets[0] ? <StudentAvatar student={adminTargets[0]} className="large" /> : <span className="student-avatar large">{adminTargets.length}</span>}<div><strong>{adminTargets.length === 1 && adminTargets[0] ? studentDisplayName(adminTargets[0]) : 'กลุ่มนักเรียนที่เลือก'}</strong><small>รายการทั้งหมดใช้เกณฑ์ เหตุผล และหลักฐานชุดเดียวกัน</small></div></div>
               <div><span>จำนวนเป้าหมาย</span><b>{adminTargets.length} คน</b></div>
@@ -1621,7 +1654,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             <PositiveRuleSelect rules={activePositiveRules} value={adminPositiveRuleId} disabled={adminAdditionBusy} onChange={(nextId) => { const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setAdminPositiveRuleId(nextId); setPoints(nextRule?.defaultPoints ?? 1); invalidateAdminRequest() }} />
             {adminPositiveRule ? <PositiveRuleSummary rule={adminPositiveRule} /> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
             <div className="date-field-grid">
-              <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={adminAdditionBusy} max={toLocalDateTimeInputValue()} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdminRequest() }} required /></label>
+              <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={adminAdditionBusy} min={scoreDates.min} max={scoreDates.max} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdminRequest() }} required /></label>
               <label>จำนวนคะแนน<input type="number" disabled={adminAdditionBusy} min="1" max={adminPositiveRule?.maxPoints ?? 100} readOnly={!adminPositiveRule?.discretionary} value={points} onChange={(event) => { setPoints(Number(event.target.value)); invalidateAdminRequest() }} /></label>
             </div>
             {!adminPointValidation.valid && adminPointValidation.message ? <p className="form-error">{adminPointValidation.message}</p> : null}
@@ -1655,6 +1688,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </form>
           ) : adminScoreAction === 'adjustment' ? (
           <form className="panel stack-form score-details-form admin-adjustment-form" onSubmit={adjustScoreDirectly}>
+            <ScoreTermContext term={state.term} onOpenTerms={() => navigateAdmin('terms')} />
             <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>ปรับคะแนนโดยผู้ดูแล</h2></div><span className="badge status-pending">สร้างประวัติใหม่</span></div>
             {adminAdjustmentTarget ? <div className="selected-student-bar batch-target-bar">
               <div><StudentAvatar student={adminAdjustmentTarget} className="large" /><div><strong>{studentDisplayName(adminAdjustmentTarget)}</strong><small>{adminAdjustmentTarget.studentCode} • {adminAdjustmentTarget.classroomName}</small></div></div>
@@ -1669,7 +1703,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
             </fieldset>
             <div className="date-field-grid">
               <label>จำนวนคะแนน<input type="number" min="1" max="100" step="1" value={adminAdjustmentPoints} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentPoints(Number(event.target.value)); invalidateAdminAdjustment() }} required /></label>
-              <label>วันที่และเวลาของรายการ<input type="datetime-local" max={toLocalDateTimeInputValue()} value={adminAdjustmentOccurredAt} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentOccurredAt(event.target.value); invalidateAdminAdjustment() }} required /></label>
+              <label>วันที่และเวลาของรายการ<input type="datetime-local" min={scoreDates.min} max={scoreDates.max} value={adminAdjustmentOccurredAt} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentOccurredAt(event.target.value); invalidateAdminAdjustment() }} required /></label>
             </div>
             <label>เหตุผลการปรับคะแนน <b>จำเป็น</b><textarea minLength={5} maxLength={2000} value={adminAdjustmentReason} disabled={mutationBusy} onChange={(event) => { setAdminAdjustmentReason(event.target.value); invalidateAdminAdjustment() }} placeholder="เช่น แก้ไขยอดจากการบันทึกคลาดเคลื่อน หรือปรับยอดตามเอกสารตรวจสอบ" required /></label>
             <p className="scope-note"><Icon name="shield" size={18} /> ระบบจะเพิ่มรายการใหม่นี้ในประวัติ นักเรียนเห็นเหตุผลและคะแนนที่เปลี่ยน แต่รายการเดิมจะไม่ถูกแก้ไข</p>
@@ -1686,6 +1720,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </form>
           ) : (
           <form className="panel stack-form score-details-form" onSubmit={deductPointsDirectly}>
+            <ScoreTermContext term={state.term} onOpenTerms={() => navigateAdmin('terms')} />
             <div className="section-heading"><div><p className="eyebrow">ขั้นตอนที่ 2 จาก 3</p><h2>รายละเอียดการตัดคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
               <div>{adminTargets.length === 1 && adminTargets[0] ? <StudentAvatar student={adminTargets[0]} className="large" /> : <span className="student-avatar large">{adminTargets.length}</span>}<div><strong>{adminTargets.length === 1 && adminTargets[0] ? studentDisplayName(adminTargets[0]) : 'กลุ่มนักเรียนที่เลือก'}</strong><small>ทุกคนจะใช้เกณฑ์ วันเวลา และรายละเอียดเหตุการณ์เดียวกัน</small></div></div>
@@ -1698,7 +1733,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               onChange={(ruleId) => { setAdminDeductionRuleId(ruleId); invalidateAdminDeduction() }}
             />
             {adminDeductionRule ? <div className="rule-summary"><div><StatusBadge severity={adminDeductionRule.severity} /> <span>{adminDeductionRule.category} • คนละ {adminDeductionRule.points} คะแนน</span></div><strong>{adminDeductionBeforeTotal} <span>→</span> {adminDeductionAfterTotal}</strong></div> : null}
-            <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={mutationBusy} max={toLocalDateTimeInputValue()} value={adminDeductionOccurredAt} onChange={(event) => { setAdminDeductionOccurredAt(event.target.value); invalidateAdminDeduction() }} required /></label>
+            <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={mutationBusy} min={scoreDates.min} max={scoreDates.max} value={adminDeductionOccurredAt} onChange={(event) => { setAdminDeductionOccurredAt(event.target.value); invalidateAdminDeduction() }} required /></label>
             <label>รายละเอียดเหตุการณ์เพิ่มเติม (ไม่บังคับ)<textarea disabled={mutationBusy} value={adminDeductionNote} maxLength={2000} onChange={(event) => { setAdminDeductionNote(event.target.value); invalidateAdminDeduction() }} placeholder="หากมี สามารถระบุข้อเท็จจริง สถานที่ หรือบริบทเพิ่มเติมได้" /></label>
             {adminDeductionRule?.guardianContactRequired ? <div className="warning-note"><Icon name="alert" /><span>เกณฑ์นี้เป็นกรณีร้ายแรง ระบบจะเปิดเคสติดตามและงานติดต่อผู้ปกครองแยกให้นักเรียนทุกคนโดยอัตโนมัติ</span></div> : null}
             {adminDeductionReview ? (
@@ -1729,15 +1764,19 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           </>}
           </> : null}
           {tab === 'manage' ? <>
+          {plannedError ? <div role="alert"><p className="form-error">{plannedError}</p><button className="button secondary" type="button" disabled={plannedLoading} onClick={() => setPlannedRetry((value) => value + 1)}>ลองโหลดภาคเรียนถัดไปใหม่</button></div> : null}
+          {plannedTerm ? <section className="panel"><strong>เตรียม {plannedTerm.name} ไว้แล้ว</strong><p>เริ่มตามปฏิทิน {plannedTerm.startsOn ? formatThaiDate(plannedTerm.startsOn, false) : 'ยังไม่กำหนด'} แต่ยังไม่ได้เปิดใช้งาน</p><button className="button secondary" onClick={() => navigateAdmin('terms')}>ตรวจและแก้ไขภาคเรียนถัดไป</button></section> : null}
           <TermScheduleForm
             key={`${state.term.id}:${state.term.startsOn ?? ''}:${state.term.endsOn ?? ''}:${state.term.isActive}`}
             term={state.term}
-            busy={mutationBusy}
+            busy={mutationBusy || plannedLoading || Boolean(plannedError)}
             activating={busyAction === 'term-activate'}
             onSave={updateTermSchedule}
             onActivate={activateTerm}
+            plannedStartsOn={plannedTerm?.startsOn}
+            onOpenTerms={() => navigateAdmin('terms')}
           />
-          <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>เริ่มคะแนนที่ 100</h2></div></div><p>รายการคะแนนเดิมยังคงอยู่ เคสติดตามที่ไม่เสร็จจะยกไปต่อโดยไม่ยกคะแนนติดลบ</p><div className="reset-preview"><span>นักเรียนที่จะรีเซ็ต <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || mutationBusy} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `รีเซ็ตแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจสอบและรีเซ็ตคะแนน'}</button></section>
+          <section className="panel"><div className="section-heading"><div><p className="eyebrow">ภาคเรียน</p><h2>ตรวจบัญชีคะแนนภาคเรียนปัจจุบัน</h2></div></div><p>สร้างเฉพาะบัญชีคะแนนที่ยังขาดที่ 100 คะแนน โดยคงยอดและประวัติของบัญชีเดิม การเปิดเทอมใหม่ให้ใช้เมนูภาคเรียนและงานแก้คะแนน</p><div className="reset-preview"><span>นักเรียนในภาคเรียน <strong>{state.students.length}</strong></span><span>เคสที่จะคงไว้ <strong>{openCases.length}</strong></span></div><button className="button warning full" disabled={Boolean(state.term.resetCompletedAt) || mutationBusy} onClick={resetTermScores}>{busyAction === 'initialize-term' ? 'กำลังเตรียมคะแนน…' : state.term.resetCompletedAt ? `บัญชีคะแนนพร้อมแล้ว ${formatThaiDate(state.term.resetCompletedAt)}` : 'ตรวจและสร้างบัญชีคะแนนที่ยังขาด'}</button></section>
           {onResetDemo ? <section className="panel danger-zone"><div className="section-heading"><div><p className="eyebrow">สำหรับการทดสอบ</p><h2>คืนค่าข้อมูลสาธิต</h2></div></div><p>ล้างเฉพาะข้อมูลสมมติในเบราว์เซอร์นี้ ไม่มีผลต่อฐานข้อมูลจริง</p><button className="button reject" disabled={mutationBusy} onClick={onResetDemo}>คืนค่าข้อมูลตัวอย่าง</button></section> : null}
           </> : null}
           {rulesDialogTab ? <ScoreRulesDialog initialTab={rulesDialogTab} deductionRules={state.rules} positiveRules={state.positiveRules} onClose={() => setRulesDialogTab(null)} /> : null}

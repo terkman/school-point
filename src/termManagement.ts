@@ -1,5 +1,6 @@
 import { createId, type Account, type DemoState, type RequestStatus, type ScoreTransaction } from './domain'
-import type { MutationResult } from './dataActions'
+import type { MutationResult, UpdateTermScheduleInput } from './dataActions'
+import { validateTermSchedule } from './termSchedule'
 
 /**
  * Term lifecycle and original-term remediation contract.
@@ -255,6 +256,8 @@ export interface ReviewTermRemediationResult {
  * reloads its own term data after every mutation.
  */
 export interface TermManagementActions {
+  /** Existing admin_update_term_schedule, dates only. */
+  updateTermSchedule: (input: UpdateTermScheduleInput) => Promise<MutationResult<{ updated: boolean }>>
   /** list_academic_terms_v1 */
   listAcademicTerms: () => Promise<AcademicTermSummary[]>
   /** get_term_history_v1 */
@@ -387,7 +390,7 @@ export function validateRemediationReview(approve: boolean, note?: string): stri
   return ''
 }
 
-function bangkokDate(value: string): string {
+export function bangkokDate(value: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
@@ -807,6 +810,24 @@ export function demoPrepareNextTerm(
   }
 }
 
+export function demoUpdateTermSchedule(state: DemoState, account: Account, input: UpdateTermScheduleInput): { state: DemoState; result: { updated: boolean } } {
+  requireAdmin(account)
+  const records = ensureTermRecords(state)
+  const target = records.terms.find((term) => term.id === input.termId)
+  if (!target) fail('ไม่พบภาคเรียน')
+  if (target.status === 'closed') fail('ภาคเรียนที่ปิดแล้วแก้วันเปิด–ปิดไม่ได้')
+  const validation = validateTermSchedule(input.startsOn, input.endsOn)
+  if (validation) fail(validation)
+  const current = activeTerm(records)
+  const planned = records.terms.find((term) => term.status === 'planned' && term.id !== input.termId)
+  if (target.status === 'planned' && current?.endsOn && input.startsOn <= current.endsOn) fail('วันเปิดภาคเรียนถัดไปต้องอยู่หลังวันปิดภาคเรียนปัจจุบัน')
+  if (target.status === 'active' && planned?.startsOn && input.endsOn >= planned.startsOn) fail('วันปิดภาคเรียนซ้อนกับภาคเรียนถัดไป')
+  if (target.startsOn === input.startsOn && target.endsOn === input.endsOn) return { state, result: { updated: false } }
+  const next = { ...state, termRecords: { ...records, terms: records.terms.map((term) => term.id === input.termId ? { ...term, startsOn: input.startsOn, endsOn: input.endsOn } : term) } }
+  if (input.termId === state.term.id) next.term = { ...state.term, startsOn: input.startsOn, endsOn: input.endsOn }
+  return { state: next, result: { updated: true } }
+}
+
 export function demoPreviewTermTransition(state: DemoState, account: Account, nextTermId: string): TermTransitionPreview {
   requireAdmin(account)
   const records = ensureTermRecords(state)
@@ -1111,6 +1132,7 @@ export function createDemoTermActions(
     })
   }
   return {
+    updateTermSchedule: (input) => mutate((state) => demoUpdateTermSchedule(state, account, input)),
     listAcademicTerms: () => read((state) => demoListAcademicTerms(state, account)),
     getTermHistory: (termId, studentId) => read((state) => demoGetTermHistory(state, account, termId, studentId)),
     listTermRemediations: () => read((state) => demoListTermRemediations(state, account)),

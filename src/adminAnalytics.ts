@@ -1,5 +1,6 @@
 import type { DemoState, ScoreTransaction, Student } from './domain'
 import { formatGradeLabel } from './studentSelection'
+import type { TermHistory } from './termManagement'
 
 export type AnalyticsKindFilter = 'all' | 'deduction' | 'addition'
 
@@ -7,11 +8,53 @@ export interface AnalyticsFilters {
   kind: AnalyticsKindFilter
   gradeLevel: string
   month: string
+  fromDate?: string
+  toDate?: string
+}
+
+export type AnalyticsStudent = Omit<Student, 'score'> & { score: number | null; closingScore?: number | null }
+export type AnalyticsState = Pick<DemoState, 'term' | 'transactions'> & {
+  students: AnalyticsStudent[]
+  dateFallbackCount?: number
+}
+
+/** Historical grades and scores belong to that term, even after promotion or graduation. */
+export function historicalAnalyticsState(state: DemoState, history: TermHistory): AnalyticsState {
+  const rawById = new Map(state.transactions.map((entry) => [entry.id, entry]))
+  let dateFallbackCount = 0
+  const transactions: ScoreTransaction[] = history.students.flatMap((student) => student.history.map((entry) => {
+    const raw = rawById.get(entry.id)
+    const matchingRaw = raw?.termId === history.term.id && raw.studentId === student.studentId ? raw : undefined
+    if (entry.entryType === 'deduction' && !matchingRaw) dateFallbackCount += 1
+    return {
+      ...matchingRaw,
+      id: entry.id, studentId: student.studentId, termId: history.term.id,
+      kind: entry.entryType === 'semester_opening' ? 'reset'
+        : entry.entryType === 'admin_adjustment' ? 'adjustment'
+          : entry.entryType === 'deduction' || entry.appliedDelta < 0 ? 'deduction' : 'addition',
+      ledgerEntryType: entry.entryType,
+      requestedDelta: entry.requestedDelta, appliedDelta: entry.appliedDelta,
+      scoreBefore: entry.balanceBefore, scoreAfter: entry.balanceAfter,
+      reason: entry.reason, actorId: matchingRaw?.actorId ?? '',
+      occurredAt: matchingRaw?.occurredAt ?? entry.activityOccurredAt ?? entry.createdAt,
+      activityOccurredAt: entry.activityOccurredAt,
+      remediationRequestId: entry.remediationRequestId,
+      additionSource: entry.entryType === 'appeal_reversal' || entry.entryType === 'appeal_adjustment' ? 'appeal' : matchingRaw?.additionSource,
+    }
+  }))
+  return {
+    term: { ...state.term, id: history.term.id, label: history.term.name, startsOn: history.term.startsOn, endsOn: history.term.endsOn, isActive: false },
+    students: history.students.filter((student) => student.enrolled || student.latestScore !== null || student.closingScore !== null).map((student) => ({
+      id: student.studentId, studentCode: student.studentCode, name: student.name, nickname: student.nickname,
+      classroomId: '', classroomName: student.classroomName ?? 'ไม่ระบุห้องเรียน', gradeLevel: student.gradeLevel ?? 'ไม่ระบุชั้น',
+      roomNumber: student.roomNumber, status: 'active', score: student.latestScore, closingScore: student.closingScore,
+    })), transactions, dateFallbackCount,
+  }
 }
 
 export interface AnalyticsTransaction {
   transaction: ScoreTransaction
-  student: Student
+  student: AnalyticsStudent
   occurredAt: string
   month: string
   points: number
@@ -40,7 +83,7 @@ export interface AnalyticsMonthRow {
 }
 
 export interface AnalyticsStudentRow {
-  student: Student
+  student: AnalyticsStudent
   transactions: AnalyticsTransaction[]
   totalEvents: number
   deductionCount: number
@@ -52,7 +95,7 @@ export interface AnalyticsStudentRow {
 }
 
 export interface AnalyticsCurrentScoreRiskStudent {
-  student: Student
+  student: AnalyticsStudent & { score: number }
   differenceFromThreshold: number
   transactions: AnalyticsTransaction[]
   latestDeduction?: AnalyticsTransaction
@@ -91,6 +134,9 @@ export interface AdminAnalyticsSummary {
   additionPoints: number
   netPoints: number
   scopeStudentCount: number
+  remediationPoints: number
+  appealPoints: number
+  missingScoreCount: number
   currentScoreRisk: AnalyticsCurrentScoreRisk
 }
 
@@ -119,6 +165,7 @@ const thaiMonthFormatter = new Intl.DateTimeFormat('th-TH', {
   year: 'numeric',
   month: 'long',
 })
+const thaiDayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: BANGKOK_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
 
 function gradeRank(gradeLevel: string): number {
   const index = GRADE_ORDER.indexOf(gradeLevel)
@@ -172,14 +219,14 @@ function summarizeRows(rows: AnalyticsTransaction[]) {
   }
 }
 
-export function compareStudentCodes(left: Student, right: Student): number {
+export function compareStudentCodes(left: Pick<Student, 'studentCode' | 'name'>, right: Pick<Student, 'studentCode' | 'name'>): number {
   return left.studentCode.localeCompare(right.studentCode, 'th', {
     numeric: true,
     sensitivity: 'base',
   }) || left.name.localeCompare(right.name, 'th')
 }
 
-export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters): AdminAnalyticsSummary {
+export function buildAdminAnalytics(state: AnalyticsState, filters: AnalyticsFilters): AdminAnalyticsSummary {
   const studentById = new Map(state.students.map((student) => [student.id, student]))
   const gradeLevels = [...new Set(state.students
     .filter((student) => student.status === 'active' && student.gradeLevel)
@@ -207,8 +254,21 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
     })
   }
 
-  const monthValues = [...new Set(allTermRows.map((row) => row.month))].sort((left, right) => right.localeCompare(left))
-  const monthOptions = monthValues.map((month) => ({ value: month, label: analyticsMonthLabel(month) }))
+  const months = new Set(allTermRows.map((row) => row.month))
+  const firstMonth = state.term.startsOn?.slice(0, 7)
+  const lastMonth = state.term.endsOn?.slice(0, 7)
+  if (firstMonth && lastMonth && /^\d{4}-\d{2}$/.test(firstMonth) && /^\d{4}-\d{2}$/.test(lastMonth)) {
+    const cursor = new Date(`${firstMonth}-01T00:00:00Z`)
+    for (let count = 0; count < 240 && cursor.toISOString().slice(0, 7) <= lastMonth; count += 1) {
+      months.add(cursor.toISOString().slice(0, 7))
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+    }
+  }
+  const monthValues = [...months].sort((left, right) => right.localeCompare(left))
+  const monthOptions = monthValues.map((month) => {
+    const count = allTermRows.filter((row) => row.month === month).length
+    return { value: month, label: `${analyticsMonthLabel(month)} • ${count ? `${count} รายการ` : 'ไม่มีรายการ'}` }
+  })
   const allRowsByStudentId = new Map<string, AnalyticsTransaction[]>()
   for (const row of allTermRows) {
     const studentRows = allRowsByStudentId.get(row.student.id)
@@ -220,7 +280,7 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
       || right.transaction.id.localeCompare(left.transaction.id))
   }
   const currentScoreStudents = state.students
-    .filter((student) => student.status === 'active')
+    .filter((student): student is AnalyticsStudent & { score: number } => student.status === 'active' && student.score !== null && Number.isFinite(student.score))
     .sort((left, right) => left.score - right.score || compareStudentCodes(left, right))
   const currentScoreRiskStudents = currentScoreStudents.map((student): AnalyticsCurrentScoreRiskStudent => {
     const rows = allRowsByStudentId.get(student.id) ?? []
@@ -263,6 +323,8 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
     .filter((row) => filters.kind === 'all' || row.transaction.kind === filters.kind)
     .filter((row) => safeGrade === 'all' || row.student.gradeLevel === safeGrade)
     .filter((row) => safeMonth === 'all' || row.month === safeMonth)
+    .filter((row) => !filters.fromDate || analyticsDateKey(row.occurredAt) >= filters.fromDate)
+    .filter((row) => !filters.toDate || analyticsDateKey(row.occurredAt) <= filters.toDate)
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()
       || right.transaction.id.localeCompare(left.transaction.id))
 
@@ -317,7 +379,14 @@ export function buildAdminAnalytics(state: DemoState, filters: AnalyticsFilters)
     monthOptions,
     totalEvents: transactions.length,
     scopeStudentCount: scopeStudents.length,
+    remediationPoints: transactions.filter((row) => row.transaction.ledgerEntryType === 'remediation_credit' || row.transaction.remediationRequestId).reduce((sum, row) => sum + row.transaction.appliedDelta, 0),
+    appealPoints: transactions.filter((row) => row.transaction.additionSource === 'appeal').reduce((sum, row) => sum + row.transaction.appliedDelta, 0),
+    missingScoreCount: state.students.filter((student) => student.score === null).length,
     currentScoreRisk,
     ...totals,
   }
+}
+
+function analyticsDateKey(value: string): string {
+  return thaiDayFormatter.format(new Date(value))
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   applyScoreDelta,
   createId,
@@ -17,7 +17,6 @@ import { requiresDeductionApproval } from './adminDomain'
 import { guardianReminderDueAt } from './adminWorkflows'
 import {
   localDateTimeToIso,
-  toLocalDateTimeInputValue,
   validatePositiveRulePoints,
 } from './teacherWorkflows'
 import { EvidenceField, EvidenceSummary } from './EvidenceField'
@@ -42,6 +41,8 @@ import {
 } from './studentSelection'
 import { AppShell, EmptyState, Icon, StatusBadge, type NavItem } from './ui'
 import { TermWorkspace, useTermActions } from './TermWorkspace'
+import { ScoreTermContext } from './ScoreTermContext'
+import { scoreEntryDateBounds, validateScoreEntryDate } from './scoreEntryDates'
 
 type TeacherTab = 'overview' | 'deduct' | 'request' | 'cases' | 'rules' | 'terms'
 
@@ -99,7 +100,7 @@ export function TeacherDashboard({
 
   const [deductionSelection, setDeductionSelection] = useState(() => createInitialStudentSelection(assignedStudents))
   const [ruleId, setRuleId] = useState(activeDeductionRules[0]?.id ?? '')
-  const [occurredAt, setOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [occurredAt, setOccurredAt] = useState(() => scoreEntryDateBounds(state.term).initialValue)
   const [internalNote, setInternalNote] = useState('')
   const [reviewingDeduction, setReviewingDeduction] = useState(false)
   const [confirmSeriousBulk, setConfirmSeriousBulk] = useState(false)
@@ -111,7 +112,14 @@ export function TeacherDashboard({
   const [positiveRuleId, setPositiveRuleId] = useState(activePositiveRules[0]?.id ?? '')
   const initialPositiveRule = activePositiveRules[0]
   const [requestPoints, setRequestPoints] = useState(initialPositiveRule?.defaultPoints ?? 1)
-  const [activityOccurredAt, setActivityOccurredAt] = useState(() => toLocalDateTimeInputValue())
+  const [activityOccurredAt, setActivityOccurredAt] = useState(() => scoreEntryDateBounds(state.term).initialValue)
+  const scoreDates = scoreEntryDateBounds(state.term)
+  useEffect(() => {
+    const initialValue = scoreEntryDateBounds(state.term).initialValue
+    setOccurredAt(initialValue)
+    setActivityOccurredAt(initialValue)
+    setReviewingDeduction(false)
+  }, [state.term.id, state.term.startsOn, state.term.endsOn, state.term.isActive])
   const [requestReason, setRequestReason] = useState('')
   const [evidenceNote, setEvidenceNote] = useState('')
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
@@ -152,7 +160,7 @@ export function TeacherDashboard({
     { id: 'request', label: 'เพิ่มคะแนน', icon: 'plus', count: teacherRequests.filter((item) => item.status === 'pending').length },
     { id: 'cases', label: 'กรณีติดตาม', icon: 'alert', count: assignedCases.filter((item) => item.status !== 'resolved').length },
     { id: 'rules', label: 'เสนอเกณฑ์', icon: 'book', count: teacherRuleProposals.filter((item) => item.status === 'pending').length },
-    { id: 'terms', label: 'ภาคเรียนเดิม', icon: 'calendar' },
+    { id: 'terms', label: 'ภาคเรียน / แก้คะแนน', icon: 'calendar' },
   ]
 
   if (!teacher) return <p>ไม่พบข้อมูลครู</p>
@@ -263,6 +271,8 @@ export function TeacherDashboard({
   async function recordDeductions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const eventIso = localDateTimeToIso(occurredAt)
+    const dateError = validateScoreEntryDate(eventIso, state.term)
+    if (dateError) { reportDeductionError(dateError); return }
     if (!selectedRule || !eventIso) {
       reportDeductionError('กรุณาเลือกเหตุผลในการตัดคะแนนและวันเวลาเกิดเหตุ')
       return
@@ -443,6 +453,8 @@ export function TeacherDashboard({
   async function submitAdditionRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const activityIso = localDateTimeToIso(activityOccurredAt)
+    const dateError = validateScoreEntryDate(activityIso, state.term)
+    if (dateError) { reportAdditionError(dateError); return }
     if (!selectedPositiveRule || !pointValidation.valid || !activityIso) {
       reportAdditionError(pointValidation.message ?? 'กรุณาเลือกเหตุผลในการเพิ่มคะแนนและวันทำกิจกรรม')
       return
@@ -573,6 +585,7 @@ export function TeacherDashboard({
               emptyDetail="บัญชีครูยังไม่ได้รับมอบหมายห้อง กรุณาให้ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน"
             />
             <form className="panel action-form" onSubmit={recordDeductions}>
+              <ScoreTermContext term={state.term} onOpenTerms={() => navigateTeacherTab('terms')} />
               <div className="section-heading"><div><p className="eyebrow">บันทึกตามสิทธิ์ห้องที่รับผิดชอบ</p><h2>ตัดคะแนนพร้อมตรวจสอบรายชื่อ</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('deduction')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
               <div className="selected-student-bar batch-target-bar">
                 <div>{deductionSelection.scope === 'single' && deductionTargets[0] ? <StudentAvatar student={deductionTargets[0]} className="large" /> : <span className="student-avatar large">{deductionTargets.length}</span>}<div><strong>{deductionSelection.scope === 'single' ? deductionTargets[0] ? studentDisplayName(deductionTargets[0]) : 'ยังไม่เลือกนักเรียน' : deductionSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : classrooms.find((item) => item.id === deductionSelection.classroomId)?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>{deductionSelection.scope === 'single' ? `${deductionTargets[0]?.studentCode ?? ''} • ${deductionTargets[0]?.classroomName ?? ''}` : 'ทุกคนจะใช้เกณฑ์และรายละเอียดเดียวกัน'}</small></div></div>
@@ -587,7 +600,7 @@ export function TeacherDashboard({
               {selectedRule ? <div className="rule-summary"><div><StatusBadge severity={selectedRule.severity} /> <span>{selectedRule.category} • คนละ {selectedRule.points} คะแนน</span></div><strong>{deductionTargets.length ? deductionTargets.reduce((sum, student) => sum + student.score, 0) : 0} <span>→</span> {deductionTargets.reduce((sum, student) => sum + applyScoreDelta(student.score, -selectedRule.points).after, 0)}</strong></div> : null}
               {deductionNeedsApproval ? <div className="warning-note"><Icon name="shield" /><span>ตั้งแต่ 10 คะแนนขึ้นไปจะส่งให้แอดมินอนุมัติก่อน คะแนนนักเรียนยังไม่เปลี่ยนจนกว่าจะอนุมัติ</span></div> : null}
               <div className="date-field-grid">
-                <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={deductionBusy} max={toLocalDateTimeInputValue()} value={occurredAt} onChange={(event) => { setOccurredAt(event.target.value); invalidateDeductionRequest() }} required /></label>
+                <label>วันและเวลาเกิดเหตุ<input type="datetime-local" disabled={deductionBusy} min={scoreDates.min} max={scoreDates.max} value={occurredAt} onChange={(event) => { setOccurredAt(event.target.value); invalidateDeductionRequest() }} required /></label>
                 <div className="field-help"><strong>คะแนนรวมก่อน → หลัง</strong><span>ตัวเลขด้านบนคำนวณโดยไม่ให้คะแนนต่ำกว่า 0</span></div>
               </div>
               <label>รายละเอียดเหตุการณ์เพิ่มเติม (ไม่บังคับ)<textarea disabled={deductionBusy} value={internalNote} maxLength={2000} onChange={(event) => { setInternalNote(event.target.value); invalidateDeductionRequest() }} placeholder="หากมี สามารถระบุข้อเท็จจริง สถานที่ หรือบริบทเพิ่มเติมได้" /></label>
@@ -647,6 +660,7 @@ export function TeacherDashboard({
             emptyDetail="บัญชีครูยังไม่ได้รับมอบหมายห้อง กรุณาให้ผู้ดูแลระบบกำหนดห้องที่รับผิดชอบก่อน"
           />
           <form className="panel stack-form" onSubmit={submitAdditionRequest}>
+            <ScoreTermContext term={state.term} onOpenTerms={() => navigateTeacherTab('terms')} />
             <div className="section-heading"><div><p className="eyebrow">ต้องรออนุมัติ</p><h2>สร้างคำขอเพิ่มคะแนน</h2></div><button type="button" className="button ghost rules-reference-button" onClick={() => setRulesDialogTab('addition')}><Icon name="book" size={17} /> ดูระเบียบทั้งหมด</button></div>
             <div className="selected-student-bar batch-target-bar">
                 <div>{additionSelection.scope === 'single' && additionTargets[0] ? <StudentAvatar student={additionTargets[0]} className="large" /> : <span className="student-avatar large">{additionTargets.length}</span>}<div><strong>{additionSelection.scope === 'single' ? additionTargets[0] ? studentDisplayName(additionTargets[0]) : 'ยังไม่เลือกนักเรียน' : additionSelection.scope === 'selected' ? 'กลุ่มนักเรียนที่เลือก' : classrooms.find((item) => item.id === additionSelection.classroomId)?.name ?? 'ยังไม่เลือกห้อง'}</strong><small>ระบบจะสร้างคำขอแยกให้นักเรียนทุกคน เพื่อให้แอดมินตรวจสอบรายคน</small></div></div>
@@ -655,7 +669,7 @@ export function TeacherDashboard({
             <PositiveRuleSelect rules={activePositiveRules} value={positiveRuleId} disabled={additionBusy} onChange={(nextId) => { const nextRule = activePositiveRules.find((rule) => rule.id === nextId); setPositiveRuleId(nextId); setRequestPoints(nextRule?.defaultPoints ?? 1); invalidateAdditionRequest() }} />
             {selectedPositiveRule ? <PositiveRuleSummary rule={selectedPositiveRule} /> : <p className="form-error">ยังไม่มีเกณฑ์การเพิ่มคะแนนที่เปิดใช้งาน</p>}
             <div className="date-field-grid">
-              <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={additionBusy} max={toLocalDateTimeInputValue()} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdditionRequest() }} required /></label>
+              <label>วันและเวลาที่ทำกิจกรรม<input type="datetime-local" disabled={additionBusy} min={scoreDates.min} max={scoreDates.max} value={activityOccurredAt} onChange={(event) => { setActivityOccurredAt(event.target.value); invalidateAdditionRequest() }} required /></label>
               <label>จำนวนคะแนนที่ขอ<input type="number" disabled={additionBusy} min="1" max={selectedPositiveRule?.maxPoints ?? 100} readOnly={!selectedPositiveRule?.discretionary} value={requestPoints} onChange={(event) => { setRequestPoints(Number(event.target.value)); invalidateAdditionRequest() }} /></label>
             </div>
             {!pointValidation.valid && pointValidation.message ? <p className="form-error">{pointValidation.message}</p> : null}
