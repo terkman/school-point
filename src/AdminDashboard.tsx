@@ -743,10 +743,6 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
       setAnnouncement('กรุณาเลือกนักเรียนหรือห้องเรียนที่ต้องการเพิ่มคะแนน')
       return
     }
-    if (adminTargets.every((student) => student.score >= 100)) {
-      setAnnouncement('นักเรียนที่เลือกทุกคนมีคะแนนเต็ม 100 แล้ว จึงไม่มีคะแนนให้เพิ่ม')
-      return
-    }
     if (!adminAdditionReview) {
       setAdminAdditionReview(true)
       setAnnouncement(`ตรวจสอบรายชื่อ ${adminTargets.length} คนและคะแนนก่อนยืนยันบันทึก`)
@@ -1658,7 +1654,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
               <label>จำนวนคะแนน<input type="number" disabled={adminAdditionBusy} min="1" max={adminPositiveRule?.maxPoints ?? 100} readOnly={!adminPositiveRule?.discretionary} value={points} onChange={(event) => { setPoints(Number(event.target.value)); invalidateAdminRequest() }} /></label>
             </div>
             {!adminPointValidation.valid && adminPointValidation.message ? <p className="form-error">{adminPointValidation.message}</p> : null}
-            {adminTargets.length ? <div className="addition-preview"><span>คะแนนรวมหลังบันทึก (รายคนสูงสุด 100)</span><strong>{adminAdditionBeforeTotal} <i>→</i> {adminAdditionAfterTotal}</strong><small>ระบบจะเพิ่มจริงรวม {adminAdditionAppliedTotal} คะแนน</small></div> : null}
+            {adminTargets.length ? <div className="addition-preview"><span>คะแนนรวมหลังบันทึก</span><strong>{adminAdditionBeforeTotal} <i>→</i> {adminAdditionAfterTotal}</strong><small>ระบบจะเพิ่มจริงรวม {adminAdditionAppliedTotal} คะแนน</small></div> : null}
             <label>รายละเอียดเพิ่มเติม (ไม่บังคับ)<textarea disabled={adminAdditionBusy} value={reason} maxLength={2000} onChange={(event) => { setReason(event.target.value); invalidateAdminRequest() }} placeholder="หากมี สามารถอธิบายกิจกรรมหรือพฤติกรรมเพิ่มเติมได้" /></label>
             <EvidenceField
               note={adminEvidenceNote}

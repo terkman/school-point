@@ -266,9 +266,9 @@ export function StudentDashboard({ account, state, onChange, actions, onLogout, 
               className={`score-ring ${currentStudent.score >= 80 ? 'tone-good' : currentStudent.score >= 50 ? 'tone-watch' : 'tone-low'}`}
               style={{ '--score': `${Math.min(100, Math.max(0, currentStudent.score)) * 3.6}deg` } as React.CSSProperties}
               role="img"
-              aria-label={`คะแนนความประพฤติ ${currentStudent.score} จาก 100`}
+              aria-label={`คะแนนความประพฤติ ${currentStudent.score} คะแนน`}
             >
-              <div aria-hidden="true"><strong>{currentStudent.score}</strong><span>/ 100</span></div>
+              <div aria-hidden="true"><strong style={{ fontSize: `${Math.min(2.75, 9 / String(currentStudent.score).length)}rem` }}>{currentStudent.score}</strong><span>คะแนน</span></div>
             </div>
             <div className="score-message">
               <span className="success-icon"><Icon name="shield" size={26} /></span>

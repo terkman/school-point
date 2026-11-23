@@ -104,7 +104,7 @@ export interface AnalyticsCurrentScoreRiskStudent {
 export interface AnalyticsCurrentScoreRiskBand {
   id: string
   minScore: number
-  maxScore: number
+  maxScore: number | null
   scoreLabel: string
   riskLabel: string
   studentCount: number
@@ -154,6 +154,7 @@ export const CURRENT_SCORE_RISK_BANDS = [
   { id: '70-79', minScore: 70, maxScore: 79, scoreLabel: '70–79', riskLabel: 'เสี่ยงเล็กน้อย' },
   { id: '80-89', minScore: 80, maxScore: 89, scoreLabel: '80–89', riskLabel: 'ผ่านเกณฑ์ ควรติดตาม' },
   { id: '90-100', minScore: 90, maxScore: 100, scoreLabel: '90–100', riskLabel: 'ปลอดภัย' },
+  { id: '101-plus', minScore: 101, maxScore: null, scoreLabel: '101 ขึ้นไป', riskLabel: 'ปลอดภัย' },
 ] as const
 const monthPartsFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: BANGKOK_TIME_ZONE,
@@ -300,7 +301,7 @@ export function buildAdminAnalytics(state: AnalyticsState, filters: AnalyticsFil
     )).length,
     bands: CURRENT_SCORE_RISK_BANDS.map((band) => {
       const students = currentScoreRiskStudents.filter((row) => (
-        row.student.score >= band.minScore && row.student.score <= band.maxScore
+        row.student.score >= band.minScore && (band.maxScore === null || row.student.score <= band.maxScore)
       ))
       return {
         ...band,

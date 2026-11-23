@@ -1,4 +1,4 @@
-import { createId, type Account, type DemoState, type RequestStatus, type ScoreTransaction } from './domain'
+import { applyScoreDelta, createId, type Account, type DemoState, type RequestStatus, type ScoreTransaction } from './domain'
 import type { MutationResult, UpdateTermScheduleInput } from './dataActions'
 import { validateTermSchedule } from './termSchedule'
 
@@ -12,11 +12,12 @@ import { validateTermSchedule } from './termSchedule'
  *   case for that ORIGINAL term; approved credits are added to the original
  *   term's balance only and never to the current term;
  * - the case passes automatically when the original-term balance reaches the
- *   threshold (80); credits are capped at 100;
+ *   threshold (80);
  * - teachers (or admins) request credits, admins approve or reject them.
  */
 export const REMEDIATION_THRESHOLD = 80
-export const MAX_TERM_SCORE = 100
+export const MAX_REMEDIATION_REQUEST_POINTS = 100
+const TERM_START_SCORE = 100
 
 export type TermStatus = 'planned' | 'active' | 'closed'
 export type RemediationStatus = 'open' | 'passed'
@@ -289,9 +290,8 @@ export function remediationPointsNeeded(score: number, threshold = REMEDIATION_T
 }
 
 export function applyRemediationCredit(balance: number, points: number): { applied: number; after: number } {
-  const before = Math.max(0, Math.min(MAX_TERM_SCORE, Math.round(balance)))
-  const applied = Math.max(0, Math.min(Math.round(points), MAX_TERM_SCORE - before))
-  return { applied, after: before + applied }
+  const change = applyScoreDelta(balance, Math.max(0, Math.round(points)))
+  return { applied: change.appliedDelta, after: change.after }
 }
 
 export function termStatusLabel(status: TermStatus): string {
@@ -373,7 +373,7 @@ export function validateRemediationRequestInput(
   sourceTerm?: Pick<AcademicTermSummary, 'startsOn'>,
   now = new Date(),
 ): string {
-  if (!Number.isInteger(input.points) || input.points < 1 || input.points > MAX_TERM_SCORE) return 'คะแนนต้องเป็นจำนวนเต็ม 1–100'
+  if (!Number.isInteger(input.points) || input.points < 1 || input.points > MAX_REMEDIATION_REQUEST_POINTS) return 'คะแนนต้องเป็นจำนวนเต็ม 1–100'
   const reason = input.reason.trim()
   if (reason.length < 5 || reason.length > 2000) return 'กรุณาระบุรายละเอียดกิจกรรม 5–2000 ตัวอักษร'
   const occurred = new Date(input.activityOccurredAt).getTime()
@@ -928,16 +928,16 @@ export function demoTransitionTerm(
     openedAt: closedAt,
   }))
   const carried = new Set(preparation.studentIds)
-  const carriedStudents = state.students.filter((student) => carried.has(student.id)).map((student) => ({ ...student, score: MAX_TERM_SCORE }))
+  const carriedStudents = state.students.filter((student) => carried.has(student.id)).map((student) => ({ ...student, score: TERM_START_SCORE }))
   const openings: ScoreTransaction[] = carriedStudents.map((student) => ({
     id: createId('opening'),
     studentId: student.id,
     termId: next.id,
     kind: 'reset',
-    requestedDelta: MAX_TERM_SCORE,
-    appliedDelta: MAX_TERM_SCORE,
+    requestedDelta: TERM_START_SCORE,
+    appliedDelta: TERM_START_SCORE,
     scoreBefore: 0,
-    scoreAfter: MAX_TERM_SCORE,
+    scoreAfter: TERM_START_SCORE,
     reason: 'เปิดคะแนนประจำภาคเรียน',
     occurredAt: closedAt,
     actorId: account.id,

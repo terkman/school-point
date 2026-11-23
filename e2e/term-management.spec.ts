@@ -68,7 +68,7 @@ async function saved(page: Page): Promise<DemoState> {
   return page.evaluate(() => JSON.parse(localStorage.getItem('school-point:demo:v2')!))
 }
 
-test('starts Term 2 at 100 and completes original-term remediation without changing the new 95-point balance', async ({ page }, testInfo) => {
+test('starts Term 2 at 100 and credits the original term above 100 without changing the new balance', async ({ page }, testInfo) => {
   const state = fixture()
   const student = state.students[0]!
   const errors: string[] = []
@@ -95,9 +95,11 @@ test('starts Term 2 at 100 and completes original-term remediation without chang
   expect((await saved(page)).students.find(item => item.id === student.id)!.score).toBe(95)
   await workspace(page, 'teacher')
   const caseCard = page.getByRole('article', { name: `เคสแก้ไขคะแนน ${student.name}`, exact: true })
-  await expect(caseCard).toContainText('70 / 80')
+  await expect(caseCard.locator('.term-score-pair')).toContainText(/ล่าสุด\s*70\s*เกณฑ์ผ่าน\s*80/)
   await caseCard.getByRole('button', { name: 'ขอเพิ่มคะแนนแก้ไข' }).click()
+  await caseCard.getByLabel('คะแนนที่ขอเพิ่ม').fill('50')
   await caseCard.getByLabel('รายละเอียดกิจกรรมแก้ไขพฤติกรรม').fill('ทำกิจกรรมจิตอาสาตามแผนแก้ไขครบแล้ว')
+  await expect(caseCard).toContainText('120 คะแนน (ผ่านเกณฑ์)')
   await caseCard.getByRole('button', { name: 'ส่งคำขอให้ผู้ดูแลอนุมัติ' }).click()
   await expect(caseCard).toContainText('รออนุมัติ')
 
@@ -107,19 +109,25 @@ test('starts Term 2 at 100 and completes original-term remediation without chang
   await adminCase.getByRole('button', { name: 'อนุมัติ', exact: true }).click()
   await page.getByRole('checkbox', { name: /แสดงเคสที่ผ่านเกณฑ์แล้ว/ }).check()
   await expect(adminCase).toContainText('ผ่านเกณฑ์แล้ว')
-  await expect(adminCase).toContainText('80 / 80')
+  await expect(adminCase.locator('.term-score-pair')).toContainText(/ล่าสุด\s*120\s*เกณฑ์ผ่าน\s*80/)
   const after = await saved(page)
   expect(after.students.find(item => item.id === student.id)!.score).toBe(95)
-  expect(after.termRecords!.snapshots.find(item => item.studentId === student.id)).toMatchObject({ closingScore: 70, latestScore: 80 })
+  expect(after.termRecords!.snapshots.find(item => item.studentId === student.id)).toMatchObject({ closingScore: 70, latestScore: 120 })
   expect(after.transactions.filter(item => item.remediationRequestId)).toHaveLength(1)
   await page.getByLabel('เลือกภาคเรียน').selectOption(state.term.id)
   await expect(page.locator('.term-history-panel')).toContainText('คะแนนล่าสุดของภาคนี้')
   await page.screenshot({ path: testInfo.outputPath('term1-remediation-passed-desktop.png'), fullPage: true })
 
+  await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
+  await page.getByLabel('ภาคเรียนสำหรับสถิติ', { exact: true }).selectOption(state.term.id)
+  await page.getByRole('button', { name: /ช่วงคะแนน 101 ขึ้นไป/ }).click()
+  const historicalScores = page.getByRole('table', { name: 'นักเรียนช่วงคะแนน 101 ขึ้นไป' })
+  await expect(historicalScores.getByRole('row').filter({ hasText: student.name })).toContainText('70 / 120')
+
   await changeRole(page, state, 'student')
   await workspace(page, 'student')
   await page.getByLabel('เลือกภาคเรียน').selectOption(state.term.id)
-  await expect(page.locator('.term-history-panel')).toContainText('80')
+  await expect(page.locator('.term-history-panel')).toContainText('120')
   await expect(page.locator('.term-history-panel')).not.toContainText(state.students[1]!.name)
   await expect(page.getByRole('button', { name: 'ขอเพิ่มคะแนนแก้ไข' })).toHaveCount(0)
   await expect(page.locator('vite-error-overlay')).toHaveCount(0)

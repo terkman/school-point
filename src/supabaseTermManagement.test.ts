@@ -17,12 +17,13 @@ describe('Supabase semester contract', () => {
   it('keeps closing and adjusted balances distinct and normalizes student-safe history', () => {
     const value = normalizeTermHistory({ term, threshold: 80, closedAt: '2026-10-02T00:00:00Z', students: [{ ...rawStudent,
       classroom: { name: 'ป.1/1', gradeLevel: 'P1', roomNumber: '1' }, enrolled: true,
-      latestScore: 80, closingScore: 70, threshold: 80, remediation: { caseId: 8, status: 'passed' },
-      history: [{ ...safeLedger, actor_user_id: 'private-actor', actor_snapshot: 'private-name' }],
+      latestScore: 125, closingScore: 105, threshold: 80,
+      history: [{ ...safeLedger, entryType: 'appeal_reversal', requestedDelta: 20, appliedDelta: 20,
+        balanceBefore: 105, balanceAfter: 125, actor_user_id: 'private-actor', actor_snapshot: 'private-name' }],
     }] })
     expect(value.term.id).toBe('1')
-    expect(value.students[0]).toMatchObject({ studentId: '7', name: 'ด.ช.ตัวอย่าง ทดสอบ', closingScore: 70, latestScore: 80, remediation: { caseId: '8', status: 'passed' } })
-    expect(value.students[0]!.history[0]).toMatchObject({ termId: '1', activityOccurredAt: '2026-11-01T03:00:00Z' })
+    expect(value.students[0]).toMatchObject({ studentId: '7', name: 'ด.ช.ตัวอย่าง ทดสอบ', closingScore: 105, latestScore: 125 })
+    expect(value.students[0]!.history[0]).toMatchObject({ termId: '1', activityOccurredAt: '2026-11-01T03:00:00Z', balanceBefore: 105, balanceAfter: 125 })
     expect(JSON.stringify(value)).not.toMatch(/private-actor|private-name|actor_user_id|actor_snapshot/)
   })
 

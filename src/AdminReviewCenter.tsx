@@ -507,10 +507,15 @@ export function AdminReviewCenter({
 
       {selectedAppeal ? (() => {
         const student = studentById.get(selectedAppeal.studentId)
+        const sourceTermId = selectedAppealSource?.termId
+        const isCurrentTerm = sourceTermId === state.term.id
+        const sourceScore = isCurrentTerm ? student?.score : state.termRecords?.snapshots.find((snapshot) => (
+          snapshot.termId === sourceTermId && snapshot.studentId === selectedAppeal.studentId
+        ))?.latestScore
         const priorRestoredPoints = selectedAppeal.reviewVersion ? (selectedAppeal.restoredPoints ?? 0) : 0
         const nextRestoredPoints = restorePoints ? restoredPoints : 0
-        const nextScore = applyScoreDelta(
-          student?.score ?? 0,
+        const nextScore = sourceScore === undefined ? undefined : applyScoreDelta(
+          sourceScore,
           calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints),
         ).after
         return (
@@ -549,7 +554,11 @@ export function AdminReviewCenter({
                   <textarea value={appealExplanation} minLength={5} required disabled={busy} placeholder="อธิบายผลการพิจารณาด้วยภาษาที่นักเรียนเข้าใจได้" onChange={(event) => { setAppealExplanation(event.target.value); setAppealError('') }} />
                 </label>
                 <p className="privacy-note"><Icon name="shield" size={18} /> นักเรียนจะเห็นผู้ตอบว่า “ฝ่ายปกครอง” และจะไม่เห็นชื่อแอดมินผู้พิจารณา</p>
-                <div className="score-result-preview"><span>คะแนนหลังบันทึกผล</span><strong>{student?.score ?? 0} <i>→</i> {nextScore}</strong></div>
+                {nextScore !== undefined ? (
+                  <div className="score-result-preview"><span>{isCurrentTerm ? 'คะแนนหลังบันทึกผล' : 'คะแนนภาคเรียนต้นเรื่องหลังบันทึกผล'}</span><strong>{sourceScore} <i>→</i> {nextScore}</strong></div>
+                ) : sourceTermId && !isCurrentTerm ? (
+                  <p className="form-help">ระบบจะปรับคะแนนในภาคเรียนที่เกิดรายการตัดคะแนน</p>
+                ) : null}
                 {appealError ? <p className="form-error" role="alert">{appealError}</p> : null}
               </div>
               <footer className="phase2-decision-footer single-action">
