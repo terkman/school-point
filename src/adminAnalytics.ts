@@ -116,6 +116,7 @@ export interface AnalyticsCurrentScoreRisk {
   threshold: number
   studentCount: number
   belowThresholdCount: number
+  belowThresholdStudents: AnalyticsCurrentScoreRiskStudent[]
   nearThresholdCount: number
   bands: AnalyticsCurrentScoreRiskBand[]
 }
@@ -292,10 +293,12 @@ export function buildAdminAnalytics(state: AnalyticsState, filters: AnalyticsFil
       latestDeduction: rows.find((row) => row.transaction.kind === 'deduction'),
     }
   })
+  const belowThresholdStudents = currentScoreRiskStudents.filter((row) => row.differenceFromThreshold < 0)
   const currentScoreRisk: AnalyticsCurrentScoreRisk = {
     threshold: CURRENT_SCORE_THRESHOLD,
     studentCount: currentScoreRiskStudents.length,
-    belowThresholdCount: currentScoreRiskStudents.filter((row) => row.student.score < CURRENT_SCORE_THRESHOLD).length,
+    belowThresholdCount: belowThresholdStudents.length,
+    belowThresholdStudents,
     nearThresholdCount: currentScoreRiskStudents.filter((row) => (
       row.student.score >= CURRENT_SCORE_THRESHOLD && row.student.score < CURRENT_SCORE_THRESHOLD + 10
     )).length,

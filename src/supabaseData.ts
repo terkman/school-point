@@ -873,7 +873,7 @@ async function loadStudentState(
     }
   })
   const transactionByIncident = new Map(
-    transactions.filter((row) => row.incidentId).map((row) => [row.incidentId as string, row.id]),
+    transactions.filter((row) => row.incidentId && row.ledgerEntryType === 'deduction').map((row) => [row.incidentId as string, row.id]),
   )
   const appeals: Appeal[] = incidentRows.flatMap((row) => {
     if (row.appeal_id === null || row.appeal_status === null) return []
@@ -1078,12 +1078,13 @@ async function loadStaffState(
   const avatarPaths = profileCards.flatMap((row) => row.avatar_path ? [row.avatar_path] : [])
   const signedAvatarUrlByPath = new Map<string, string>()
   if (avatarPaths.length) {
-    const { data: signedAvatars, error: signedAvatarError } = await client.storage
-      .from(PROFILE_AVATAR_BUCKET)
-      .createSignedUrls(avatarPaths, 3600)
-    if (signedAvatarError) throw new Error(`โหลดรูปโปรไฟล์นักเรียนไม่สำเร็จ: ${signedAvatarError.message}`)
-    for (const signedAvatar of signedAvatars ?? []) {
-      if (signedAvatar.path && signedAvatar.signedUrl) signedAvatarUrlByPath.set(signedAvatar.path, signedAvatar.signedUrl)
+    try {
+      const { data: signedAvatars } = await client.storage.from(PROFILE_AVATAR_BUCKET).createSignedUrls(avatarPaths, 3600)
+      for (const signedAvatar of signedAvatars ?? []) {
+        if (signedAvatar.path && signedAvatar.signedUrl) signedAvatarUrlByPath.set(signedAvatar.path, signedAvatar.signedUrl)
+      }
+    } catch {
+      // The roster can still render its preset or initials when Storage is unavailable.
     }
   }
   const profileCardByStudent = new Map(profileCards.map((row) => [asId(row.student_id), row]))
@@ -1174,7 +1175,7 @@ async function loadStaffState(
     }
   })
   const transactionByIncident = new Map(
-    transactions.filter((row) => row.incidentId).map((row) => [row.incidentId as string, row.id]),
+    transactions.filter((row) => row.incidentId && row.ledgerEntryType === 'deduction').map((row) => [row.incidentId as string, row.id]),
   )
   const positiveRuleById = new Map(positiveRules.map((rule) => [rule.id, rule]))
   const ruleById = new Map(rules.map((rule) => [rule.id, rule]))

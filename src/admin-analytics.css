@@ -196,7 +196,7 @@
   gap: 7px;
 }
 
-.analytics-risk-summary span {
+.analytics-risk-summary > :is(span, button) {
   background: #f3f6fa;
   border: 1px solid #dfe6ee;
   border-radius: 9px;
@@ -222,6 +222,18 @@
 
 .analytics-risk-summary .is-danger strong {
   color: #9f1239;
+}
+
+.analytics-risk-summary button:hover,
+.analytics-risk-summary button[aria-expanded='true'] {
+  background: #ffe4e6;
+  border-color: #be123c;
+}
+
+.analytics-risk-summary button small {
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .analytics-risk-summary .is-watch {
@@ -357,8 +369,16 @@
   align-items: center;
   background: var(--risk-soft);
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   justify-content: space-between;
   padding: 16px 22px;
+}
+
+.analytics-risk-results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .analytics-risk-results-heading h3 {
@@ -1051,7 +1071,7 @@
     width: 100%;
   }
 
-  .analytics-risk-summary span {
+  .analytics-risk-summary > :is(span, button) {
     flex: 1 1 0;
     min-width: 0;
   }

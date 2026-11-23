@@ -7,7 +7,8 @@ import {
   type AnalyticsFilters,
   type AnalyticsKindFilter,
 } from './adminAnalytics'
-import { currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
+import { adminHref } from './adminRoute'
+import { browserHrefForLogicalRoute, currentLogicalBrowserRoute, replaceLogicalBrowserRoute } from './browserRoute'
 import { formatThaiDate, studentDisplayName, type DemoState } from './domain'
 import { EmptyState, Icon } from './ui'
 import { StudentAvatar } from './ProfileAvatar'
@@ -20,6 +21,8 @@ const DEFAULT_FILTERS: AnalyticsFilters = {
   month: 'all',
 }
 const DETAIL_LIMIT = 100
+const BELOW_THRESHOLD_RISK_ID = 'below-threshold'
+const RISK_RESULTS_ID = 'analytics-risk-results'
 
 function filtersFromLocation(): AnalyticsFilters {
   if (typeof window === 'undefined') return DEFAULT_FILTERS
@@ -37,7 +40,7 @@ function filtersFromLocation(): AnalyticsFilters {
 function riskBandFromLocation(): string | null {
   if (typeof window === 'undefined') return null
   const riskBandId = new URLSearchParams(currentLogicalBrowserRoute().search).get('risk')
-  return CURRENT_SCORE_RISK_BANDS.some((band) => band.id === riskBandId) ? riskBandId : null
+  return riskBandId === BELOW_THRESHOLD_RISK_ID || CURRENT_SCORE_RISK_BANDS.some((band) => band.id === riskBandId) ? riskBandId : null
 }
 
 function replaceFilterLocation(filters: AnalyticsFilters, riskBandId: string | null) {
@@ -165,15 +168,22 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null)
   const [selectedRiskBandId, setSelectedRiskBandId] = useState<string | null>(riskBandFromLocation)
   const [expandedRiskStudentId, setExpandedRiskStudentId] = useState<string | null>(null)
+  const belowThresholdButton = useRef<HTMLButtonElement>(null)
   const summary = useMemo(() => buildAdminAnalytics(state, filters), [filters, state])
   const selectedGradeLabel = summary.gradeOptions.find((option) => option.value === filters.gradeLevel)?.label
   const gradeMaximum = Math.max(1, ...summary.gradeRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const monthMaximum = Math.max(1, ...summary.monthRows.flatMap((row) => [row.deductionPoints, row.additionPoints]))
   const visibleTransactions = summary.transactions.slice(0, DETAIL_LIMIT)
-  const selectedRiskBand = summary.currentScoreRisk.bands.find((band) => band.id === selectedRiskBandId)
-  const selectedRiskTone = selectedRiskBand
-    ? summary.currentScoreRisk.bands.findIndex((band) => band.id === selectedRiskBand.id) + 1
-    : 0
+  const { bands, belowThresholdCount, belowThresholdStudents, threshold } = summary.currentScoreRisk
+  const showBelowThreshold = selectedRiskBandId === BELOW_THRESHOLD_RISK_ID
+  const selectedRiskBand = bands.find((band) => band.id === selectedRiskBandId)
+  const selectedRiskStudents = showBelowThreshold ? belowThresholdStudents : selectedRiskBand?.students
+  const selectedRiskTone = selectedRiskBand ? bands.indexOf(selectedRiskBand) + 1 : 2
+  const belowThresholdLabel = `นักเรียนต่ำกว่าเกณฑ์ ${threshold} คะแนน`
+  const riskListTitle = selectedRiskBand ? `ช่วง ${selectedRiskBand.scoreLabel} คะแนน` : belowThresholdLabel
+  const riskListLabel = selectedRiskBand
+    ? `นักเรียนช่วงคะแนน ${selectedRiskBand.maxScore === null ? selectedRiskBand.scoreLabel : `${selectedRiskBand.minScore} ถึง ${selectedRiskBand.maxScore}`}`
+    : belowThresholdLabel
   const invalidRange = Boolean(filters.fromDate && filters.toDate && filters.fromDate > filters.toDate)
 
   useEffect(() => {
@@ -211,6 +221,29 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
     setSelectedRiskBandId(nextRiskBandId)
     replaceFilterLocation(filters, nextRiskBandId)
   }
+
+  const riskBands = (
+    <div className="analytics-risk-bands" role="group" aria-label={historical ? 'การกระจายคะแนนล่าสุดของภาคเรียนที่เลือก' : 'การกระจายคะแนนปัจจุบัน'}>
+      {bands.map((band, index) => {
+        const selected = band.id === selectedRiskBandId
+        return (
+          <button
+            aria-controls={selected ? RISK_RESULTS_ID : undefined}
+            aria-label={`ช่วงคะแนน ${band.maxScore === null ? band.scoreLabel : `${band.minScore} ถึง ${band.maxScore}`} ${band.riskLabel} ${band.studentCount} คน`}
+            aria-pressed={selected}
+            className={`analytics-risk-band risk-tone-${index + 1}`}
+            key={band.id}
+            type="button"
+            onClick={() => selectRiskBand(band.id)}
+          >
+            <span className="analytics-risk-band-label"><strong>{band.scoreLabel}</strong><small>{band.riskLabel}</small></span>
+            <span className="analytics-risk-band-count"><strong>{band.studentCount}</strong><small>คน • {band.percentage}%</small></span>
+            <span className="analytics-risk-band-meter" aria-hidden="true"><i style={{ width: `${band.percentage}%` }} /></span>
+          </button>
+        )
+      })}
+    </div>
+  )
 
   return (
     <div className="analytics-dashboard">
@@ -292,15 +325,25 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
           <div>
             <p className="eyebrow">{historical ? 'คะแนนล่าสุดหลังแก้ของภาคเรียนที่เลือก' : 'คะแนนปัจจุบันทุกระดับชั้น'}</p>
             <h2 id="current-risk-title">
-              {summary.currentScoreRisk.belowThresholdCount
-                ? `${summary.currentScoreRisk.belowThresholdCount} คนต่ำกว่าเกณฑ์ 80 คะแนน`
-                : 'ไม่มีนักเรียนต่ำกว่าเกณฑ์ 80 คะแนน'}
+              {belowThresholdCount
+                ? `${belowThresholdCount} คนต่ำกว่าเกณฑ์ ${threshold} คะแนน`
+                : `ไม่มีนักเรียนต่ำกว่าเกณฑ์ ${threshold} คะแนน`}
             </h2>
             <p>เลือกช่วงคะแนนเพื่อดูรายชื่อ เรียงจากคะแนนต่ำที่สุดก่อน</p>
           </div>
           <div className="analytics-risk-summary" aria-label={historical ? 'สรุปความเสี่ยงจากคะแนนล่าสุดของภาคเรียนที่เลือก' : 'สรุปความเสี่ยงจากคะแนนปัจจุบัน'}>
             <span><strong>{summary.currentScoreRisk.studentCount}</strong> นักเรียนทั้งหมด</span>
-            <span className="is-danger"><strong>{summary.currentScoreRisk.belowThresholdCount}</strong> ต่ำกว่าเกณฑ์</span>
+            <button
+              ref={belowThresholdButton}
+              className="is-danger"
+              type="button"
+              aria-label={`${showBelowThreshold ? 'ซ่อน' : 'ดู'}รายชื่อ${belowThresholdLabel} ${belowThresholdCount} คน`}
+              aria-expanded={showBelowThreshold}
+              aria-controls={showBelowThreshold ? RISK_RESULTS_ID : undefined}
+              onClick={() => selectRiskBand(BELOW_THRESHOLD_RISK_ID)}
+            >
+              <strong>{belowThresholdCount}</strong> ต่ำกว่าเกณฑ์ <small>{showBelowThreshold ? 'ซ่อนรายชื่อ' : 'ดูรายชื่อ'}</small>
+            </button>
             <span className="is-watch"><strong>{summary.currentScoreRisk.nearThresholdCount}</strong> ช่วง 80–89</span>
           </div>
         </div>
@@ -309,45 +352,34 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
           <Icon name="alert" size={17} /> แสดงคะแนน{historical ? 'ล่าสุดของภาคเรียนที่เลือก' : 'ปัจจุบัน'}ทุกระดับชั้น ไม่เปลี่ยนตามตัวกรองประเภท ระดับชั้น เดือน หรือช่วงวันที่ด้านบน
         </p>
 
-        <div className="analytics-risk-bands" role="group" aria-label={historical ? 'การกระจายคะแนนล่าสุดของภาคเรียนที่เลือก' : 'การกระจายคะแนนปัจจุบัน'}>
-          {summary.currentScoreRisk.bands.map((band, index) => {
-            const selected = band.id === selectedRiskBandId
-            return (
-              <button
-                aria-controls={selected ? 'analytics-risk-results' : undefined}
-                aria-label={`ช่วงคะแนน ${band.maxScore === null ? band.scoreLabel : `${band.minScore} ถึง ${band.maxScore}`} ${band.riskLabel} ${band.studentCount} คน`}
-                aria-pressed={selected}
-                className={`analytics-risk-band risk-tone-${index + 1}`}
-                key={band.id}
-                type="button"
-                onClick={() => selectRiskBand(band.id)}
-              >
-                <span className="analytics-risk-band-label"><strong>{band.scoreLabel}</strong><small>{band.riskLabel}</small></span>
-                <span className="analytics-risk-band-count"><strong>{band.studentCount}</strong><small>คน • {band.percentage}%</small></span>
-                <span className="analytics-risk-band-meter" aria-hidden="true"><i style={{ width: `${band.percentage}%` }} /></span>
-              </button>
-            )
-          })}
-        </div>
+        {showBelowThreshold ? null : riskBands}
 
-        {selectedRiskBand ? (
-          <div className={`analytics-risk-results risk-tone-${selectedRiskTone}`} id="analytics-risk-results">
+        {selectedRiskStudents ? (
+          <div className={`analytics-risk-results risk-tone-${selectedRiskTone}`} id={RISK_RESULTS_ID}>
             <div className="analytics-risk-results-heading">
-              <div><p className="eyebrow">รายชื่อนักเรียนทุกระดับชั้น</p><h3>ช่วง {selectedRiskBand.scoreLabel} คะแนน • {selectedRiskBand.studentCount} คน</h3></div>
-              <button className="button ghost compact" type="button" onClick={() => selectRiskBand(selectedRiskBand.id)}>ซ่อนรายชื่อ</button>
+              <div><p className="eyebrow">รายชื่อนักเรียนทุกระดับชั้น</p><h3>{riskListTitle} • {selectedRiskStudents.length} คน</h3></div>
+              <div className="analytics-risk-results-actions">
+                {showBelowThreshold && historical && selectedRiskStudents.length ? (
+                  <a className="button secondary compact" href={browserHrefForLogicalRoute(adminHref('system-academic-years'), import.meta.env.BASE_URL)}>ไปที่งานแก้คะแนน</a>
+                ) : null}
+                <button className="button ghost compact" type="button" onClick={() => {
+                  if (selectedRiskBandId) selectRiskBand(selectedRiskBandId)
+                  if (showBelowThreshold) belowThresholdButton.current?.focus()
+                }}>ซ่อนรายชื่อ</button>
+              </div>
             </div>
-            {selectedRiskBand.students.length ? (
-              <div className="analytics-risk-roster" role="table" aria-label={`นักเรียนช่วงคะแนน ${selectedRiskBand.maxScore === null ? selectedRiskBand.scoreLabel : `${selectedRiskBand.minScore} ถึง ${selectedRiskBand.maxScore}`}`}>
+            {selectedRiskStudents.length ? (
+              <div className="analytics-risk-roster" role="table" aria-label={riskListLabel}>
                 <div className="analytics-risk-columns" role="row">
                   <span role="columnheader">นักเรียน</span>
                   <span role="columnheader">ชั้น / ห้อง</span>
                   <span role="columnheader">{historical ? 'ปิดภาค / ล่าสุด' : 'คะแนนปัจจุบัน'}</span>
-                  <span role="columnheader">เทียบเกณฑ์ 80</span>
+                  <span role="columnheader">เทียบเกณฑ์ {threshold}</span>
                   <span role="columnheader">การตัดคะแนนล่าสุด</span>
                   <span className="sr-only" role="columnheader">เปิดประวัติ</span>
                 </div>
                 <div role="rowgroup">
-                  {selectedRiskBand.students.map((row) => {
+                  {selectedRiskStudents.map((row) => {
                     const expanded = expandedRiskStudentId === row.student.id
                     const historyId = `analytics-risk-history-${row.student.id}`
                     return (
@@ -390,9 +422,12 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
                   })}
                 </div>
               </div>
-            ) : <EmptyState title="ไม่มีนักเรียนในช่วงคะแนนนี้" detail="เลือกช่วงคะแนนอื่นเพื่อดูรายชื่อ" />}
+            ) : showBelowThreshold
+              ? <EmptyState title={`ไม่มี${belowThresholdLabel}ในภาคเรียนที่เลือก`} detail="เลือกภาคเรียนอื่นเพื่อตรวจรายชื่อของภาคเรียนนั้น" />
+              : <EmptyState title="ไม่มีนักเรียนในช่วงคะแนนนี้" detail="เลือกช่วงคะแนนอื่นเพื่อดูรายชื่อ" />}
           </div>
         ) : null}
+        {showBelowThreshold ? riskBands : null}
       </section>
 
       {selectedGradeLabel ? (

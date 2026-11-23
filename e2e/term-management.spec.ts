@@ -28,8 +28,7 @@ function fixture() {
   state.accounts.push({ id: 'term-director', username: 'director.demo', password: 'demo1234', displayName: 'ผู้อำนวยการทดสอบ', role: 'director' })
   return state
 }
-function closedFixture() {
-  const state = fixture()
+function closedFixture(state = fixture()) {
   const admin = state.accounts.find(account => account.role === 'admin')!
   const prepared = demoPrepareNextTerm(state, admin, { schoolYear: 2569, semester: 2, name: 'ภาคเรียนที่ 2/2569', startsOn: dateOffset(0), endsOn: dateOffset(90) })
   return demoTransitionTerm(prepared.state, admin, { currentTermId: state.term.id, nextTermId: prepared.result.termId, clientRequestId: 'daeb48d5-ae50-4cc1-aaf8-b0caf0c10e7f' }).state
@@ -196,6 +195,52 @@ test('keeps closed-term statistics and scheduled empty months accessible after t
   await expect(page.locator('.analytics-metrics')).toContainText('30')
   await page.reload()
   await expect(page.getByLabel('ภาคเรียนสำหรับสถิติ', { exact: true })).toHaveValue(oldTerm.id)
+})
+
+test('shows every score below 80 from one report control for current or closed terms', async ({ page }) => {
+  const source = fixture()
+  const [first, second, passing] = source.students
+  second.score = 62
+  passing.score = 80
+  const state = closedFixture(source)
+  state.students.find(student => student.id === first.id)!.score = 74
+  state.students.find(student => student.id === second.id)!.score = 61
+  state.students.find(student => student.id === passing.id)!.score = 80
+  state.termRecords!.snapshots.find(snapshot => snapshot.studentId === first.id)!.latestScore = 75
+  await page.setViewportSize({ width: 390, height: 844 })
+  await seed(page, state)
+  await page.getByRole('button', { name: 'สถิติ', exact: true }).filter({ visible: true }).click()
+
+  const shortcut = page.getByRole('button', { name: /รายชื่อนักเรียนต่ำกว่าเกณฑ์ 80 คะแนน 2 คน/ })
+  const roster = page.getByRole('table', { name: 'นักเรียนต่ำกว่าเกณฑ์ 80 คะแนน' })
+  const students = roster.getByRole('rowgroup').getByRole('row')
+  await shortcut.focus()
+  await shortcut.press('Enter')
+  await expect(shortcut).toHaveAttribute('aria-expanded', 'true')
+  await expect(page).toHaveURL(/risk=below-threshold/)
+  await expect(students.nth(0)).toContainText(second.name)
+  await expect(students.nth(1)).toContainText(first.name)
+  await expect(students.nth(1)).toContainText('ต่ำกว่าเกณฑ์ 6 คะแนน')
+  await expect(roster.getByText(passing.name, { exact: true })).toHaveCount(0)
+  await expect(students).toHaveCount(2)
+
+  await page.getByLabel('ภาคเรียนสำหรับสถิติ', { exact: true }).selectOption(source.term.id)
+  await expect(shortcut).toHaveAttribute('aria-expanded', 'false')
+  await shortcut.click()
+  const historicalStudent = students.filter({ hasText: first.name })
+  await expect(historicalStudent.getByRole('cell').filter({ hasText: '70 / 75' })).toHaveAttribute('data-label', 'ปิดภาค / ล่าสุด')
+  await expect(historicalStudent).toContainText('ต่ำกว่าเกณฑ์ 5 คะแนน')
+  await expect(page.getByRole('link', { name: 'ไปที่งานแก้คะแนน' })).toHaveAttribute('href', '/admin/system/academic-years')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  await page.reload()
+  await expect(roster).toBeVisible()
+  await page.getByRole('button', { name: 'ซ่อนรายชื่อ', exact: true }).click()
+  await expect(shortcut).toBeFocused()
+  await expect(roster).toHaveCount(0)
+  await shortcut.click()
+  await page.getByRole('link', { name: 'ไปที่งานแก้คะแนน' }).click()
+  await expect(page.getByRole('heading', { name: 'กิจกรรมแก้คะแนนภาคเรียนเดิม' })).toBeVisible()
 })
 
 test('keeps outstanding pupils who left the new roster and restricts the director to reading', async ({ page }) => {

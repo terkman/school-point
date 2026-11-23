@@ -185,8 +185,10 @@ export function AdminReviewCenter({
     const appeal = state.appeals.find((item) => item.id === appealId)
     const source = appeal ? transactionById.get(appeal.transactionId) : undefined
     if (!appeal || !source) return
-    setRestorePoints(source.appliedDelta < 0)
-    setRestoredPoints(Math.max(0, -source.appliedDelta))
+    const maximum = Math.max(0, -source.appliedDelta)
+    const initial = Math.min(maximum, appeal.reviewVersion ? appeal.restoredPoints ?? 0 : maximum)
+    setRestorePoints(initial > 0)
+    setRestoredPoints(initial || Math.min(1, maximum))
     setAppealExplanation('')
     setAppealError('')
     setSelected({ type: 'appeal', id: appealId })
@@ -512,12 +514,13 @@ export function AdminReviewCenter({
         const sourceScore = isCurrentTerm ? student?.score : state.termRecords?.snapshots.find((snapshot) => (
           snapshot.termId === sourceTermId && snapshot.studentId === selectedAppeal.studentId
         ))?.latestScore
-        const priorRestoredPoints = selectedAppeal.reviewVersion ? (selectedAppeal.restoredPoints ?? 0) : 0
         const nextRestoredPoints = restorePoints ? restoredPoints : 0
-        const nextScore = sourceScore === undefined ? undefined : applyScoreDelta(
-          sourceScore,
-          calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints),
-        ).after
+        const requestedDelta = selectedAppealSource
+          ? calculateAppealAdjustment(selectedAppeal, selectedAppealSource, state.transactions, nextRestoredPoints)
+          : undefined
+        const nextScore = sourceScore !== undefined && requestedDelta !== undefined && Math.abs(requestedDelta) <= 100
+          ? applyScoreDelta(sourceScore, requestedDelta).after
+          : undefined
         return (
           <ReviewDialog titleId="appeal-review-title" busy={busy} onClose={() => setSelected(null)} className="phase2-review-detail appeal-detail">
               <header className="phase2-detail-header">
