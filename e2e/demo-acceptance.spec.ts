@@ -142,6 +142,70 @@ test.describe('demo acceptance smoke checks', () => {
     expect(errors).toEqual([])
   })
 
+  test('shows the requested, approved and posted points when an admin adjusts a teacher request', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    const rule = 'เก็บสิ่งของหรือเงินส่งคืนเจ้าของ'
+    await page.goto('/')
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: /งานรอตรวจ/ }).first().click()
+    await page.getByRole('tab', { name: /ขอเพิ่มคะแนน/ }).click()
+    await page.getByRole('button', { name: new RegExp(rule) }).click()
+    const dialog = page.getByRole('dialog', { name: 'ตรวจสอบก่อนอนุมัติ' })
+    await dialog.getByLabel('คะแนนที่จะอนุมัติ').fill('3')
+    await dialog.getByLabel(/เหตุผลประกอบ/).fill('ตรวจสอบหลักฐานแล้วอนุมัติให้สามคะแนน')
+    await dialog.getByRole('button', { name: 'อนุมัติ +3 คะแนน' }).click()
+    await expect(dialog).toHaveCount(0)
+
+    await signOutOfDemo(page)
+    await signInAsDemoRole(page, /คุณครู teacher\.demo/)
+    await page.getByRole('button', { name: 'เพิ่มคะแนน' }).first().click()
+    const request = page.getByRole('article').filter({ hasText: rule })
+    await expect(request).toContainText('ขอ +5 คะแนน')
+    await expect(request).toContainText('อนุมัติ +3 คะแนน')
+    await expect(request).toContainText('บันทึกเข้าบัญชีจริง +3 คะแนน')
+    await expect(request).toContainText('อนุมัติแล้ว')
+    await expectHealthyScreen(page)
+    expect(errors).toEqual([])
+  })
+
+  test('reverses only the points posted by an earlier capped appeal decision', async ({ page }) => {
+    const state = createDemoState()
+    const appeal = state.appeals[0]
+    const source = state.transactions.find((transaction) => transaction.id === appeal.transactionId)!
+    const student = state.students.find((item) => item.id === appeal.studentId)!
+    source.requestedDelta = -20
+    source.appliedDelta = -20
+    source.scoreAfter = source.scoreBefore - 20
+    student.score = 100
+    appeal.status = 'reviewing'
+    appeal.reviewVersion = 1
+    appeal.restoredPoints = 20
+    state.transactions.unshift({
+      id: 'legacy-appeal-credit', studentId: student.id, termId: source.termId, kind: 'addition',
+      requestedDelta: 20, appliedDelta: 5, scoreBefore: 95, scoreAfter: 100,
+      reason: 'คืนคะแนนตามกติกาเดิม', occurredAt: new Date().toISOString(),
+      actorId: 'acc-admin-01', sourceAppealId: appeal.id, additionSource: 'appeal',
+    })
+    await page.goto('/')
+    await page.evaluate((demo) => localStorage.setItem('school-point:demo:v2', JSON.stringify(demo)), state)
+    await page.reload()
+
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: /งานรอตรวจ/ }).first().click()
+    await page.getByRole('tab', { name: /คำอุทธรณ์/ }).click()
+    await page.getByRole('button', { name: new RegExp(appeal.statement) }).click()
+    const dialog = page.getByRole('dialog', { name: 'พิจารณาคืนคะแนน' })
+    await dialog.getByLabel(/ไม่คืนคะแนน/).check()
+    await expect(dialog.locator('.score-result-preview')).toContainText(/100\s*→\s*95/)
+    await dialog.getByLabel(/คำชี้แจงให้นักเรียนเห็น/).fill('ตรวจหลักฐานอีกครั้งแล้วพิจารณาไม่คืนคะแนน')
+    await dialog.getByRole('button', { name: 'ยืนยันไม่คืนคะแนน' }).click()
+    await expect(dialog).toHaveCount(0)
+
+    await signOutOfDemo(page)
+    await signInAsDemoRole(page, /นักเรียน 69001/)
+    await expect(page.getByRole('img', { name: 'คะแนนความประพฤติ 95 คะแนน' })).toBeVisible()
+  })
+
   test('adds and restores scores above 100 across teacher, admin and student views', async ({ page }) => {
     const errors = collectBrowserErrors(page)
     const positiveRule = 'สร้างชื่อเสียงที่ดีด้านต่าง ๆ ให้โรงเรียนจนเป็นที่ยอมรับและศรัทธาจากสังคม'

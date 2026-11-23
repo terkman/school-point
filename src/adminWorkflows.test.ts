@@ -8,6 +8,7 @@ import {
   validateAppealDecision,
   validateAdminScoreAdjustment,
 } from './adminWorkflows'
+import type { Appeal, ScoreTransaction } from './domain'
 
 describe('admin review decisions', () => {
   it('allows unchanged approval without a reason, but requires one for rejection or adjustment', () => {
@@ -22,10 +23,35 @@ describe('admin review decisions', () => {
     expect(validateAppealDecision({ accepted: false, restoredPoints: 0, maximumRestorablePoints: 10, explanation: '' })).toContain('คำชี้แจง')
   })
 
-  it('applies only the difference when an appeal is reviewed again', () => {
-    expect(calculateAppealAdjustment(undefined, 5)).toBe(5)
-    expect(calculateAppealAdjustment(5, 3)).toBe(-2)
-    expect(calculateAppealAdjustment(5, 0)).toBe(-5)
+  it('reconsiders an appeal from net posted points, including a legacy capped credit', () => {
+    const appeal: Appeal = {
+      id: 'appeal-a', studentId: 'student-a', transactionId: 'deduction-a',
+      statement: 'Test appeal', status: 'reviewing', restoredPoints: 20, createdAt: '2026-10-03T04:00:00Z',
+    }
+    const source: ScoreTransaction = {
+      id: 'deduction-a', incidentId: 'incident-a', studentId: 'student-a', termId: 'term-a',
+      kind: 'deduction', requestedDelta: -20, appliedDelta: -20, scoreBefore: 100, scoreAfter: 80,
+      reason: 'Test deduction', occurredAt: '2026-10-02T04:00:00Z', actorId: 'admin-a',
+    }
+    const credit: ScoreTransaction = {
+      ...source, id: 'legacy-credit', kind: 'addition', ledgerEntryType: 'appeal_reversal',
+      requestedDelta: 20, appliedDelta: 5, scoreBefore: 95, scoreAfter: 100,
+    }
+    const withdrawal: ScoreTransaction = {
+      ...source, id: 'demo-withdrawal', incidentId: undefined, sourceAppealId: appeal.id,
+      requestedDelta: -5, appliedDelta: -2, scoreBefore: 2, scoreAfter: 0,
+    }
+    const unrelatedCredits: ScoreTransaction[] = [
+      { ...credit, id: 'different-incident', incidentId: 'incident-b' },
+      { ...credit, id: 'different-student', studentId: 'student-b' },
+      { ...credit, id: 'different-term', termId: 'term-b' },
+      { ...credit, id: 'different-appeal', sourceAppealId: 'appeal-b' },
+    ]
+
+    expect(calculateAppealAdjustment(appeal, source, [source, ...unrelatedCredits], 20)).toBe(20)
+    expect(calculateAppealAdjustment(appeal, source, [source, credit, ...unrelatedCredits], 0)).toBe(-5)
+    expect(calculateAppealAdjustment(appeal, source, [source, credit, ...unrelatedCredits], 20)).toBe(15)
+    expect(calculateAppealAdjustment(appeal, source, [source, credit, withdrawal, ...unrelatedCredits], 0)).toBe(-3)
   })
 })
 

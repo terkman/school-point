@@ -613,7 +613,7 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
           restoredPoints: input.accepted ? input.restoredPoints : 0,
           note: input.explanation,
         })
-        setAnnouncement(input.accepted ? 'อนุมัติคำอุทธรณ์และสร้างรายการคืนคะแนนแล้ว' : 'ปฏิเสธคำอุทธรณ์แล้ว คะแนนเดิมยังคงอยู่')
+        setAnnouncement(input.accepted ? 'บันทึกผลอนุมัติคำอุทธรณ์แล้ว' : 'บันทึกผลไม่คืนคะแนนตามคำอุทธรณ์แล้ว')
       } catch (error) {
         const message = error instanceof Error ? error.message : 'ไม่สามารถพิจารณาคำอุทธรณ์ได้'
         setAnnouncement(message)
@@ -625,8 +625,8 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
     }
     const decidedAt = new Date().toISOString()
     const nextRestoredPoints = input.accepted ? input.restoredPoints : 0
-    const priorRestoredPoints = appeal.restoredPoints ?? 0
-    const requestedDelta = calculateAppealAdjustment(priorRestoredPoints, nextRestoredPoints)
+    const requestedDelta = calculateAppealAdjustment(appeal, source, state.transactions, nextRestoredPoints)
+    if (Math.abs(requestedDelta) > 100) throw new Error('ยอดที่ต้องปรับเกิน 100 คะแนน กรุณาตรวจสอบประวัติการคืนคะแนนก่อนบันทึก')
     const adjustment = applyScoreDeltaInTerm(state, appeal.studentId, source.termId, requestedDelta, decidedAt)
     const change = adjustment.change
     const accepted = nextRestoredPoints > 0
@@ -649,12 +649,10 @@ export function AdminDashboard({ account, state, onChange, actions, onResetDemo,
         additionSource: 'appeal',
       }, ...state.transactions],
     })
-    if (accepted) {
+    if (change.appliedDelta !== 0) {
       setAnnouncement(`บันทึกผลอุทธรณ์แล้ว ปรับคะแนน ${change.appliedDelta >= 0 ? '+' : ''}${change.appliedDelta} คะแนน โดยไม่แก้ประวัติเดิม`)
     } else {
-      setAnnouncement(change.appliedDelta < 0
-        ? `ปฏิเสธคำอุทธรณ์แล้ว ปรับคืนคะแนนเดิม ${Math.abs(change.appliedDelta)} คะแนน โดยไม่แก้ประวัติเดิม`
-        : 'ปฏิเสธคำอุทธรณ์แล้ว ประวัติและคะแนนเดิมยังคงอยู่')
+      setAnnouncement('บันทึกผลอุทธรณ์แล้ว ยอดคะแนนคงเดิม')
     }
   }
 

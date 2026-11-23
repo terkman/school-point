@@ -1,10 +1,27 @@
-import type { DemoState, GuardianContactChannel, GuardianContactOutcome } from './domain'
+import type { Appeal, DemoState, GuardianContactChannel, GuardianContactOutcome, ScoreTransaction } from './domain'
 
 export const MIN_REVIEW_NOTE_LENGTH = 5
 export const GUARDIAN_REMINDER_HOURS = 24
 
-export function calculateAppealAdjustment(previousRestoredPoints: number | undefined, nextRestoredPoints: number): number {
-  return nextRestoredPoints - (previousRestoredPoints ?? 0)
+export function calculateAppealAdjustment(
+  appeal: Appeal,
+  source: ScoreTransaction,
+  transactions: readonly ScoreTransaction[],
+  nextRestoredPoints: number,
+): number {
+  const posted = transactions.reduce((total, transaction) => {
+    if (transaction.studentId !== appeal.studentId || transaction.termId !== source.termId) return total
+    if (transaction.sourceAppealId) {
+      return transaction.sourceAppealId === appeal.id ? total + transaction.appliedDelta : total
+    }
+    // Supabase has one appeal per incident, and posts appeal adjustments under that incident.
+    if (source.incidentId && source.incidentId === transaction.incidentId
+      && (transaction.ledgerEntryType === 'appeal_reversal' || transaction.ledgerEntryType === 'appeal_adjustment')) {
+      return total + transaction.appliedDelta
+    }
+    return total
+  }, 0)
+  return nextRestoredPoints - posted
 }
 
 export function resolveOpenCaseSelection(

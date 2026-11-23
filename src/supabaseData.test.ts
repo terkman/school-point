@@ -1,6 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
-import { createSupabaseActions, fetchAllPages, ledgerAdditionSource, loadMyStudentHistory, selectAccessibleTerm } from './supabaseData'
+import { createSupabaseActions, fetchAllPages, ledgerAdditionSource, loadMyStudentHistory, loadSupabaseState, selectAccessibleTerm } from './supabaseData'
 
 describe('Supabase term selection', () => {
   const plannedTerm = {
@@ -30,6 +30,43 @@ describe('score-history source metadata', () => {
     expect(ledgerAdditionSource('appeal_reversal')).toBe('appeal')
     expect(ledgerAdditionSource('appeal_adjustment')).toBe('appeal')
     expect(ledgerAdditionSource('deduction')).toBeUndefined()
+  })
+})
+
+describe('Supabase staff avatar fallback', () => {
+  it.each(['service error', 'network rejection'])('preserves roster and score when avatar signing has a %s', async (failure) => {
+    const staff = { id: 'teacher-example', email: 'teacher@example.invalid' } as User
+    const student = { id: '12', student_code: 'S12', given_name: 'Student', family_name: 'Example', status: 'active' }
+    const avatarPath = 'student-example/profile.webp'
+    const rows: Record<string, unknown[]> = {
+      profiles: [{ user_id: staff.id, role: 'teacher', display_name: 'Teacher Example', is_active: true, activation_required: false }],
+      academic_terms: [{ id: '7', name: 'ภาคเรียนทดสอบ', status: 'active' }],
+      students: [student],
+      enrollments: [{ student_id: student.id, classroom_id: '3' }],
+      classrooms: [{ id: '3', display_name: 'ป.6/1', grade_level: 'P6', room_number: '1' }],
+      score_accounts: [{ student_id: student.id, balance: 125, opened_at: '2026-11-02T00:00:00Z' }],
+    }
+    const createSignedUrls = failure === 'network rejection'
+      ? vi.fn().mockRejectedValue(new Error('Offline'))
+      : vi.fn().mockResolvedValue({ data: null, error: { message: 'Unavailable' } })
+    const client = {
+      from: vi.fn((name: string) => {
+        const result = rows[name] ?? []
+        return {
+          select() { return this }, eq() { return this }, limit() { return this }, order() { return this },
+          in() { return this }, is() { return this },
+          maybeSingle: async () => ({ data: result[0] ?? null, error: null }),
+          range: async () => ({ data: result, error: null }),
+        }
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: [{ student_id: student.id, avatar_path: avatarPath }], error: null }),
+      storage: { from: vi.fn(() => ({ createSignedUrls })) },
+    } as unknown as SupabaseClient
+
+    const state = await loadSupabaseState(client, staff)
+
+    expect(createSignedUrls).toHaveBeenCalledWith([avatarPath], 3600)
+    expect(state.students).toEqual([expect.objectContaining({ id: student.id, classroomName: 'ป.6/1', score: 125, avatarUrl: undefined })])
   })
 })
 

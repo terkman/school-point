@@ -151,6 +151,18 @@ export function TeacherDashboard({
   const deductionTargets = resolveStudentTargets(assignedStudents, deductionSelection)
   const isSeriousBulk = Boolean(selectedRule && ['serious', 'critical'].includes(selectedRule.severity) && deductionTargets.length > 1)
   const teacherRequests = state.additionRequests.filter((item) => item.teacherId === teacher?.id)
+  const postedAdditionsByRequest = useMemo(() => {
+    const posted = new Map<string, number | null>()
+    for (const transaction of state.transactions) {
+      if (transaction.kind !== 'addition' || !transaction.sourceRequestId
+        || (transaction.additionSource && transaction.additionSource !== 'teacher_request')) continue
+      const key = `${transaction.studentId}:${transaction.sourceRequestId}`
+      // A single approved request posts one ledger row. If a legacy import is ambiguous,
+      // leave the actual amount unreported rather than infer it from the approval.
+      posted.set(key, posted.has(key) ? null : transaction.appliedDelta)
+    }
+    return posted
+  }, [state.transactions])
   const teacherDeductionRequests = state.deductionRequests.filter((item) => item.teacherId === teacher?.id)
   const assignedCases = state.seriousCases.filter((item) => assignedStudents.some((student) => student.id === item.studentId))
   const teacherRuleProposals = state.ruleProposals.filter((item) => item.proposedBy === account.id)
@@ -689,7 +701,33 @@ export function TeacherDashboard({
           </form>
           </div>
           <section className="panel"><div className="section-heading"><div><p className="eyebrow">ประวัติคำขอ</p><h2>สถานะการอนุมัติ</h2></div><span className="counter">{teacherRequests.length}</span></div>
-            {teacherRequests.length ? <div className="record-list">{teacherRequests.map((request) => { const student = state.students.find((item) => item.id === request.studentId); const detail = request.reason.trim() !== request.positiveRuleTitle?.trim() ? request.reason.trim() : ''; return <article className="record-row detailed-record" key={request.id}>{student ? <StudentAvatar student={student} /> : null}<div><strong>{student ? studentDisplayName(student) : 'ไม่พบนักเรียน'} • +{request.requestedPoints}</strong><span>{request.positiveRuleTitle ?? 'ไม่ระบุเหตุผล'}</span>{detail ? <span>รายละเอียด: {detail}</span> : null}<small>หลักฐาน:</small><EvidenceSummary value={request.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} /><small>ทำกิจกรรม {formatThaiDate(request.activityOccurredAt ?? request.createdAt)} • ส่ง {formatThaiDate(request.createdAt)}</small>{request.decisionNote ? <small>หมายเหตุแอดมิน: {request.decisionNote}</small> : null}</div><span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span></article> })}</div> : <EmptyState title="ยังไม่มีคำขอ" detail="คำขอเพิ่มคะแนนที่ส่งแล้วจะแสดงพร้อมรายละเอียดที่นี่" />}
+            {teacherRequests.length ? (
+              <div className="record-list">
+                {teacherRequests.map((request) => {
+                  const student = state.students.find((item) => item.id === request.studentId)
+                  const detail = request.reason.trim() !== request.positiveRuleTitle?.trim() ? request.reason.trim() : ''
+                  const approved = request.status === 'approved' ? request.approvedPoints : undefined
+                  const posted = request.status === 'approved' ? postedAdditionsByRequest.get(`${request.studentId}:${request.id}`) : undefined
+                  return (
+                    <article className="record-row detailed-record" key={request.id}>
+                      {student ? <StudentAvatar student={student} /> : null}
+                      <div>
+                        <strong>{student ? studentDisplayName(student) : 'ไม่พบนักเรียน'} • {approved !== undefined ? `อนุมัติ +${approved} คะแนน` : `ขอ +${request.requestedPoints} คะแนน`}</strong>
+                        {approved !== undefined && approved !== request.requestedPoints ? <small>ขอ +{request.requestedPoints} คะแนน</small> : null}
+                        {posted != null ? <small>บันทึกเข้าบัญชีจริง {posted > 0 ? '+' : ''}{posted} คะแนน</small> : null}
+                        <span>{request.positiveRuleTitle ?? 'ไม่ระบุเหตุผล'}</span>
+                        {detail ? <span>รายละเอียด: {detail}</span> : null}
+                        <small>หลักฐาน:</small>
+                        <EvidenceSummary value={request.evidenceNote} resolveFileUrl={actions?.createEvidenceUrl} />
+                        <small>ทำกิจกรรม {formatThaiDate(request.activityOccurredAt ?? request.createdAt)} • ส่ง {formatThaiDate(request.createdAt)}</small>
+                        {request.decisionNote ? <small>หมายเหตุแอดมิน: {request.decisionNote}</small> : null}
+                      </div>
+                      <span className={`badge status-${request.status}`}>{request.status === 'pending' ? 'รออนุมัติ' : request.status === 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}</span>
+                    </article>
+                  )
+                })}
+              </div>
+            ) : <EmptyState title="ยังไม่มีคำขอ" detail="คำขอเพิ่มคะแนนที่ส่งแล้วจะแสดงพร้อมรายละเอียดที่นี่" />}
           </section>
         </>
       ) : null}
