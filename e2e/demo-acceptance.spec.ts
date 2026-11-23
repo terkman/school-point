@@ -142,9 +142,10 @@ test.describe('demo acceptance smoke checks', () => {
     expect(errors).toEqual([])
   })
 
-  test('carries a teacher deduction and addition request through admin approval to student history and appeal submission', async ({ page }) => {
+  test('adds and restores scores above 100 across teacher, admin and student views', async ({ page }) => {
     const errors = collectBrowserErrors(page)
-    const positiveRule = 'อุทิศตนและเสียสละช่วยงานโรงเรียนหรืองานครูจนเป็นที่ยอมรับ'
+    const positiveRule = 'สร้างชื่อเสียงที่ดีด้านต่าง ๆ ให้โรงเรียนจนเป็นที่ยอมรับและศรัทธาจากสังคม'
+    const appealStatement = 'E2E: ขอให้ตรวจสอบข้อเท็จจริงของรายการตัดคะแนนนี้อีกครั้ง'
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
 
@@ -168,21 +169,41 @@ test.describe('demo acceptance smoke checks', () => {
     await page.getByRole('tab', { name: /ขอเพิ่มคะแนน/ }).click()
     await page.getByRole('button', { name: new RegExp(positiveRule) }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
-    await page.getByRole('button', { name: 'อนุมัติ +10 คะแนน' }).click()
+    await page.getByRole('button', { name: 'อนุมัติ +25 คะแนน' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
+    await page.getByRole('button', { name: /ช่วงคะแนน 101 ขึ้นไป/ }).click()
+    const highScores = page.getByRole('table', { name: 'นักเรียนช่วงคะแนน 101 ขึ้นไป' })
+    await expect(highScores.getByRole('row').filter({ hasText: 'นักเรียนตัวอย่าง 01' })).toContainText('115')
 
     await signOutOfDemo(page)
     await signInAsDemoRole(page, /นักเรียน 69001/)
-    await expect(page.locator('.score-ring strong')).toHaveText('100')
+    await expect(page.getByRole('img', { name: 'คะแนนความประพฤติ 115 คะแนน' })).toContainText('115')
     await page.getByRole('button', { name: 'ประวัติคะแนน' }).first().click()
     await expect(page.getByText(positiveRule)).toBeVisible()
     await page.getByRole('button', { name: 'ยื่นอุทธรณ์' }).first().click()
     await expect(page.getByRole('heading', { name: 'ยื่นคำอุทธรณ์' })).toBeVisible()
-    await page.getByLabel('เหตุผลการอุทธรณ์').fill('E2E: ขอให้ตรวจสอบข้อเท็จจริงของรายการตัดคะแนนนี้อีกครั้ง')
+    await page.getByLabel('เหตุผลการอุทธรณ์').fill(appealStatement)
     await page.getByRole('button', { name: 'ส่งคำอุทธรณ์' }).click()
     await expect(page.getByText('ส่งคำอุทธรณ์เรียบร้อยแล้ว')).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'คำอุทธรณ์ของฉัน' })).toBeVisible()
     await expect(page.getByText('อยู่ระหว่างพิจารณา').first()).toBeVisible()
+
+    await signOutOfDemo(page)
+    await signInAsDemoAdmin(page)
+    await page.getByRole('button', { name: /งานรอตรวจ/ }).first().click()
+    await page.getByRole('tab', { name: /คำอุทธรณ์/ }).click()
+    await page.getByRole('button', { name: new RegExp(appealStatement) }).click()
+    const appeal = page.getByRole('dialog', { name: 'พิจารณาคืนคะแนน' })
+    await expect(appeal.locator('.score-result-preview')).toContainText(/115\s*→\s*117/)
+    await appeal.getByLabel(/คำชี้แจงให้นักเรียนเห็น/).fill('ตรวจสอบแล้วอนุมัติคืนคะแนนตามรายการตัดเดิม')
+    await appeal.getByRole('button', { name: 'ยืนยันคืน 2 คะแนน' }).click()
+    await expect(appeal).toHaveCount(0)
+
+    await signOutOfDemo(page)
+    await signInAsDemoRole(page, /นักเรียน 69001/)
+    await expect(page.getByRole('img', { name: 'คะแนนความประพฤติ 117 คะแนน' })).toContainText('117')
     await expectHealthyScreen(page)
     expect(errors).toEqual([])
   })
@@ -195,8 +216,8 @@ test.describe('demo acceptance smoke checks', () => {
     await page.getByRole('button', { name: 'สถิติ', exact: true }).click()
 
     const riskPanel = page.getByRole('region', { name: /ต่ำกว่าเกณฑ์ 80 คะแนน|ไม่มีนักเรียนต่ำกว่าเกณฑ์/ })
-    const riskBands = riskPanel.getByRole('group', { name: 'การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน' })
-    await expect(riskBands.getByRole('button')).toHaveCount(10)
+    const riskBands = riskPanel.getByRole('group', { name: 'การกระจายคะแนนปัจจุบัน' })
+    await expect(riskBands.getByRole('button')).toHaveCount(11)
     await riskBands.getByRole('button', { name: /ช่วงคะแนน 90 ถึง 100/ }).click()
 
     const riskRoster = riskPanel.getByRole('table', { name: 'นักเรียนช่วงคะแนน 90 ถึง 100' })

@@ -42,4 +42,12 @@ describe('original-term appeal adjustments', () => {
     expect(() => applyScoreDeltaInTerm(state, studentId, 'unknown-old-term', 10, '2026-11-03T03:00:00Z')).toThrow('ไม่พบยอดคะแนน')
     expect(state.students[0]!.score).toBe(95)
   })
+
+  it('retains an above-100 closing score and applies a late appeal only to the original balance', () => {
+    const { state, sourceTermId, studentId } = transitioned(110)
+    const updated = applyScoreDeltaInTerm(state, studentId, sourceTermId, 15, '2026-11-03T03:00:00Z')
+    expect(updated.change).toMatchObject({ before: 110, after: 125, appliedDelta: 15 })
+    expect(updated.state.students[0]!.score).toBe(95)
+    expect(updated.state.termRecords!.snapshots.find(item => item.studentId === studentId)).toMatchObject({ closingScore: 110, latestScore: 125 })
+  })
 })

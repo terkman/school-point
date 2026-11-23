@@ -31,7 +31,7 @@ function number(value: unknown): number {
 }
 function score(value: unknown): number {
   const result = number(value)
-  if (result < 0 || result > 100) throw new Error('คะแนนภาคเรียนอยู่นอกช่วง 0–100')
+  if (!Number.isSafeInteger(result) || result < 0) throw new Error('คะแนนภาคเรียนต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป')
   return result
 }
 function fullName(value: JsonRow): string {

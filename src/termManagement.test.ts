@@ -48,6 +48,7 @@ describe('semester lifecycle and remediation policy', () => {
     expect(replay.result.replayed).toBe(true)
     expect(replay.state).toBe(first.state)
     expect(first.state.termRecords!.cases).toHaveLength(1)
+    expect(first.state.students.every(student => student.score === 100)).toBe(true)
     expect(first.state.transactions.filter(item => item.termId === transitionInput.nextTermId)).toHaveLength(first.state.students.length)
     expect(() => demoTransitionTerm(first.state, admin, { ...transitionInput, nextTermId: 'different-term' })).toThrow()
   })
@@ -60,7 +61,7 @@ describe('semester lifecycle and remediation policy', () => {
     expect(blocked.termRecords!.snapshots).toHaveLength(0)
   })
 
-  it('caps original-term credits at 100 and never re-applies the approved request or changes the new term', () => {
+  it('credits an original-term balance above 100 and never re-applies the approved request or changes the new term', () => {
     const { admin, teacher, prepared, transitionInput } = setup()
     const closed = demoTransitionTerm(prepared.state, admin, transitionInput).state
     closed.students[0]!.score = 95
@@ -72,9 +73,9 @@ describe('semester lifecycle and remediation policy', () => {
       activityOccurredAt: new Date().toISOString(), reason: 'ขอเพิ่มซ้ำระหว่างรออนุมัติ', clientRequestId: '6902c2dd-99b7-4f48-8931-a5b9fb12977e' })).toThrow()
     const decision = { requestId: request.result.requestId, approve: true, clientRequestId: '705141ee-fe28-42f0-9be4-34fc0ccdbdd3' }
     const approved = demoReviewTermRemediation(request.state, admin, decision)
-    expect(approved.result).toMatchObject({ appliedPoints: 30, balanceBefore: 70, balanceAfter: 100, caseStatus: 'passed' })
+    expect(approved.result).toMatchObject({ appliedPoints: 50, balanceBefore: 70, balanceAfter: 120, caseStatus: 'passed' })
     expect(approved.state.students[0]!.score).toBe(95)
-    expect(approved.state.termRecords!.snapshots[0]).toMatchObject({ closingScore: 70, latestScore: 100 })
+    expect(approved.state.termRecords!.snapshots[0]).toMatchObject({ closingScore: 70, latestScore: 120 })
     expect(demoReviewTermRemediation(approved.state, admin, decision).state).toBe(approved.state)
     expect(demoRequestTermRemediation(approved.state, teacher, creditInput).result).toMatchObject({ replayed: true, status: 'approved' })
   })

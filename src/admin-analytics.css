@@ -347,7 +347,7 @@
 .risk-tone-7 { --risk-accent: #a16207; --risk-soft: #fefce8; }
 .risk-tone-8 { --risk-accent: #7c6f08; --risk-soft: #fcfce8; }
 .risk-tone-9 { --risk-accent: #4d7c0f; --risk-soft: #f7fee7; }
-.risk-tone-10 { --risk-accent: #047857; --risk-soft: #ecfdf5; }
+.risk-tone-10, .risk-tone-11 { --risk-accent: #047857; --risk-soft: #ecfdf5; }
 
 .analytics-risk-results {
   border-top: 4px solid var(--risk-accent);

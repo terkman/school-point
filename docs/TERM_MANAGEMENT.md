@@ -117,7 +117,7 @@ ID เดิมแต่ค่าต่าง → `22023`; ภาคเรีย
   ครูที่ได้รับมอบหมายนักเรียนในภาคปัจจุบัน ครูที่ได้รับมอบหมายเคส หรือแอดมิน; เคสต้อง `open`
   และมีคำขอรอได้ครั้งละหนึ่งรายการ วันที่ทำกิจกรรมจริงเก็บแยกจากภาคที่ได้เครดิต
 - `review_term_remediation_v1(p_request_id, p_approve, p_review_note, p_client_request_id)`
-  แอดมินเท่านั้น; อนุมัติแล้วลง `remediation_credit` ในบัญชีภาคเดิม (เพดาน 100) พร้อม
+  แอดมินเท่านั้น; อนุมัติแล้วลง `remediation_credit` ในบัญชีภาคเดิม ยอดสะสมเกิน 100 ได้ พร้อม
   `score_ledger.remediation_request_id` เป็น provenance ที่ unique; ปฏิเสธต้องมีหมายเหตุ
 - `admin_assign_term_remediation_teacher_v1(p_case_id, p_teacher_id, p_reason)`
   มอบหมายหรือยกเลิก (`NULL`) ครูผู้รับผิดชอบเคส

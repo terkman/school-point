@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { formatThaiDate, type Account, type DemoState } from './domain'
 import type { AppDataActions, UpdateTermScheduleInput } from './dataActions'
 import {
+  applyRemediationCredit,
   createDemoTermActions,
   bangkokDate,
+  MAX_REMEDIATION_REQUEST_POINTS,
   REMEDIATION_THRESHOLD,
+  remediationPointsNeeded,
   remediationStatusLabel,
   suggestNextTerm,
   termEntryTypeLabel,
@@ -421,7 +424,8 @@ function RemediationCaseRow({ item, sourceTerm, canRequest, isAdmin, isStudent, 
         </div>
         <dl className="term-score-pair">
           <div><dt>ปิดภาค</dt><dd>{item.closingScore}</dd></div>
-          <div><dt>ล่าสุด</dt><dd>{item.currentScore} / {item.threshold}</dd></div>
+          <div><dt>ล่าสุด</dt><dd>{item.currentScore}</dd></div>
+          <div><dt>เกณฑ์ผ่าน</dt><dd>{item.threshold}</dd></div>
           {item.status === 'open' ? <div><dt>ขาดอีก</dt><dd>{item.pointsNeeded}</dd></div> : null}
         </dl>
         <span className={`badge ${item.status === 'passed' ? 'status-approved' : 'status-rejected'}`}>{remediationStatusLabel(item.status)}{item.passedAt ? ` • ${formatThaiDate(item.passedAt, false)}` : ''}</span>
@@ -470,14 +474,15 @@ function RemediationRequestForm({ item, sourceTerm, busy, disabled, onCancel, on
   onCancel: () => void
   onSubmit: (draft: RemediationRequestDraft) => Promise<void>
 }) {
-  const [points, setPoints] = useState(Math.max(1, Math.min(100, item.pointsNeeded || 1)))
+  const [points, setPoints] = useState(Math.max(1, Math.min(MAX_REMEDIATION_REQUEST_POINTS, item.pointsNeeded)))
   const [activityAt, setActivityAt] = useState(() => toLocalDateTimeInputValue())
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   // Reused for retries of the same submission; replaced whenever any field changes.
   const [clientRequestId, setClientRequestId] = useState(() => newRequestId())
   const invalidate = () => setClientRequestId(newRequestId())
-  const capped = Math.min(points, 100 - item.currentScore)
+  const { after: projectedScore } = applyRemediationCredit(item.currentScore, points)
+  const projectedPointsNeeded = remediationPointsNeeded(projectedScore, item.threshold)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -502,7 +507,7 @@ function RemediationRequestForm({ item, sourceTerm, busy, disabled, onCancel, on
       <p className="form-help">ใช้วันที่ทำกิจกรรมจริง ไม่จำเป็นต้องย้อนหลังไปก่อนปิดภาคเรียนเดิม</p>
       <div className="remediation-form-grid">
         <label>คะแนนที่ขอเพิ่ม
-          <input type="number" min={1} max={100} step={1} value={points} onChange={(event) => { setPoints(Math.trunc(Number(event.target.value))); invalidate() }} />
+          <input type="number" min={1} max={MAX_REMEDIATION_REQUEST_POINTS} step={1} value={points} onChange={(event) => { setPoints(Math.trunc(Number(event.target.value))); invalidate() }} />
         </label>
         <label>วันเวลาที่ทำกิจกรรม
           <input type="datetime-local" disabled={disabled} min={sourceTerm.startsOn ? toLocalDateTimeInputValue(new Date(`${sourceTerm.startsOn}T00:00:00+07:00`)) : undefined} max={toLocalDateTimeInputValue()} value={activityAt} onChange={(event) => { setActivityAt(event.target.value); setError(''); invalidate() }} />
@@ -511,7 +516,7 @@ function RemediationRequestForm({ item, sourceTerm, busy, disabled, onCancel, on
       <label>รายละเอียดกิจกรรมแก้ไขพฤติกรรม
         <textarea rows={3} value={reason} onChange={(event) => { setReason(event.target.value); invalidate() }} placeholder="เช่น ช่วยงานจิตอาสาของโรงเรียน 2 ชั่วโมง" />
       </label>
-      <p className="muted">หากอนุมัติ คะแนน{item.sourceTerm.name}จะเป็น {item.currentScore + Math.max(0, capped)} {item.currentScore + Math.max(0, capped) >= item.threshold ? '(ผ่านเกณฑ์)' : `(ยังขาด ${Math.max(0, item.threshold - item.currentScore - Math.max(0, capped))})`} • คะแนนสูงสุด 100</p>
+      <p className="muted">หากอนุมัติ คะแนน{item.sourceTerm.name}จะเป็น {projectedScore} คะแนน {projectedPointsNeeded ? `(ยังขาด ${projectedPointsNeeded})` : '(ผ่านเกณฑ์)'}</p>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="form-actions">
         <button type="button" className="button secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>

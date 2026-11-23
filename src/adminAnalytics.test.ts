@@ -123,17 +123,22 @@ describe('admin score analytics', () => {
     state.students.push(
       { id: 'm3-risk', studentCode: '3001', name: 'นักเรียนเสี่ยง ม.3', classroomId: 'm3', classroomName: 'ม.3/1', gradeLevel: 'M3', score: 74, status: 'active' },
       { id: 'inactive-risk', studentCode: '9999', name: 'นักเรียนจบแล้ว', classroomId: 'm3', classroomName: 'ม.3/1', gradeLevel: 'M3', score: 5, status: 'graduated' },
+      { id: 'extra-points', studentCode: '3002', name: 'นักเรียนคะแนนสะสม', classroomId: 'm3', classroomName: 'ม.3/1', gradeLevel: 'M3', score: 121, status: 'active' },
     )
 
     const summary = buildAdminAnalytics(state, { kind: 'deduction', gradeLevel: 'P1', month: '2026-07' })
     const score70to79 = summary.currentScoreRisk.bands.find((band) => band.id === '70-79')
     const score90to100 = summary.currentScoreRisk.bands.find((band) => band.id === '90-100')
 
-    expect(summary.currentScoreRisk.studentCount).toBe(4)
+    expect(summary.currentScoreRisk.studentCount).toBe(5)
     expect(summary.currentScoreRisk.belowThresholdCount).toBe(1)
     expect(score70to79?.students.map((row) => row.student.id)).toEqual(['m3-risk'])
     expect(score90to100?.studentCount).toBe(3)
-    expect(summary.currentScoreRisk.bands).toHaveLength(10)
+    expect(summary.currentScoreRisk.bands).toHaveLength(11)
+    expect(summary.currentScoreRisk.bands.find((band) => band.id === '101-plus')?.students).toMatchObject([
+      { student: { id: 'extra-points', score: 121 }, differenceFromThreshold: 41 },
+    ])
+    expect(summary.currentScoreRisk.bands.reduce((total, band) => total + band.studentCount, 0)).toBe(5)
   })
 
   it('renders accessible filter controls, grade summaries, and an auditable detail table', () => {
@@ -147,8 +152,9 @@ describe('admin score analytics', () => {
     expect(markup).toContain('คะแนนเพิ่มและตัดทุกระดับชั้น')
     expect(markup).toContain('รายละเอียดคะแนน')
     expect(markup).toContain('คะแนนปัจจุบันทุกระดับชั้น')
-    expect(markup).toContain('การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน')
+    expect(markup).toContain('การกระจายคะแนนปัจจุบัน')
     expect(markup).toContain('90–100')
+    expect(markup).toContain('101 ขึ้นไป')
     expect(markup).toContain('นักเรียน ป.1')
   })
 })

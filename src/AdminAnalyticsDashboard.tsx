@@ -309,13 +309,13 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
           <Icon name="alert" size={17} /> แสดงคะแนน{historical ? 'ล่าสุดของภาคเรียนที่เลือก' : 'ปัจจุบัน'}ทุกระดับชั้น ไม่เปลี่ยนตามตัวกรองประเภท ระดับชั้น เดือน หรือช่วงวันที่ด้านบน
         </p>
 
-        <div className="analytics-risk-bands" role="group" aria-label={historical ? 'การกระจายคะแนนล่าสุดของภาคเรียนที่เลือกช่วงละ 10 คะแนน' : 'การกระจายคะแนนปัจจุบันช่วงละ 10 คะแนน'}>
+        <div className="analytics-risk-bands" role="group" aria-label={historical ? 'การกระจายคะแนนล่าสุดของภาคเรียนที่เลือก' : 'การกระจายคะแนนปัจจุบัน'}>
           {summary.currentScoreRisk.bands.map((band, index) => {
             const selected = band.id === selectedRiskBandId
             return (
               <button
                 aria-controls={selected ? 'analytics-risk-results' : undefined}
-                aria-label={`ช่วงคะแนน ${band.minScore} ถึง ${band.maxScore} ${band.riskLabel} ${band.studentCount} คน`}
+                aria-label={`ช่วงคะแนน ${band.maxScore === null ? band.scoreLabel : `${band.minScore} ถึง ${band.maxScore}`} ${band.riskLabel} ${band.studentCount} คน`}
                 aria-pressed={selected}
                 className={`analytics-risk-band risk-tone-${index + 1}`}
                 key={band.id}
@@ -337,7 +337,7 @@ function AnalyticsReport({ state, historical, termControl }: { state: AnalyticsS
               <button className="button ghost compact" type="button" onClick={() => selectRiskBand(selectedRiskBand.id)}>ซ่อนรายชื่อ</button>
             </div>
             {selectedRiskBand.students.length ? (
-              <div className="analytics-risk-roster" role="table" aria-label={`นักเรียนช่วงคะแนน ${selectedRiskBand.minScore} ถึง ${selectedRiskBand.maxScore}`}>
+              <div className="analytics-risk-roster" role="table" aria-label={`นักเรียนช่วงคะแนน ${selectedRiskBand.maxScore === null ? selectedRiskBand.scoreLabel : `${selectedRiskBand.minScore} ถึง ${selectedRiskBand.maxScore}`}`}>
                 <div className="analytics-risk-columns" role="row">
                   <span role="columnheader">นักเรียน</span>
                   <span role="columnheader">ชั้น / ห้อง</span>

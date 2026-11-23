@@ -1,5 +1,5 @@
 export const MIN_DEDUCTION_POINTS = 1
-export const MAX_SCORE = 100
+const MAX_DEDUCTION_POINTS = 100
 export const DEDUCTION_APPROVAL_THRESHOLD = 10
 
 export type AdminSeverity = 'low' | 'medium' | 'serious' | 'critical'
@@ -33,7 +33,7 @@ export type PaperDocumentStatus =
 export type PaperDocumentEventType = PaperDocumentStatus | 'paper_appeal_entered'
 
 export function assertDeductionPoints(points: number): void {
-  if (!Number.isInteger(points) || points < MIN_DEDUCTION_POINTS || points > MAX_SCORE) {
+  if (!Number.isInteger(points) || points < MIN_DEDUCTION_POINTS || points > MAX_DEDUCTION_POINTS) {
     throw new RangeError('คะแนนตัดต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 100')
   }
 }
